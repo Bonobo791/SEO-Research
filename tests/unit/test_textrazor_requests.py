@@ -2,7 +2,9 @@ import pytest
 
 from seo_rank.textrazor import (
     TextRazorCredentialError,
+    TextRazorCredentials,
     build_entity_request,
+    execute_textrazor_request,
     validate_textrazor_credentials,
 )
 
@@ -38,3 +40,50 @@ def test_validate_textrazor_credentials_rejects_missing_key_without_secrets() ->
     message = str(exc_info.value)
     assert "TEXTRAZOR_TOKEN" in message
     assert "secret-key" not in message
+
+
+def test_execute_textrazor_request_posts_form_with_api_key_header() -> None:
+    sent: dict[str, object] = {}
+
+    def transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        sent.update(
+            {
+                "method": method,
+                "url": url,
+                "headers": headers,
+                "body": body,
+                "timeout": timeout,
+            }
+        )
+        return {"response": {"entities": []}}
+
+    response = execute_textrazor_request(
+        build_entity_request(
+            {
+                "url": "https://example.com/technical-seo/1",
+                "text": "Technical SEO helps crawlers.",
+            }
+        ),
+        credentials=TextRazorCredentials(api_key="textrazor-secret"),
+        transport=transport,
+        timeout=9.0,
+    )
+
+    assert response == {"response": {"entities": []}}
+    assert sent["method"] == "POST"
+    assert sent["url"] == "https://api.textrazor.com/"
+    headers = sent["headers"]
+    assert isinstance(headers, dict)
+    assert headers == {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-TextRazor-Key": "textrazor-secret",
+    }
+    assert sent["body"] == b"extractors=entities&text=Technical+SEO+helps+crawlers."
+    assert sent["timeout"] == 9.0

@@ -5,18 +5,31 @@ Pytest configuration and verification contract for SEO-Research.
 ## Current State
 
 - Source directory: `src/seo_rank/`
-- Test directory: `tests/unit/`
+- Test directories: `tests/unit/`, `tests/integration/`
 - Test framework: `pytest`
 - Run-all-tests command: `python -m pytest`
 - Single-test-file command: `python -m pytest tests/unit/test_cli_run.py`
 - Lint / type-check / build / coverage: not configured
 - Expected test duration: fast (< 1s)
-- **Current verification status:** 19 tests collected, all passing
+- **Current verification status:** 23 tests collected; 22 passing, 1 live
+  integration smoke skipped by default
 
 ## Active Verification Command
 
 ```bash
 python -m pytest
+```
+
+Live provider smoke tests are marked `integration` and skipped unless all live
+gates are explicit:
+
+```bash
+SEO_RANK_RUN_LIVE_INTEGRATION=1 \
+SEO_RANK_ENABLE_LIVE_PROVIDERS=1 \
+DATAFORSEO_LOGIN=... \
+DATAFORSEO_PASSWORD=... \
+TEXTRAZOR_API_KEY=... \
+python -m pytest -m integration
 ```
 
 ## Suite coverage (shipped)
@@ -26,14 +39,16 @@ python -m pytest
 | `test_cli_run.py` | CLI writes artifacts; TextRazor skip vs include; live-provider gate |
 | `test_keyword_expansion.py` | 25-keyword cap, deduplication, raw provider payload |
 | `test_serp_normalization.py` | Organic-only SERP rows, depth cap |
-| `test_dataforseo_requests.py` | DataForSEO request construction and credential validation |
+| `test_dataforseo_requests.py` | DataForSEO request construction, credential validation, HTTP execution |
 | `test_passage_normalization.py` | Passage split, short-text filter |
 | `test_similarity_features.py` | Fixture embedding cosine aggregation |
 | `test_textrazor_normalization.py` | Entity schema normalization |
-| `test_textrazor_requests.py` | TextRazor parsed-text request construction and credential validation |
+| `test_textrazor_requests.py` | TextRazor parsed-text request construction, credential validation, HTTP execution |
 | `test_sdlc_docs.py` | GOALS/ROADMAP/README guards and manifest pytest commands |
+| `test_live_provider_smoke.py` | Env-gated DataForSEO/TextRazor smoke path |
 
-All tests use fixtures/mocks only. No live provider or network tests.
+Unit tests use fixtures/mocks only. Live provider smoke tests are opt-in and
+must never run without the explicit environment gates above.
 
 ## Required Workflow
 
@@ -52,7 +67,7 @@ exist.
 
 ## Planned tests (not yet in suite)
 
-- Live DataForSEO / TextRazor integration checks behind explicit flags
+- Broader live DataForSEO / TextRazor integration coverage beyond smoke checks
 - Full cluster keyword orchestration (not first keyword only)
 - Live similarity backends (`BGE-reranker-v2`, Gemini cosine)
 - Passage / page / domain similarity scopes

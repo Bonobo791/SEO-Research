@@ -21,3 +21,6 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+  "integration: live provider smoke tests skipped unless explicitly enabled",
+]

@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+from seo_rank.dataforseo import DataForSeoClientError
 from seo_rank.cli import main
 
 
@@ -169,7 +170,141 @@ def test_run_rejects_live_providers_with_missing_credentials_without_secret_leak
     assert not (output_dir / "run.json").exists()
 
 
-def test_run_rejects_live_providers_after_gate_until_clients_exist(
+def test_run_live_providers_writes_artifacts_with_injected_transports(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.setenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", "1")
+    monkeypatch.setenv("DATAFORSEO_LOGIN", "analyst@example.com")
+    monkeypatch.setenv("DATAFORSEO_PASSWORD", "dataforseo-secret")
+    monkeypatch.setenv("TEXTRAZOR_API_KEY", "textrazor-secret")
+    dataforseo_calls: list[str] = []
+    textrazor_calls: list[bytes] = []
+
+    def dataforseo_transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        del method, headers, timeout
+        dataforseo_calls.append(url)
+        if url.endswith("/keywords_data/google_ads/keywords_for_keywords/live"):
+            return {
+                "tasks": [
+                    {
+                        "result": [
+                            {"keyword": "technical seo", "search_volume": 1000},
+                        ],
+                    }
+                ],
+            }
+        if url.endswith("/serp/google/organic/live/advanced"):
+            return {
+                "tasks": [
+                    {
+                        "result": [
+                            {
+                                "items": [
+                                    {
+                                        "type": "organic",
+                                        "rank_group": 1,
+                                        "url": "https://example.com/live",
+                                        "title": "Live Result",
+                                        "description": "Live provider result.",
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        if url.endswith("/on_page/content_parsing/live"):
+            assert b"https://example.com/live" in body
+            return {
+                "tasks": [
+                    {
+                        "result": [
+                            {
+                                "url": "https://example.com/live",
+                                "title": "Live Page",
+                                "text": "Technical SEO helps crawlers find pages.",
+                            }
+                        ],
+                    }
+                ],
+            }
+        raise AssertionError(f"unexpected DataForSEO URL: {url}")
+
+    def textrazor_transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        del method, url, headers, timeout
+        textrazor_calls.append(body)
+        return {
+            "response": {
+                "entities": [
+                    {
+                        "entityId": "technical-seo",
+                        "matchedText": "Technical SEO",
+                        "confidenceScore": 8,
+                        "relevanceScore": 0.9,
+                        "type": ["Topic"],
+                    }
+                ],
+            }
+        }
+
+    monkeypatch.setattr("seo_rank.cli.DEFAULT_DATAFORSEO_TRANSPORT", dataforseo_transport)
+    monkeypatch.setattr("seo_rank.cli.DEFAULT_TEXTRAZOR_TRANSPORT", textrazor_transport)
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--output-dir",
+            str(output_dir),
+            "--live-providers",
+        ]
+    )
+
+    assert exit_code == 0
+    assert len(dataforseo_calls) == 3
+    assert len(textrazor_calls) == 1
+
+    payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
+    assert payload["config"]["live_providers"] is True
+    assert payload["keywords"] == ["technical seo"]
+    assert payload["serp_results"] == [
+        {
+            "keyword": "technical seo",
+            "rank": 1,
+            "url": "https://example.com/live",
+            "title": "Live Result",
+            "description": "Live provider result.",
+        }
+    ]
+    assert payload["network_calls"] == [
+        "dataforseo.keyword_expansion",
+        "dataforseo.serp",
+        "dataforseo.page_text",
+        "textrazor.entities",
+    ]
+    assert payload["raw_provider_data"]["dataforseo"]["keyword_expansion"]["tasks"]
+    assert payload["raw_provider_data"]["textrazor"]["entities"][0]["response"]
+    assert payload["textrazor_entities"][0]["entity_id"] == "technical-seo"
+
+
+def test_run_rejects_live_provider_client_failure_without_secret_leaks(
     tmp_path: Path,
     capsys,
     monkeypatch,
@@ -179,6 +314,12 @@ def test_run_rejects_live_providers_after_gate_until_clients_exist(
     monkeypatch.setenv("DATAFORSEO_LOGIN", "analyst@example.com")
     monkeypatch.setenv("DATAFORSEO_PASSWORD", "dataforseo-secret")
     monkeypatch.setenv("TEXTRAZOR_API_KEY", "textrazor-secret")
+
+    def failing_transport(**kwargs) -> dict[str, object]:
+        del kwargs
+        raise DataForSeoClientError("DataForSEO request failed")
+
+    monkeypatch.setattr("seo_rank.cli.DEFAULT_DATAFORSEO_TRANSPORT", failing_transport)
 
     exit_code = main(
         [
@@ -193,7 +334,7 @@ def test_run_rejects_live_providers_after_gate_until_clients_exist(
 
     captured = capsys.readouterr()
     assert exit_code == 2
-    assert "Live provider execution is not implemented" in captured.err
+    assert "DataForSEO request failed" in captured.err
     assert "analyst@example.com" not in captured.err
     assert "dataforseo-secret" not in captured.err
     assert "textrazor-secret" not in captured.err

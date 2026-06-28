@@ -35,7 +35,9 @@ Phase 2 status:
 - TextRazor parsed-text request construction: **Done**
 - Credential validation without secrets in errors: **Done**
 - Non-default CLI live-provider gate: **Done**
-- Integration tests behind explicit flags: **Next**
+- Standard-library provider HTTP clients: **Done**
+- Env-gated live smoke test: **Done**
+- Broader live integration coverage: **Next**
 
 ## In Scope (current and near-term)
 

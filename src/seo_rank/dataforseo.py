@@ -1,11 +1,15 @@
 """Offline DataForSEO fixture boundaries."""
 
+import base64
+import json
+import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
 DEFAULT_KEYWORD_LIMIT = 25
 DEFAULT_SERP_DEPTH = 20
+DATAFORSEO_BASE_URL = "https://api.dataforseo.com"
 
 DATAFORSEO_KEYWORD_EXPANSION_PATH = (
     "/v3/keywords_data/google_ads/keywords_for_keywords/live"
@@ -30,6 +34,10 @@ class DataForSeoCredentials:
 
 class DataForSeoCredentialError(ValueError):
     """Raised when required DataForSEO credentials are missing."""
+
+
+class DataForSeoClientError(RuntimeError):
+    """Raised when a DataForSEO HTTP request fails."""
 
 
 def build_keyword_expansion_request(
@@ -116,6 +124,62 @@ def validate_dataforseo_credentials(
         login=env[required[0]].strip(),
         password=env[required[1]].strip(),
     )
+
+
+def execute_dataforseo_request(
+    request: ProviderRequest,
+    *,
+    credentials: DataForSeoCredentials,
+    transport=None,
+    timeout: float = 30.0,
+) -> dict[str, object]:
+    """Execute a DataForSEO request and parse the JSON response."""
+
+    if transport is None:
+        transport = urllib_json_transport
+    body = json.dumps(request.body, separators=(",", ":")).encode("utf-8")
+    headers = {
+        **request.headers,
+        "Authorization": dataforseo_basic_auth_header(credentials),
+    }
+    response = transport(
+        method=request.method,
+        url=f"{DATAFORSEO_BASE_URL}{request.path}",
+        headers=headers,
+        body=body,
+        timeout=timeout,
+    )
+    if not isinstance(response, dict):
+        raise DataForSeoClientError("DataForSEO response was not a JSON object")
+    return response
+
+
+def dataforseo_basic_auth_header(credentials: DataForSeoCredentials) -> str:
+    token = f"{credentials.login}:{credentials.password}".encode("utf-8")
+    encoded = base64.b64encode(token).decode("ascii")
+    return f"Basic {encoded}"
+
+
+def urllib_json_transport(
+    *,
+    method: str,
+    url: str,
+    headers: dict[str, str],
+    body: bytes,
+    timeout: float,
+) -> object:
+    http_request = urllib.request.Request(
+        url,
+        data=body,
+        headers=headers,
+        method=method,
+    )
+    try:
+        with urllib.request.urlopen(http_request, timeout=timeout) as response:
+            payload = response.read()
+    except OSError as error:
+        raise DataForSeoClientError(f"DataForSEO request failed: {error}") from error
+    return json.loads(payload.decode("utf-8"))
 
 
 def fixture_keyword_expansion_response(seed: str) -> dict[str, object]:

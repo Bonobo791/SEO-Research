@@ -10,7 +10,7 @@ rows, passages, page-level similarity features, and optional TextRazor
 entities, then writes JSON and Markdown artifacts with **no network calls**.
 Phase 2 provider request builders and credential validators are available for
 offline verification. The CLI also has a non-default `--live-providers` gate,
-but live calls are not implemented or executed yet.
+standard-library HTTP clients, and an env-gated live smoke test.
 
 ```bash
 python -m pytest
@@ -23,9 +23,9 @@ Live provider boundaries are in progress: DataForSEO request construction,
 parsed-page TextRazor request construction, and credential validation are
 implemented. `--live-providers` now requires
 `SEO_RANK_ENABLE_LIVE_PROVIDERS=1` and valid provider credentials before
-stopping at the unimplemented live execution boundary. Integration checks for
-live calls are next. The offline scaffold stays in place while those boundaries
-are added.
+executing the minimal live provider smoke path. Broader live integration
+coverage is next. The offline scaffold stays in place while those boundaries are
+added.
 
 Later phases remain planned after that: per-cluster keyword execution, top-20
 organic SERPs at passage / page / domain scope, dual similarity backends every

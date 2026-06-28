@@ -9,7 +9,13 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from seo_rank.dataforseo import (
+    DataForSeoClientError,
     DataForSeoCredentialError,
+    DataForSeoCredentials,
+    build_keyword_expansion_request,
+    build_page_text_request,
+    build_serp_request,
+    execute_dataforseo_request,
     fixture_keyword_expansion_response,
     fixture_page_text_response,
     fixture_serp_response,
@@ -21,13 +27,22 @@ from seo_rank.dataforseo import (
 from seo_rank.similarity import compute_page_similarity_features
 from seo_rank.text import normalize_page_text
 from seo_rank.textrazor import (
+    TextRazorClientError,
     TextRazorCredentialError,
+    TextRazorCredentials,
+    build_entity_request,
+    execute_textrazor_request,
     fixture_entity_response,
     normalize_entities,
     validate_textrazor_credentials,
 )
 
 LIVE_PROVIDER_ENV_FLAG = "SEO_RANK_ENABLE_LIVE_PROVIDERS"
+DEFAULT_DATAFORSEO_TRANSPORT = None
+DEFAULT_TEXTRAZOR_TRANSPORT = None
+DATAFORSEO_LOCATION_CODES = {
+    "United States": 2840,
+}
 
 
 @dataclass(frozen=True)
@@ -49,6 +64,12 @@ class LiveProviderGateError(ValueError):
     """Raised when live provider execution is not explicitly allowed."""
 
 
+@dataclass(frozen=True)
+class LiveProviderCredentials:
+    dataforseo: DataForSeoCredentials
+    textrazor: TextRazorCredentials
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the command-line interface."""
 
@@ -59,11 +80,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         config = config_from_args(args)
         if config.live_providers:
             try:
-                validate_live_provider_gate(os.environ)
-            except LiveProviderGateError as error:
+                write_live_artifacts(config, os.environ)
+            except (
+                DataForSeoClientError,
+                LiveProviderGateError,
+                TextRazorClientError,
+            ) as error:
                 print(error, file=sys.stderr)
                 return 2
-        write_offline_artifacts(config)
+        else:
+            write_offline_artifacts(config)
         return 0
 
     parser.print_help()
@@ -88,7 +114,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--live-providers",
         action="store_true",
-        help="Validate live provider readiness; live execution is not implemented yet",
+        help="Run the env-gated live provider smoke path",
     )
 
     return parser
@@ -117,28 +143,42 @@ def config_from_args(args: argparse.Namespace) -> RunConfig:
     )
 
 
-def validate_live_provider_gate(env: Mapping[str, str]) -> None:
+def validate_live_provider_gate(env: Mapping[str, str]) -> LiveProviderCredentials:
     if env.get(LIVE_PROVIDER_ENV_FLAG) != "1":
         raise LiveProviderGateError(
             f"Live provider execution requires {LIVE_PROVIDER_ENV_FLAG}=1"
         )
     try:
-        validate_dataforseo_credentials(env)
-        validate_textrazor_credentials(env)
+        dataforseo = validate_dataforseo_credentials(env)
+        textrazor = validate_textrazor_credentials(env)
     except (DataForSeoCredentialError, TextRazorCredentialError) as error:
         raise LiveProviderGateError(str(error)) from error
-    raise LiveProviderGateError("Live provider execution is not implemented yet")
+    return LiveProviderCredentials(dataforseo=dataforseo, textrazor=textrazor)
 
 
 def write_offline_artifacts(config: RunConfig) -> None:
     config.output_dir.mkdir(parents=True, exist_ok=True)
     payload = build_offline_payload(config)
+    write_artifacts(config.output_dir, payload)
 
-    (config.output_dir / "run.json").write_text(
+
+def write_live_artifacts(config: RunConfig, env: Mapping[str, str]) -> None:
+    config.output_dir.mkdir(parents=True, exist_ok=True)
+    payload = build_live_payload(
+        config,
+        env=env,
+        dataforseo_transport=DEFAULT_DATAFORSEO_TRANSPORT,
+        textrazor_transport=DEFAULT_TEXTRAZOR_TRANSPORT,
+    )
+    write_artifacts(config.output_dir, payload)
+
+
+def write_artifacts(output_dir: Path, payload: dict[str, object]) -> None:
+    (output_dir / "run.json").write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    (config.output_dir / "report.md").write_text(
+    (output_dir / "report.md").write_text(
         render_markdown_report(payload),
         encoding="utf-8",
     )
@@ -201,6 +241,121 @@ def build_offline_payload(config: RunConfig) -> dict[str, object]:
         "textrazor_entities": textrazor_entities,
         "network_calls": [],
     }
+
+
+def build_live_payload(
+    config: RunConfig,
+    *,
+    env: Mapping[str, str],
+    dataforseo_transport,
+    textrazor_transport,
+) -> dict[str, object]:
+    credentials = validate_live_provider_gate(env)
+    location_code = dataforseo_location_code(config.location)
+    network_calls: list[str] = []
+
+    keyword_request = build_keyword_expansion_request(
+        config.seed,
+        location_code=location_code,
+        language_code=config.language,
+    )
+    keyword_expansion = execute_dataforseo_request(
+        keyword_request,
+        credentials=credentials.dataforseo,
+        transport=dataforseo_transport,
+    )
+    network_calls.append("dataforseo.keyword_expansion")
+    keywords = normalize_keyword_expansion(keyword_expansion, seed=config.seed)
+    target_keyword = keywords[0]
+
+    serp_response = execute_dataforseo_request(
+        build_serp_request(
+            target_keyword,
+            location_code=location_code,
+            language_code=config.language,
+            device=config.device,
+            depth=config.depth,
+        ),
+        credentials=credentials.dataforseo,
+        transport=dataforseo_transport,
+    )
+    network_calls.append("dataforseo.serp")
+    serp_results = normalize_serp_results(
+        serp_response,
+        keyword=target_keyword,
+        depth=config.depth,
+    )
+
+    page_text_responses = [
+        execute_dataforseo_request(
+            build_page_text_request(
+                str(result["url"]),
+                javascript_parsing=config.javascript_parsing,
+            ),
+            credentials=credentials.dataforseo,
+            transport=dataforseo_transport,
+        )
+        for result in serp_results
+    ]
+    if page_text_responses:
+        network_calls.append("dataforseo.page_text")
+    passages = [
+        passage
+        for response in page_text_responses
+        for passage in normalize_page_text(parsed_page_text(response))
+    ]
+
+    textrazor_responses: list[dict[str, object]] = []
+    textrazor_entities: list[dict[str, object]] = []
+    if not config.skip_textrazor:
+        textrazor_responses = [
+            execute_textrazor_request(
+                build_entity_request(page_text),
+                credentials=credentials.textrazor,
+                transport=textrazor_transport,
+            )
+            | {"url": page_text["url"], "source_text": page_text["text"]}
+            for response in page_text_responses
+            for page_text in [parsed_page_text(response)]
+            if page_text
+        ]
+        if textrazor_responses:
+            network_calls.append("textrazor.entities")
+        textrazor_entities = [
+            entity
+            for response in textrazor_responses
+            for entity in normalize_entities(response, url=str(response["url"]))
+        ]
+
+    raw_provider_data: dict[str, object] = {
+        "dataforseo": {
+            "keyword_expansion": keyword_expansion,
+            "page_text": page_text_responses,
+            "serp": serp_response,
+        },
+    }
+    if textrazor_responses:
+        raw_provider_data["textrazor"] = {
+            "entities": textrazor_responses,
+        }
+    return {
+        "config": serialized_config(config),
+        "keywords": keywords,
+        "raw_provider_data": raw_provider_data,
+        "passages": passages,
+        "serp_results": serp_results,
+        "similarity_features": [],
+        "textrazor_entities": textrazor_entities,
+        "network_calls": network_calls,
+    }
+
+
+def dataforseo_location_code(location: str) -> int:
+    if location.isdigit():
+        return int(location)
+    if location in DATAFORSEO_LOCATION_CODES:
+        return DATAFORSEO_LOCATION_CODES[location]
+    raise LiveProviderGateError(f"Unsupported DataForSEO location: {location}")
 
 
 def serialized_config(config: RunConfig) -> dict[str, object]:

@@ -2,9 +2,11 @@ import pytest
 
 from seo_rank.dataforseo import (
     DataForSeoCredentialError,
+    DataForSeoCredentials,
     build_keyword_expansion_request,
     build_page_text_request,
     build_serp_request,
+    execute_dataforseo_request,
     validate_dataforseo_credentials,
 )
 
@@ -79,3 +81,56 @@ def test_validate_dataforseo_credentials_rejects_missing_values_without_secrets(
     assert "DATAFORSEO_API_TOKEN" in message
     assert "super-secret" not in message
     assert "user@example.com" not in message
+
+
+def test_execute_dataforseo_request_posts_json_with_basic_auth() -> None:
+    sent: dict[str, object] = {}
+
+    def transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        sent.update(
+            {
+                "method": method,
+                "url": url,
+                "headers": headers,
+                "body": body,
+                "timeout": timeout,
+            }
+        )
+        return {"tasks": [{"result": [{"keyword": "technical seo"}]}]}
+
+    response = execute_dataforseo_request(
+        build_keyword_expansion_request(
+            "technical seo",
+            location_code=2840,
+            language_code="en",
+        ),
+        credentials=DataForSeoCredentials(
+            login="analyst@example.com",
+            password="dataforseo-secret",
+        ),
+        transport=transport,
+        timeout=7.0,
+    )
+
+    assert response == {"tasks": [{"result": [{"keyword": "technical seo"}]}]}
+    assert sent["method"] == "POST"
+    assert sent["url"] == (
+        "https://api.dataforseo.com/v3/keywords_data/google_ads/"
+        "keywords_for_keywords/live"
+    )
+    headers = sent["headers"]
+    assert isinstance(headers, dict)
+    assert headers["Content-Type"] == "application/json"
+    assert headers["Authorization"].startswith("Basic ")
+    assert sent["body"] == (
+        b'[{"keywords":["technical seo"],"location_code":2840,'
+        b'"language_code":"en"}]'
+    )
+    assert sent["timeout"] == 7.0

@@ -30,10 +30,11 @@ network calls.
 
 **Phase 2 in progress:** DataForSEO and TextRazor provider boundaries now
 include offline-verifiable request construction, credential validation, and a
-non-default CLI live-provider gate. Live execution and integration checks remain
-next. Later phases keep the full cluster keyword loop, dual-backend live
-similarity (BGE-reranker-v2 + Gemini cosine), and `statsmodels` OLS with
-Benjamini-Hochberg after OLS pre-analysis diagnostics.
+non-default CLI live-provider gate. Standard-library HTTP clients and an
+env-gated live smoke test are available for the minimal provider path. Later
+phases keep the full cluster keyword loop, dual-backend live similarity
+(BGE-reranker-v2 + Gemini cosine), and `statsmodels` OLS with Benjamini-
+Hochberg after OLS pre-analysis diagnostics.
 
 TextRazor entities are captured in offline runs for schema validation; entity-derived
 model features remain out of scope.
@@ -67,11 +68,12 @@ The repository contains an **offline-verifiable CLI scaffold** (Phase 1 shipped)
   `similarity.py`, `textrazor.py`
 - **CLI:** `seo-rank run` writes `run.json` and `report.md` from fixtures (no
   network calls)
-- **Tests:** 19 unit tests under `tests/unit/`; gate: `python -m pytest`
+- **Tests:** 22 tests under `tests/`; gate: `python -m pytest`
 - **Product docs:** `ARCHITECTURE.md`, `GOALS.md`, `ROADMAP.md`, `README.md`,
   `TESTING.md`
-- **Not yet:** live provider clients, full cluster keyword loop, live similarity
-  backends, `statsmodels` analysis, `runs/RUN_ID/` layout
+- **Not yet:** full cluster keyword loop, live similarity backends, `statsmodels`
+  analysis, `runs/RUN_ID/` layout; broader live provider integration beyond the
+  smoke path
 
 Module and artifact details are in [Application Surface](#application-surface)
 and [Key Product Components](#key-product-components) below. Planned live
@@ -89,11 +91,14 @@ in code yet.
   organic SERP, and page-text request specs; TextRazor parsed-text entity
   request specs; credential validation without secret values in errors.
 - **Live-provider gate (shipped):** `--live-providers` requires
-  `SEO_RANK_ENABLE_LIVE_PROVIDERS=1` and provider credentials, then stops before
-  unimplemented live execution.
+  `SEO_RANK_ENABLE_LIVE_PROVIDERS=1` and provider credentials before executing
+  the minimal live provider smoke path.
+- **Provider HTTP clients (shipped):** standard-library DataForSEO and TextRazor
+  request execution with injectable transports for offline tests.
 - **Text pipeline (shipped, offline):** passage split (`text.py`); page-level
   similarity from fixture embeddings (`similarity.py`).
-- **Provider HTTP clients (planned):** live DataForSEO and TextRazor calls.
+- **Broader provider integration (planned):** live coverage beyond the smoke
+  path.
 - **Live similarity (planned):** dual-backend scoring — see
   [Planned Cosine Similarity Run](#planned-cosine-similarity-run).
 - **Analysis engine (planned):** OLS pre-analysis, `statsmodels` OLS,

@@ -1,9 +1,13 @@
 """Offline TextRazor fixture boundaries."""
 
+import json
+import urllib.parse
+import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+TEXTRAZOR_BASE_URL = "https://api.textrazor.com"
 TEXTRAZOR_ENTITY_PATH = "/"
 
 
@@ -22,6 +26,10 @@ class TextRazorCredentials:
 
 class TextRazorCredentialError(ValueError):
     """Raised when required TextRazor credentials are missing."""
+
+
+class TextRazorClientError(RuntimeError):
+    """Raised when a TextRazor HTTP request fails."""
 
 
 def build_entity_request(page_text: Mapping[str, str]) -> TextRazorRequest:
@@ -48,6 +56,55 @@ def validate_textrazor_credentials(
     if not env.get(required, "").strip():
         raise TextRazorCredentialError(f"Missing TextRazor credential: {required}")
     return TextRazorCredentials(api_key=env[required].strip())
+
+
+def execute_textrazor_request(
+    request: TextRazorRequest,
+    *,
+    credentials: TextRazorCredentials,
+    transport=None,
+    timeout: float = 30.0,
+) -> dict[str, object]:
+    """Execute a TextRazor request and parse the JSON response."""
+
+    if transport is None:
+        transport = urllib_form_transport
+    body = urllib.parse.urlencode(request.body).encode("utf-8")
+    response = transport(
+        method=request.method,
+        url=f"{TEXTRAZOR_BASE_URL}{request.path}",
+        headers={
+            **request.headers,
+            "X-TextRazor-Key": credentials.api_key,
+        },
+        body=body,
+        timeout=timeout,
+    )
+    if not isinstance(response, dict):
+        raise TextRazorClientError("TextRazor response was not a JSON object")
+    return response
+
+
+def urllib_form_transport(
+    *,
+    method: str,
+    url: str,
+    headers: dict[str, str],
+    body: bytes,
+    timeout: float,
+) -> object:
+    http_request = urllib.request.Request(
+        url,
+        data=body,
+        headers=headers,
+        method=method,
+    )
+    try:
+        with urllib.request.urlopen(http_request, timeout=timeout) as response:
+            payload = response.read()
+    except OSError as error:
+        raise TextRazorClientError(f"TextRazor request failed: {error}") from error
+    return json.loads(payload.decode("utf-8"))
 
 
 def fixture_entity_response(url: str, text: str) -> dict[str, object]:
