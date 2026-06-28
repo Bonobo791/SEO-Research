@@ -36,7 +36,8 @@ authentication validation, and integration tests behind explicit flags.
 - Pytest coverage under `tests/unit/`.
 - Offline DataForSEO and TextRazor fixtures with normalization.
 - JSON + Markdown run artifacts for dry runs.
-- Product documentation under `docs/architecture/` and `docs/implementation/`.
+- Product documentation in root markdown: `ARCHITECTURE.md`, `GOALS.md`,
+  `ROADMAP.md`, `README.md`, `TESTING.md`.
 - Explicit credential validation before live runs (Phase 2).
 
 ## Out Of Scope
@@ -54,8 +55,8 @@ authentication validation, and integration tests behind explicit flags.
 - [x] CLI smoke test writes JSON and Markdown from fixtures/mocks only.
 - [x] Provider normalization behind testable module boundaries.
 - [x] Run outputs preserve raw and normalized provider data.
-- [x] Documentation aligned with `ARCHITECTURE.md`, `TESTING.md`, and the
-  implementation plan.
+- [x] Documentation aligned with `ARCHITECTURE.md`, `TESTING.md`, and
+  `ROADMAP.md`.
 
 ## Operating Rules
 

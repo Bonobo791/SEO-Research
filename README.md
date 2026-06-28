@@ -26,17 +26,17 @@ Not implemented in code yet.
 | Path | Purpose |
 |------|---------|
 | `src/seo_rank/` | CLI and offline provider boundaries |
-| `tests/unit/` | 10 pytest unit tests |
-| `docs/architecture/` | Detailed product architecture and ADRs |
-| `docs/implementation/` | Phased implementation plan |
+| `tests/unit/` | pytest unit tests |
+| `ARCHITECTURE.md` | Product architecture, data flow, planned pipeline |
 | `GOALS.md` | Active-scope contract |
-| `ROADMAP.md` | Backlog and history |
+| `ROADMAP.md` | Phased backlog and history |
+| `TESTING.md` | Verification contract |
 
 ## Documentation
 
-- Root summary: `ARCHITECTURE.md`
-- Product detail: `docs/architecture/ARCHITECTURE.md`
-- Implementation phases: `docs/implementation/dataforseo-textrazor-ranking-similarity-plan.md`
+- Architecture and planned pipeline: `ARCHITECTURE.md`
+- Active scope: `GOALS.md`
+- Backlog: `ROADMAP.md`
 - Testing: `TESTING.md`
 - Process: `AGENTS.md`, `SDLC.md`
 

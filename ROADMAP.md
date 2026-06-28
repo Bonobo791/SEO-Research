@@ -46,6 +46,6 @@ scope contract; keep deferred and historical items here.
 
 - Repository scaffold: `pyproject.toml`, `src/seo_rank/`, `tests/`.
 - **Phase 1 shipped:** offline CLI, DataForSEO/TextRazor fixtures, keyword/SERP/
-  passage/similarity/entity normalization, `run.json` + `report.md`, 10 unit
-  tests, product docs under `docs/`.
+  passage/similarity/entity normalization, `run.json` + `report.md`, unit tests,
+  root product docs (`ARCHITECTURE.md`, `GOALS.md`, `ROADMAP.md`).
 - SDLC wizard surface: hooks, manifest, `GOALS.md` active contract.

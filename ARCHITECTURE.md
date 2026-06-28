@@ -35,8 +35,8 @@ dual-backend live similarity (BGE-reranker-v2 + Gemini cosine), and
 TextRazor entities are captured in offline runs for schema validation; entity-derived
 model features remain out of scope.
 
-Detailed product architecture: `docs/architecture/ARCHITECTURE.md`. Phased plan:
-`docs/implementation/dataforseo-textrazor-ranking-similarity-plan.md`.
+Product architecture, scope, and phased backlog live in root markdown:
+`ARCHITECTURE.md` (this file), `GOALS.md`, and `ROADMAP.md`.
 
 ## Current Components
 
@@ -53,8 +53,8 @@ Detailed product architecture: `docs/architecture/ARCHITECTURE.md`. Phased plan:
 - `.codex/hooks/*.cjs`: active hook implementations for session, git, and
   compaction guards.
 - `.codex-sdlc/manifest.json`: setup scan results and confirmed preferences.
-- `docs/architecture/`: product architecture and ADRs.
-- `docs/implementation/`: first implementation plan.
+- `GOALS.md`: active-scope contract and Phase status.
+- `ROADMAP.md`: phased backlog and history.
 
 ## Application Surface
 
@@ -64,15 +64,16 @@ The repository contains an **offline-verifiable CLI scaffold** (Phase 1 shipped)
   `similarity.py`, `textrazor.py`
 - **CLI:** `seo-rank run` writes `run.json` and `report.md` from fixtures (no
   network calls)
-- **Tests:** 10 unit tests under `tests/unit/`; gate: `python -m pytest`
-- **Product docs:** `docs/architecture/`, `docs/implementation/`, ADRs under
-  `docs/architecture/adr/`
+- **Tests:** 9 unit tests under `tests/unit/`; gate: `python -m pytest`
+- **Product docs:** `ARCHITECTURE.md`, `GOALS.md`, `ROADMAP.md`, `README.md`,
+  `TESTING.md`
 - **Not yet:** live provider clients, full cluster keyword loop, live similarity
   backends, `statsmodels` analysis, `runs/RUN_ID/` layout
 
-See `docs/architecture/ARCHITECTURE.md` for the current module and artifact
-contract. Planned live similarity and statistical analysis sections below are
-**not implemented** in code yet.
+Module and artifact details are in [Application Surface](#application-surface)
+and [Key Product Components](#key-product-components) below. Planned live
+similarity and statistical analysis sections in this file are **not implemented**
+in code yet.
 
 ## Key Product Components
 
@@ -271,7 +272,8 @@ before proceeding to Benjamini-Hochberg correction and run reporting.
   from the first ranking-variation model.
 - Continue filling in the real package under `src/seo_rank/` and add
   discoverable tests under `tests/`.
-- Keep significant architecture decisions in `docs/architecture/adr/`.
+- Record significant architecture decisions in this file's [Decisions](#decisions)
+  section and `ROADMAP.md` History.
 
 ## Codex And SDLC Flow
 
