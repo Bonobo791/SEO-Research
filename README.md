@@ -14,18 +14,23 @@ python -m pytest
 seo-rank run --seed "technical seo" --dry-run --output-dir artifacts
 ```
 
-## Product direction (planned)
+## Product direction (Phase 2)
 
-Per cluster keyword: top-20 organic SERP, similarity at passage / page / domain
-URL scope, dual backends every run (`BGE-reranker-v2` + Gemini cosine),
-`statsmodels` OLS with Benjamini-Hochberg after OLS pre-analysis diagnostics.
-Not implemented in code yet.
+Live provider boundaries are next: DataForSEO request construction, parsed-page
+TextRazor request construction, credential validation, and explicit flags or
+integration checks for non-default live calls. The offline scaffold stays in
+place while those boundaries are added.
+
+Later phases remain planned after that: per-cluster keyword execution, top-20
+organic SERPs at passage / page / domain scope, dual similarity backends every
+run, and `statsmodels` OLS with Benjamini-Hochberg after OLS pre-analysis
+diagnostics.
 
 ## Repository layout
 
 | Path | Purpose |
 |------|---------|
-| `src/seo_rank/` | CLI and offline provider boundaries |
+| `src/seo_rank/` | CLI and provider boundaries |
 | `tests/unit/` | pytest unit tests |
 | `ARCHITECTURE.md` | Product architecture, data flow, planned pipeline |
 | `GOALS.md` | Active-scope contract |

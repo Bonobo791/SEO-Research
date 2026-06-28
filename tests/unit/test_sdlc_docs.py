@@ -10,9 +10,18 @@ def test_goals_and_roadmap_define_active_scope_and_backlog() -> None:
     roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
 
     assert "active-scope contract" in goals
-    assert "Build the first offline-verifiable Python CLI scaffold" in goals
+    assert "Next objective (Phase 2)" in goals
+    assert "Live provider boundaries" in goals
     assert "Current Backlog" in roadmap
     assert "When `GOALS.md` exists, it is the active" in roadmap
+
+
+def test_readme_reflects_phase_two_direction() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "What works today" in readme
+    assert "Product direction (Phase 2)" in readme
+    assert "provider boundaries" in readme
 
 
 def test_manifest_records_resolved_pytest_commands() -> None:

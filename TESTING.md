@@ -11,7 +11,7 @@ Pytest configuration and verification contract for SEO-Research.
 - Single-test-file command: `python -m pytest tests/unit/test_cli_run.py`
 - Lint / type-check / build / coverage: not configured
 - Expected test duration: fast (< 1s)
-- **Current verification status:** 9 tests collected, all passing
+- **Current verification status:** 10 tests collected, all passing
 
 ## Active Verification Command
 
@@ -29,7 +29,7 @@ python -m pytest
 | `test_passage_normalization.py` | Passage split, short-text filter |
 | `test_similarity_features.py` | Fixture embedding cosine aggregation |
 | `test_textrazor_normalization.py` | Entity schema normalization |
-| `test_sdlc_docs.py` | GOALS/ROADMAP guards and manifest pytest commands |
+| `test_sdlc_docs.py` | GOALS/ROADMAP/README guards and manifest pytest commands |
 
 All tests use fixtures/mocks only. No live provider or network tests.
 

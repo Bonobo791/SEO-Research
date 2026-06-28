@@ -28,9 +28,11 @@ fixtures, normalizes SERP rows, passages, page-level similarity features, and
 optional TextRazor entities, then writes `run.json` and `report.md` with no
 network calls.
 
-**Planned:** live DataForSEO and TextRazor clients, full cluster keyword loop,
-dual-backend live similarity (BGE-reranker-v2 + Gemini cosine), and
-`statsmodels` OLS with Benjamini-Hochberg after OLS pre-analysis diagnostics.
+**Phase 2 next:** live DataForSEO and TextRazor provider boundaries, including
+request construction, credential validation, and explicit live-call gating.
+Later phases keep the full cluster keyword loop, dual-backend live similarity
+(BGE-reranker-v2 + Gemini cosine), and `statsmodels` OLS with Benjamini-
+Hochberg after OLS pre-analysis diagnostics.
 
 TextRazor entities are captured in offline runs for schema validation; entity-derived
 model features remain out of scope.
@@ -64,7 +66,7 @@ The repository contains an **offline-verifiable CLI scaffold** (Phase 1 shipped)
   `similarity.py`, `textrazor.py`
 - **CLI:** `seo-rank run` writes `run.json` and `report.md` from fixtures (no
   network calls)
-- **Tests:** 9 unit tests under `tests/unit/`; gate: `python -m pytest`
+- **Tests:** 10 unit tests under `tests/unit/`; gate: `python -m pytest`
 - **Product docs:** `ARCHITECTURE.md`, `GOALS.md`, `ROADMAP.md`, `README.md`,
   `TESTING.md`
 - **Not yet:** live provider clients, full cluster keyword loop, live similarity

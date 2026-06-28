@@ -5,8 +5,7 @@
 
 ## Active Objective
 
-Build the first offline-verifiable Python CLI scaffold for SEO ranking
-similarity research.
+Build Phase 2 provider boundaries for SEO ranking similarity research.
 
 ### Phase 1 status: **complete**
 
