@@ -10,8 +10,9 @@ def test_goals_and_roadmap_define_active_scope_and_backlog() -> None:
     roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
 
     assert "active-scope contract" in goals
-    assert "Next objective (Phase 2)" in goals
-    assert "Live provider boundaries" in goals
+    assert "Active Objective" in goals
+    assert "Phase 3" in goals
+    assert "full cluster orchestration" in goals
     assert "Current Backlog" in roadmap
     assert "When `GOALS.md` exists, it is the active" in roadmap
 

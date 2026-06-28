@@ -5,66 +5,68 @@
 
 ## Active Objective
 
-Build Phase 2 provider boundaries for SEO ranking similarity research.
+Build Phase 3 full cluster orchestration for SEO ranking similarity research.
 
-### Phase 1 status: **complete**
+### Current limitation
 
-The offline scaffold can:
+SERP, page text, passages, offline similarity features, and TextRazor entities
+run against the **first expanded keyword only**, not every keyword in the capped
+cluster (up to 25 keywords after seed expansion).
 
-1. Accept a seed keyword and run configuration through the CLI. **Done**
-2. Expand the seed into a capped keyword set using mocked provider data. **Done**
-3. Normalize organic top-20 SERP results. **Done**
-4. Normalize parsed page text into usable passages. **Done**
-5. Compute deterministic similarity features from fixture embeddings. **Done**
-6. Write JSON and Markdown run artifacts without network calls. **Done**
+### Phase 3 objective
 
-Additional Phase 1 delivery: offline TextRazor entity capture with
-`--skip-textrazor` support.
+For **each keyword** in the capped cluster, run the provider pipeline with that
+keyword as the **target keyword** for all SERP-derived outputs:
 
-**Known Phase 1 limitation:** SERP, page text, and similarity run against the
-first expanded keyword only, not every keyword in the cluster.
+1. Collect organic SERP results (depth-capped, default top 20).
+2. Fetch or fixture-load parsed page text for each organic result.
+3. Normalize passages from that page text.
+4. Compute offline fixture similarity features against the target keyword.
+5. Capture TextRazor entities from parsed text when not skipped.
 
-### Next objective (Phase 2)
+Apply the same per-keyword loop in **offline** (`seo-rank run`) and **live**
+(`--live-providers` with explicit env gates) paths.
 
-Live provider boundaries: DataForSEO and TextRazor request construction,
-authentication validation, and integration tests behind explicit flags.
+Phase 3 status:
 
-Phase 2 status:
-
-- DataForSEO request construction: **Done**
-- TextRazor parsed-text request construction: **Done**
-- Credential validation without secrets in errors: **Done**
-- Non-default CLI live-provider gate: **Done**
-- Standard-library provider HTTP clients: **Done**
-- Env-gated live smoke test: **Done**
-- Broader live integration coverage: **Next**
+- Per-keyword offline orchestration: **Next**
+- Per-keyword live orchestration: **Next**
+- Run artifacts grouped by target keyword: **Next**
+- Cluster orchestration tests (offline + injected live transports): **Next**
 
 ## In Scope (current and near-term)
 
 - Python CLI under `src/seo_rank/`.
-- Pytest coverage under `tests/unit/`.
-- Offline DataForSEO and TextRazor fixtures with normalization.
-- JSON + Markdown run artifacts for dry runs.
+- Pytest coverage under `tests/unit/` and orchestration tests as needed.
+- Offline and live provider paths extended to the full capped keyword cluster.
+- JSON + Markdown run artifacts that preserve per-keyword raw and normalized
+  provider data.
 - Product documentation in root markdown: `ARCHITECTURE.md`, `GOALS.md`,
   `ROADMAP.md`, `README.md`, `TESTING.md`.
-- Explicit credential validation before live runs (Phase 2).
 
 ## Out Of Scope
 
-- Live provider calls by default until Phase 2+ gates exist.
-- Direct page fetching outside DataForSEO.
+- Live similarity backends (`BGE-reranker-v2`, Gemini cosine) until Phase 4.
+- Passage / page / domain live similarity scopes until Phase 4.
+- `statsmodels` OLS, OLS pre-analysis, and Benjamini-Hochberg until Phase 5.
+- `runs/RUN_ID/` artifact layout and expanded reporting until Phase 6.
 - Entity-derived ranking features.
+- Direct page fetching outside DataForSEO.
 - Causal claims about ranking factors.
 - CI, deployment, databases, cache layers, production hosting.
-- Live similarity backends and `statsmodels` analysis until their phases ship.
 
-## Acceptance Criteria (Phase 1)
+## Acceptance Criteria (Phase 3)
 
-- [x] `python -m pytest` passes meaningful tests for the offline workflow.
-- [x] CLI smoke test writes JSON and Markdown from fixtures/mocks only.
-- [x] Provider normalization behind testable module boundaries.
-- [x] Run outputs preserve raw and normalized provider data.
-- [x] Documentation aligned with `ARCHITECTURE.md`, `TESTING.md`, and
+- [ ] Offline `seo-rank run` processes **every** keyword in the capped cluster,
+  not only the first.
+- [ ] Live `--live-providers` smoke orchestration processes **every** keyword in
+  the capped cluster when explicitly enabled.
+- [ ] Each keyword's SERP, page text, passages, similarity features, and
+  TextRazor entities use that keyword as the target keyword.
+- [ ] `run.json` and `report.md` expose per-keyword results without losing raw
+  provider payloads.
+- [ ] `python -m pytest` includes meaningful cluster-orchestration coverage.
+- [ ] Documentation aligned with `ARCHITECTURE.md`, `TESTING.md`, and
   `ROADMAP.md`.
 
 ## Operating Rules
