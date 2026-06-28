@@ -5,19 +5,15 @@ scope contract; keep deferred and historical items here.
 
 ## Current Backlog
 
-### Phase 2 — Provider boundaries
-
-- DataForSEO request construction (keyword expansion, SERP, page-text parsing)
-- TextRazor request construction from parsed page text
-- Authentication validation without secrets in errors or artifacts
-- Standard-library provider HTTP clients with injectable transports
-- Env-gated live smoke test behind explicit integration flags
-- Broader live provider integration checks beyond smoke coverage
+Active scope contract: `GOALS.md` (Phase 3).
 
 ### Phase 3 — Full cluster orchestration
 
-- SERP, page text, and downstream features for **every** keyword in the capped
-  cluster (today: first keyword only)
+- Per-keyword offline orchestration for the full capped cluster (not first keyword
+  only)
+- Per-keyword live orchestration behind existing provider gates
+- Run artifacts grouped by target keyword with raw provider payloads preserved
+- Cluster orchestration tests (offline fixtures + injected live transports)
 
 ### Phase 4 — Live similarity
 
@@ -51,3 +47,13 @@ scope contract; keep deferred and historical items here.
   passage/similarity/entity normalization, `run.json` + `report.md`, unit tests,
   root product docs (`ARCHITECTURE.md`, `GOALS.md`, `ROADMAP.md`).
 - SDLC wizard surface: hooks, manifest, `GOALS.md` active contract.
+- **Phase 2 shipped:** provider request builders (DataForSEO keyword expansion,
+  organic SERP, page-text parsing; TextRazor parsed-text entities), credential
+  validation without secrets in errors, non-default CLI live-provider gate
+  (`--live-providers` + `SEO_RANK_ENABLE_LIVE_PROVIDERS=1`), standard-library
+  HTTP clients with injectable transports, env-gated live smoke integration test
+  (`SEO_RANK_RUN_LIVE_INTEGRATION=1`), and Phase 2 documentation/test coverage.
+- **Phase 2 deferred to later backlog:** broader live provider integration beyond
+  the minimal smoke path.
+- **GOALS retargeted to Phase 3:** full cluster orchestration for every capped
+  keyword in offline and live paths.
