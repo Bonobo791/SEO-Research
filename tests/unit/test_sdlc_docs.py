@@ -23,6 +23,8 @@ def test_readme_reflects_phase_three_direction() -> None:
     assert "What works today" in readme
     assert "Product direction (Phase 4)" in readme
     assert "Phase 3 shipped" in readme
+    assert "--live-gemini" in readme
+    assert "--live-textrazor" in readme
 
 
 def test_manifest_records_resolved_pytest_commands() -> None:
@@ -47,9 +49,12 @@ def test_env_example_documents_live_provider_gates_without_real_secrets() -> Non
     expected_placeholders = {
         "SEO_RANK_RUN_LIVE_INTEGRATION": "0",
         "SEO_RANK_ENABLE_LIVE_PROVIDERS": "0",
+        "SEO_RANK_ENABLE_GEMINI": "0",
+        "SEO_RANK_ENABLE_TEXTRAZOR": "0",
         "DATAFORSEO_LOGIN": "replace-with-dataforseo-api-login",
         "DATAFORSEO_PASSWORD": "replace-with-dataforseo-api-password",
         "TEXTRAZOR_API_KEY": "replace-with-textrazor-api-key",
+        "GEMINI_API_KEY": "replace-with-gemini-api-key",
     }
 
     for name, placeholder in expected_placeholders.items():

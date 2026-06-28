@@ -23,6 +23,15 @@ and fill in real credentials. The CLI and pytest **load `.env` automatically**
 (project root is detected via `pyproject.toml`); you do not need to `source` it in
 the shell. Values in `.env` override conflicting shell exports.
 
+Live-provider contract:
+
+- `--live-providers` always uses live DataForSEO.
+- `--live-gemini` additionally enables Gemini live scoring and requires
+  `SEO_RANK_ENABLE_GEMINI=1` plus `GEMINI_API_KEY`.
+- `--live-textrazor` additionally enables live TextRazor entity extraction and
+  requires `SEO_RANK_ENABLE_TEXTRAZOR=1` plus `TEXTRAZOR_API_KEY`.
+- If an optional live flag is not passed, that provider is skipped.
+
 ## Product direction (Phase 4)
 
 Phase 3 shipped full cluster orchestration: offline and gated live runs process

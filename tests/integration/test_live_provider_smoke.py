@@ -17,8 +17,9 @@ def require_live_provider_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "SEO_RANK_ENABLE_LIVE_PROVIDERS",
         "DATAFORSEO_LOGIN",
         "DATAFORSEO_PASSWORD",
-        "TEXTRAZOR_API_KEY",
     ]
+    if os.environ.get("SEO_RANK_ENABLE_TEXTRAZOR") == "1":
+        required.append("TEXTRAZOR_API_KEY")
     missing = [name for name in required if not os.environ.get(name)]
     if missing:
         pytest.skip("missing live provider environment variables: " + ", ".join(missing))
@@ -31,19 +32,20 @@ def test_live_provider_smoke_writes_artifacts(
 ) -> None:
     require_live_provider_env(monkeypatch)
     output_dir = tmp_path / "live-artifacts"
+    argv = [
+        "run",
+        "--seed",
+        "technical seo",
+        "--depth",
+        "1",
+        "--output-dir",
+        str(output_dir),
+        "--live-providers",
+    ]
+    if os.environ.get("SEO_RANK_ENABLE_TEXTRAZOR") == "1":
+        argv.append("--live-textrazor")
 
-    exit_code = main(
-        [
-            "run",
-            "--seed",
-            "technical seo",
-            "--depth",
-            "1",
-            "--output-dir",
-            str(output_dir),
-            "--live-providers",
-        ]
-    )
+    exit_code = main(argv)
 
     assert exit_code == 0
     payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))

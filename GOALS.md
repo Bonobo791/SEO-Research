@@ -16,8 +16,10 @@ group outputs under `keyword_results`, and annotate flattened rows with
 
 Phase 4 is in progress: page-level **fixture** scoring exposes **BGE**, **Gemini
 Doc Retrieval**, and **Gemini Semantic Similarity** per SERP row in offline and
-gated live artifact generation. **Live backend execution is not done yet** —
-fixtures stand in until the integration work below ships.
+gated live artifact generation. **Optional live provider controls** (`--live-gemini`,
+`--live-textrazor`, env gates, hard failures) are shipped. **Live Gemini and BGE
+backend execution is not done yet** — live runs still use fixtures for
+`page_similarity` unless the remaining integration slices land.
 
 ### Phase 4 objective
 
@@ -36,19 +38,24 @@ local compute are available.
 
 ### Dev slices
 
-1. **Fixture backends** — done: offline-testable BGE, Gemini Doc Retrieval, and
+1. **Fixture backends** — **done**: offline-testable BGE, Gemini Doc Retrieval, and
    Gemini Semantic Similarity scorers behind a shared page-level interface.
-2. **Page scope** — done: score parsed page text vs `target_keyword` per
+2. **Page scope** — **done**: score parsed page text vs `target_keyword` per
    organic result.
-3. **Per-keyword wiring** — done: attach page similarity scores to
+3. **Per-keyword wiring** — **done**: attach page similarity scores to
    `keyword_results` in offline and live orchestration paths.
-4. **Artifacts** — done: expose raw + normalized page similarity in `run.json` /
+4. **Artifacts** — **done**: expose raw + normalized page similarity in `run.json` /
    `report.md`.
-5. **Live integration** — **remaining**: replace fixture scorers with real
-   `gemini-embedding-2` calls (Gen AI SDK) and local BGE inference (see
-   [Remaining live backend work](#remaining-live-backend-work)).
-6. **Docs** — in progress: align `ARCHITECTURE.md`, `README.md`, `TESTING.md`,
-   `ROADMAP.md`, `.env.example`.
+5. **Provider controls** — **done**: `--live-gemini`, `--live-textrazor`, matching
+   env gates, and hard failures when flags or credentials are missing.
+6. **TextRazor live selection** — **done**: live TextRazor runs only when
+   `--live-textrazor` is passed; default live runs skip entities.
+7. **Live similarity backends** — **remaining**: `gemini_embeddings.py` +
+   `gemini-embedding-2` scoring when `--live-gemini` is enabled; FlagEmbedding BGE
+   when its gate ships (see [Remaining live backend work](#remaining-live-backend-work)).
+8. **Docs** — **done** for root contract (`ARCHITECTURE.md`, `README.md`,
+   `TESTING.md`, `ROADMAP.md`, `.env.example`). **Remaining:** `pyproject.toml`
+   `similarity` extra and opt-in Gemini integration tests when backends land.
 
 ### Remaining live backend work
 
@@ -56,10 +63,41 @@ Implement the slices below in order. Follow `AGENTS.md`: failing test first,
 minimal implementation, then `python -m pytest`. Do **not** break offline runs or
 existing artifact shape.
 
+### Approved live-provider contract
+
+Live provider behavior for Phase 4 is now fixed unless a later goals update
+changes it:
+
+- `--live-providers` always enables live DataForSEO. There is no useful live run
+  without it because DataForSEO provides keyword expansion, SERP results, and
+  parsed page text.
+- `--live-gemini` is optional and requires both `--live-providers` and an env
+  safety gate. If requested without its env gate or credentials, the CLI fails
+  hard.
+- `--live-textrazor` is optional and requires both `--live-providers` and an env
+  safety gate. If requested without its env gate or credentials, the CLI fails
+  hard.
+- If live Gemini is not enabled, `page_similarity` still remains present in
+  artifacts and Gemini fields stay populated from deterministic fixtures for
+  comparability.
+- If live TextRazor is not enabled, live runs skip TextRazor entities entirely.
+
+### Approved remaining slice order
+
+| # | Slice | Status |
+|---|-------|--------|
+| 1 | **Provider controls** — `--live-gemini`, `--live-textrazor`, env gates, hard validation | **Done** |
+| 2 | **Gemini live integration** — `gemini_embeddings.py`, real `gemini-embedding-2` scores when `--live-gemini` | **Remaining** |
+| 3 | **TextRazor live selection** — opt-in only via `--live-textrazor` | **Done** |
+| 4 | **BGE live integration** — FlagEmbedding reranker behind its own gate | **Remaining** |
+| 5 | **Docs and integration pass** — root docs done; `pyproject.toml` extra + Gemini integration tests pending | **In progress** |
+
 **Touchpoints today**
 
 - Scoring entry point: `compute_page_similarity_scores()` in
-  `src/seo_rank/similarity.py` (fixtures only).
+  `src/seo_rank/similarity.py` (**fixtures only** for all paths today).
+- Live Gemini gate: `validate_live_gemini_config()` in `cli.py` runs when
+  `--live-gemini` is set but does **not** swap in live embeddings yet.
 - Call sites: `build_offline_keyword_result()` and `build_live_keyword_result()`
   in `src/seo_rank/cli.py`.
 - Artifact shape under `page_similarity` (extend only with test + doc updates):
@@ -80,10 +118,11 @@ reports; use the **JSON key** column in `run.json` only.
 
 ---
 
-#### Slice A — Gemini embeddings (Gen AI SDK)
+#### Slice A — Gemini embeddings (Gen AI SDK) — **remaining**
 
-**Goal:** Live runs call **`gemini-embedding-2`** via the **`google-genai`** SDK.
-Offline tests and `--dry-run` keep fixtures.
+**Goal:** When `--live-gemini` is set, live runs call **`gemini-embedding-2`**
+via the **`google-genai`** SDK. Offline tests, default live runs, and `--dry-run`
+keep fixtures.
 
 **1. Dependency**
 
@@ -148,23 +187,25 @@ automatically (8192-token cap). No client-side truncation or re-normalization.
 
 **6. Wire + test**
 
-- Live path only in `build_live_keyword_result()` when env validates.
+- Swap fixtures in `build_live_keyword_result()` only when `config.live_gemini`
+  is true (gate already validated in `build_live_payload()`).
 - Append `genai.embed_content` to `network_calls`.
 - Tests first: `test_gemini_embeddings.py` (mock formatted inputs: search-result
   query + title|text doc; sentence-similarity on keyword and page), existing
   fixture tests unchanged, `test_cli_run.py` live-path selection, opt-in
   integration gate.
 
-**Done when:** live run returns real Gemini scores with `GEMINI_API_KEY` set;
-offline pytest stays network-free.
+**Done when:** `--live-gemini` run returns real Gemini scores with
+`GEMINI_API_KEY` set; live runs without the flag still use fixtures; offline
+pytest stays network-free.
 
 ---
 
-#### Slice B — BGE (local cross-encoder)
+#### Slice B — BGE (local cross-encoder) — **remaining**
 
-**Goal:** On live runs, replace the `bge` fixture path with a real FlagEmbedding
-reranker. This is a **cross-encoder** (query + document → score), not a
-bi-encoder embed model like `bge-base-en-v1.5`.
+**Goal:** When BGE live is enabled, replace the `bge` fixture path in live runs
+with a real FlagEmbedding **cross-encoder** reranker (not a bi-encoder embed
+model). Default live runs keep fixture BGE.
 
 **1. Dependencies**
 
@@ -216,13 +257,12 @@ Mock the reranker in unit tests; optional integration test with
 
 ---
 
-#### Slice C — Shared cleanup
+#### Slice C — Shared cleanup — **in progress**
 
-1. **`validate_live_provider_gate()`** — extend credential validation to require
-   `GEMINI_API_KEY` when Gemini live similarity is requested (mirror
-   DataForSEO/TextRazor error style: no secret values in exceptions).
-2. **`pyproject.toml` / README / ARCHITECTURE / ROADMAP / TESTING`** — sync with
-   Gen AI SDK + `gemini-embedding-2` + FlagEmbedding instructions above.
+1. **`validate_live_gemini_config()`** — **done** (called when `--live-gemini` is
+   set; mirrors DataForSEO/TextRazor hard-fail style).
+2. **`pyproject.toml` / integration tests** — **remaining**: add `similarity`
+   optional extra; ship opt-in Gemini integration coverage when Slice A lands.
 3. **Acceptance criteria below** — check off items as slices land.
 
 ## In Scope (current and near-term)
@@ -253,14 +293,18 @@ Mock the reranker in unit tests; optional integration test with
 - [x] Scores land in `keyword_results` with `target_keyword` preserved.
 - [x] Offline fixture tests cover `bge`, `gemini_doc_retrieval`, and
   `gemini_semantic_similarity` at page scope.
+- [x] Optional live provider flags (`--live-gemini`, `--live-textrazor`) with
+  env gates and hard failures when misconfigured.
+- [x] Live TextRazor is opt-in only; default live runs skip entity extraction.
+- [x] Documentation and `.env.example` aligned with `ARCHITECTURE.md`,
+  `TESTING.md`, `ROADMAP.md`.
 - [ ] Live **Gemini Doc Retrieval** and **Gemini Semantic Similarity** via
-  Gen AI SDK (`gemini-embedding-2`) with `GEMINI_API_KEY` in `.env`.
+  Gen AI SDK (`gemini-embedding-2`) when `--live-gemini` is enabled.
 - [ ] Live **BGE** cross-encoder via FlagEmbedding with documented model pin
   and score calibration notes.
-- [ ] All three live scorers run on every non-dry live similarity path (fixtures
-  remain for offline tests only).
-- [ ] Documentation and `.env.example` aligned with `ARCHITECTURE.md`,
-  `TESTING.md`, `ROADMAP.md`.
+- [ ] `pyproject.toml` `similarity` optional extra for `google-genai` and
+  `FlagEmbedding`.
+- [ ] Opt-in integration tests for live Gemini (and BGE when shipped).
 
 ## Operating Rules
 

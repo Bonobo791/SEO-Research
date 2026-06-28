@@ -42,6 +42,8 @@ from seo_rank.textrazor import (
 )
 
 LIVE_PROVIDER_ENV_FLAG = "SEO_RANK_ENABLE_LIVE_PROVIDERS"
+LIVE_GEMINI_ENV_FLAG = "SEO_RANK_ENABLE_GEMINI"
+LIVE_TEXTRAZOR_ENV_FLAG = "SEO_RANK_ENABLE_TEXTRAZOR"
 DEFAULT_DATAFORSEO_TRANSPORT = None
 DEFAULT_TEXTRAZOR_TRANSPORT = None
 DATAFORSEO_LOCATION_CODES = {
@@ -62,6 +64,8 @@ class RunConfig:
     dry_run: bool
     skip_textrazor: bool
     live_providers: bool = False
+    live_gemini: bool = False
+    live_textrazor: bool = False
 
 
 class LiveProviderGateError(ValueError):
@@ -71,7 +75,6 @@ class LiveProviderGateError(ValueError):
 @dataclass(frozen=True)
 class LiveProviderCredentials:
     dataforseo: DataForSeoCredentials
-    textrazor: TextRazorCredentials
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -79,10 +82,15 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     ensure_project_env_loaded()
     parser = build_parser()
-    args = parser.parse_args(argv)
+    try:
+        args = parser.parse_args(argv)
+        config = config_from_args(args) if args.command == "run" else None
+    except LiveProviderGateError as error:
+        print(error, file=sys.stderr)
+        return 2
 
     if args.command == "run":
-        config = config_from_args(args)
+        assert config is not None
         if config.live_providers:
             try:
                 write_live_artifacts(config, os.environ)
@@ -121,6 +129,8 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run the env-gated live provider smoke path",
     )
+    run.add_argument("--live-gemini", action="store_true")
+    run.add_argument("--live-textrazor", action="store_true")
 
     return parser
 
@@ -133,6 +143,10 @@ def positive_int(value: str) -> int:
 
 
 def config_from_args(args: argparse.Namespace) -> RunConfig:
+    if args.live_gemini and not args.live_providers:
+        raise LiveProviderGateError("--live-gemini requires --live-providers")
+    if args.live_textrazor and not args.live_providers:
+        raise LiveProviderGateError("--live-textrazor requires --live-providers")
     return RunConfig(
         seed=args.seed,
         location=args.location,
@@ -145,6 +159,8 @@ def config_from_args(args: argparse.Namespace) -> RunConfig:
         dry_run=args.dry_run,
         skip_textrazor=args.skip_textrazor,
         live_providers=args.live_providers,
+        live_gemini=args.live_gemini,
+        live_textrazor=args.live_textrazor,
     )
 
 
@@ -155,10 +171,35 @@ def validate_live_provider_gate(env: Mapping[str, str]) -> LiveProviderCredentia
         )
     try:
         dataforseo = validate_dataforseo_credentials(env)
-        textrazor = validate_textrazor_credentials(env)
-    except (DataForSeoCredentialError, TextRazorCredentialError) as error:
+    except DataForSeoCredentialError as error:
         raise LiveProviderGateError(str(error)) from error
-    return LiveProviderCredentials(dataforseo=dataforseo, textrazor=textrazor)
+    return LiveProviderCredentials(dataforseo=dataforseo)
+
+
+def require_live_optional_env_flag(env: Mapping[str, str], name: str) -> None:
+    if env.get(name) != "1":
+        raise LiveProviderGateError(f"Live provider execution requires {name}=1")
+
+
+def validate_live_gemini_config(env: Mapping[str, str]) -> str:
+    errors: list[str] = []
+    if env.get(LIVE_GEMINI_ENV_FLAG) != "1":
+        errors.append(f"{LIVE_GEMINI_ENV_FLAG}=1")
+    if not env.get("GEMINI_API_KEY", "").strip():
+        errors.append("GEMINI_API_KEY")
+    if errors:
+        raise LiveProviderGateError(
+            "Missing Gemini live configuration: " + ", ".join(errors)
+        )
+    return env["GEMINI_API_KEY"].strip()
+
+
+def validate_live_textrazor_config(env: Mapping[str, str]) -> TextRazorCredentials:
+    require_live_optional_env_flag(env, LIVE_TEXTRAZOR_ENV_FLAG)
+    try:
+        return validate_textrazor_credentials(env)
+    except TextRazorCredentialError as error:
+        raise LiveProviderGateError(str(error)) from error
 
 
 def write_offline_artifacts(config: RunConfig) -> None:
@@ -309,6 +350,11 @@ def build_live_payload(
     textrazor_transport,
 ) -> dict[str, object]:
     credentials = validate_live_provider_gate(env)
+    if config.live_gemini:
+        validate_live_gemini_config(env)
+    textrazor_credentials = (
+        validate_live_textrazor_config(env) if config.live_textrazor else None
+    )
     location_code = dataforseo_location_code(config.location)
     network_calls: list[str] = []
 
@@ -329,6 +375,7 @@ def build_live_payload(
             config,
             target_keyword=keyword,
             credentials=credentials,
+            textrazor_credentials=textrazor_credentials,
             location_code=location_code,
             dataforseo_transport=dataforseo_transport,
             textrazor_transport=textrazor_transport,
@@ -377,6 +424,7 @@ def build_live_keyword_result(
     *,
     target_keyword: str,
     credentials: LiveProviderCredentials,
+    textrazor_credentials: TextRazorCredentials | None,
     location_code: int,
     dataforseo_transport,
     textrazor_transport,
@@ -431,11 +479,11 @@ def build_live_keyword_result(
 
     textrazor_responses: list[dict[str, object]] = []
     textrazor_entities: list[dict[str, object]] = []
-    if not config.skip_textrazor:
+    if config.live_textrazor and textrazor_credentials is not None:
         textrazor_responses = [
             execute_textrazor_request(
                 build_entity_request(page_text),
-                credentials=credentials.textrazor,
+                credentials=textrazor_credentials,
                 transport=textrazor_transport,
             )
             | {"url": page_text["url"], "source_text": page_text["text"]}
