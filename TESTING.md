@@ -1,8 +1,7 @@
 # Testing
 
-This repository now has an initial Python package scaffold and pytest
-configuration. There are currently no discoverable test source files in the
-working tree, so pytest completes with `0` collected tests.
+This repository has a Python package scaffold, pytest configuration, and an
+initial unit test suite under `tests/unit/`.
 
 ## Current State
 
@@ -10,13 +9,14 @@ working tree, so pytest completes with `0` collected tests.
 - Test directory: `tests/`
 - Test framework: `pytest`
 - Run-all-tests command: `python -m pytest`
-- Single-test-file command: not available until test source files are restored
+- Single-test-file command: `python -m pytest tests/unit/test_cli_run.py`
 - Lint command: not configured yet
 - Type-check command: not configured yet
 - Production build command: not configured yet
 - Coverage config: not configured yet
 - Expected test duration: fast
-- Current verification status: `python -m pytest` exits with `0` collected tests
+- Current verification status: `python -m pytest` collects and passes the active
+  unit suite
 
 ## Active Verification Command
 
@@ -29,7 +29,8 @@ python -m pytest
 Current observed result:
 
 - Pytest discovers the configured `tests/` root
-- Pytest collects `0` tests from the current working tree
+- Pytest collects unit tests from `tests/unit/`
+- Current suite covers SDLC doc guards and the offline CLI smoke path
 
 ## Required Workflow
 

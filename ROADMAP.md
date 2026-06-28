@@ -63,6 +63,5 @@ scope contract.
   `tests/`.
 - Architecture and ADR docs define a CLI-first, DataForSEO-backed,
   observational analysis product direction.
-- The configured test command is `python -m pytest`; the repository currently
-  has no meaningful discoverable tests until the first implementation slice adds
-  them.
+- The configured test command is `python -m pytest`; the first offline CLI smoke
+  test and SDLC doc guards are present under `tests/unit/`.

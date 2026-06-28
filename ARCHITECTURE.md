@@ -52,17 +52,17 @@ The repository now contains the first project scaffold:
 - Source directory: present at `src/seo_rank/`
 - Test directory: present at `tests/`
 - Package manager or dependency manifest: present at `pyproject.toml`
-- Current package contents: `__init__.py` and a stub `cli.py`
-- Current test status: pytest is configured, but there are no discoverable test
-  source files in the working tree
+- Current package contents: `__init__.py` and `cli.py` with an offline `run`
+  command that writes JSON and Markdown artifacts from fixtures
+- Current test status: pytest collects unit tests under `tests/unit/`
 - Database: not present
 - Cache layer: not present
 - Deployment target: not present
 - CI workflow: not present
 
-Implementation has started, but the runnable product surface is still minimal.
-The current `python -m pytest` run completes with `0` collected tests, so there
-is no active source-level verification yet.
+Implementation has started. The runnable product surface is still minimal, but
+`python -m pytest` now verifies the offline CLI smoke path and SDLC doc guards.
+Provider boundaries, normalization, and similarity features remain planned work.
 
 ## Key Product Components
 

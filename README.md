@@ -11,14 +11,12 @@ results.
 
 Current repository state:
 
-- `pyproject.toml` exists with a setuptools package definition and `seo-rank`
-  console script.
-- `src/seo_rank/` exists but currently contains only the package marker and a
-  stub CLI entrypoint.
-- `tests/` is configured as the pytest discovery root, but there are currently
-  no discoverable test source files in the working tree.
-- `python -m pytest` is the active verification command and currently exits
-  with `0` collected tests.
+- `pyproject.toml` defines the `seo-rank` console script and pytest config.
+- `src/seo_rank/` contains the package marker and an offline `run` CLI that
+  writes JSON and Markdown artifacts from fixtures.
+- `tests/unit/` contains the active pytest suite, including an offline CLI smoke
+  test and SDLC doc guards.
+- `python -m pytest` is the active verification command.
 
 Start here:
 

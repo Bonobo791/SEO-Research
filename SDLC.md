@@ -37,32 +37,41 @@ Do not treat `/sdlc` as a real Codex command for this repo.
 
 ## Current Commands
 
-No product commands are configured yet because the repo has no application
-source, tests, package manifest, build system, or CI.
+Primary verification command:
 
-Current setup verification command:
+```bash
+python -m pytest
+```
+
+Targeted single-file example:
+
+```bash
+python -m pytest tests/unit/test_cli_run.py
+```
+
+Setup verification command:
 
 ```bash
 test -s TESTING.md && test -s ARCHITECTURE.md && test -s SDLC.md && test -s .codex-sdlc/manifest.json
 ```
 
-When product code is added, update `TESTING.md` and
-`.codex-sdlc/manifest.json` with the real commands before relying on the git
-proof shortcut.
+Lint, type-check, build, and CI commands are not configured yet.
 
 ## Pre-Commit Proof
 
-Use `PROVE-IT.md` before committing. Because no full product test command exists
-yet, pass the setup verification command explicitly when stamping proof for
-setup-only changes:
+Use `PROVE-IT.md` before committing. The manifest records `python -m pytest` as
+the proof command, so the git gate can run it directly:
+
+```bash
+node .codex/hooks/git-guard.cjs prove --reviewed
+```
+
+For setup-only changes that do not touch product verification, you can still pass
+the setup verification command explicitly:
 
 ```bash
 node .codex/hooks/git-guard.cjs prove --reviewed --check "test -s TESTING.md && test -s ARCHITECTURE.md && test -s SDLC.md && test -s .codex-sdlc/manifest.json"
 ```
-
-After real test, lint, type-check, or build commands exist and are recorded in
-`.codex-sdlc/manifest.json`, `node .codex/hooks/git-guard.cjs prove --reviewed`
-can run the configured proof commands directly.
 
 ## Product Documentation
 

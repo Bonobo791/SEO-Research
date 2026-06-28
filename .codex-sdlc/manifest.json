@@ -2,22 +2,32 @@
   "schema_version": 1,
   "generated_by": "setup-wizard",
   "generated_at": "2026-06-28",
+  "updated_at": "2026-06-28",
   "scan": {
-    "source_directory": "planned: src/seo_rank/",
-    "test_directory": "planned: tests/",
-    "test_framework": null,
+    "source_directory": "src/seo_rank/",
+    "test_directory": "tests/",
+    "test_framework": "pytest",
     "lint_command": null,
     "typecheck_command": null,
-    "test_command": null,
-    "single_test_file_command": null,
+    "test_command": "python -m pytest",
+    "single_test_file_command": "python -m pytest tests/unit/test_cli_run.py",
     "build_command": null,
     "deployment_setup": null,
     "databases": [],
     "cache_layer": null,
-    "test_duration_expectation": "fast once tests exist",
-    "test_types_present": [],
+    "test_duration_expectation": "fast",
+    "test_types_present": ["unit"],
     "coverage_config": null,
     "project_domain": "Python CLI for DataForSEO/TextRazor SEO ranking similarity research"
+  },
+  "resolved_values": {
+    "source_directory": "src/seo_rank/",
+    "test_directory": "tests/",
+    "test_framework": "pytest",
+    "test_command": "python -m pytest",
+    "single_test_file_command": "python -m pytest tests/unit/test_cli_run.py",
+    "test_duration_expectation": "fast",
+    "test_types_present": ["unit"]
   },
   "planned_commands": {
     "test_command": "python -m pytest"
@@ -28,12 +38,17 @@
     "mocking_philosophy": "mock nondeterministic or destructive external side effects; prefer real integration checks at important boundaries",
     "ci_shepherd": false
   },
+  "scope": {
+    "active_contract": "GOALS.md",
+    "backlog": "ROADMAP.md"
+  },
   "codex": {
-    "model_profile": "task-based-gpt-5.5",
+    "model_profile": "task-based-mixed-gpt-5.4-gpt-5.5",
     "model": "gpt-5.5",
     "default_reasoning_effort": "low",
     "reasoning_effort_by_task": {
-      "documentation": "low",
+      "documentation": "medium",
+      "planning": "high",
       "coding": "medium",
       "review": "high",
       "qa": "high",
@@ -41,14 +56,14 @@
       "installs": "xhigh",
       "configuration": "xhigh"
     },
-    "review_model": "gpt-5.5",
+    "review_model": "gpt-5.4",
     "hooks_enabled": true,
     "canonical_sdlc_entrypoint": "$sdlc"
   },
   "setup_verification_command": "test -s TESTING.md && test -s ARCHITECTURE.md && test -s SDLC.md && test -s .codex-sdlc/manifest.json",
   "notes": [
-    "Product architecture is documented, but no application source, test framework, dependency manifest, CI, database, cache, or deployment setup is present yet.",
-    "Do not invent product commands before the corresponding tooling exists.",
-    "Update this manifest in the same SDLC slice that introduces real product commands."
+    "Initial CLI scaffold and pytest suite are present under src/seo_rank/ and tests/.",
+    "Pre-commit proof uses python -m pytest via manifest resolved_values.",
+    "Provider boundaries, normalization, and similarity features remain in GOALS.md backlog."
   ]
 }

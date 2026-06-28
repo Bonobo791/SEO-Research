@@ -1,7 +1,7 @@
 
 model = "gpt-5.5"
 model_reasoning_effort = "low"
-review_model = "gpt-5.5"
+review_model = "gpt-5.4"
 
 [features]
 hooks = true
