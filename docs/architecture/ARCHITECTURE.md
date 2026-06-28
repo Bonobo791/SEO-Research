@@ -12,10 +12,18 @@ over measurable text similarity signals.
 
 ## Current Repository Assessment
 
-The repository currently contains SDLC/Codex setup documentation but no product
-source package, dependency manifest, test suite, or CI. Implementation should
-begin by adding a Python package under `src/seo_rank/`, tests under `tests/`, and
-`pyproject.toml` with the CLI entrypoint and test configuration.
+The repository now contains SDLC/Codex setup documentation plus an initial
+product scaffold:
+
+- `pyproject.toml` defines the `seo-rank` package and console script.
+- `src/seo_rank/` exists with the package marker and a stub CLI entrypoint.
+- `tests/` is configured for pytest discovery, but there are currently no
+  discoverable test source files in the working tree.
+- CI is still not configured.
+
+The next implementation slice should add the missing runtime modules and restore
+or add discoverable tests so `python -m pytest` provides meaningful source-level
+verification.
 
 ## System Boundary
 

@@ -4,8 +4,9 @@
 
 - Language: Python
 - Runtime: CLI
-- Source directory: planned `src/seo_rank/`
-- Test directory: planned `tests/`
+- Source directory: `src/seo_rank/`
+- Test directory: `tests/`
+- Package manifest: `pyproject.toml`
 - Deployment: none
 - Databases: none
 - Cache layer: none
@@ -13,7 +14,7 @@
 
 ## Overview
 
-SEO-Research is planned as a Python CLI application for research-grade SEO
+SEO-Research is a Python CLI application scaffold for research-grade SEO
 ranking analysis. The first version will expand a seed keyword into a keyword
 cluster, collect top-20 organic SERP results through DataForSEO, retrieve
 provider-parsed page text, compute passage-to-keyword semantic similarity, and
@@ -28,8 +29,8 @@ The detailed product architecture lives in
 
 ## Current Components
 
-- `AGENTS.md`: repo process contract. It requires `gpt-5.5` with effort selected
-  by task type, strict TDD for code-shaped changes, and all tests passing before
+- `AGENTS.md`: repo process contract. It requires task-based model selection,
+  strict TDD for code-shaped changes, and all configured tests passing before
   commit.
 - `SDLC-LOOP.md`: operating loop for planning, red/green proof, review, and
   escalation.
@@ -41,25 +42,29 @@ The detailed product architecture lives in
 - `.codex/hooks.json`: portable hook wiring using Node entrypoints.
 - `.codex/hooks/*.cjs`: active hook implementations for session, git, and
   compaction guards.
-- `.codex-sdlc/model-profile.json`: selected task-based `gpt-5.5` model
-  profile.
+- `.codex-sdlc/model-profile.json`: selected task-based model profile.
 - `.codex-sdlc/manifest.json`: setup scan results and confirmed preferences.
 - `docs/architecture/`: product architecture and ADRs.
 - `docs/implementation/`: first implementation plan.
 
 ## Application Surface
 
-No application modules are present yet:
+The repository now contains the first project scaffold:
 
-- Source directory: not present
-- Test directory: not present
-- Package manager or dependency manifest: not present
+- Source directory: present at `src/seo_rank/`
+- Test directory: present at `tests/`
+- Package manager or dependency manifest: present at `pyproject.toml`
+- Current package contents: `__init__.py` and a stub `cli.py`
+- Current test status: pytest is configured, but there are no discoverable test
+  source files in the working tree
 - Database: not present
 - Cache layer: not present
 - Deployment target: not present
 - CI workflow: not present
 
-The accepted product direction is documented, but implementation has not begun.
+Implementation has started, but the runnable product surface is still minimal.
+The current `python -m pytest` run completes with `0` collected tests, so there
+is no active source-level verification yet.
 
 ## Key Product Components
 
@@ -95,8 +100,8 @@ control.
 - Treat analysis as observational and censored to observed top-20 rankings.
 - Capture TextRazor entities for future work but exclude entity-derived features
   from the first ranking-variation model.
-- Add the real package under `src/seo_rank/` and tests under `tests/` when
-  implementation begins.
+- Continue filling in the real package under `src/seo_rank/` and add
+  discoverable tests under `tests/`.
 - Keep significant architecture decisions in `docs/architecture/adr/`.
 
 ## Codex And SDLC Flow

@@ -1,31 +1,35 @@
 # Testing
 
-This repository is currently documentation-first. Product architecture is
-accepted for a Python CLI, but no application source, dependency manifest, test
-framework, CI workflow, build command, database, cache, or deployment target has
-been added yet.
+This repository now has an initial Python package scaffold and pytest
+configuration. There are currently no discoverable test source files in the
+working tree, so pytest completes with `0` collected tests.
 
 ## Current State
 
-- Source directory: not present yet
-- Test directory: not present yet
-- Test framework: not configured yet
-- Run-all-tests command: not configured yet
-- Single-test-file command: not configured yet
+- Source directory: `src/seo_rank/`
+- Test directory: `tests/`
+- Test framework: `pytest`
+- Run-all-tests command: `python -m pytest`
+- Single-test-file command: not available until test source files are restored
 - Lint command: not configured yet
 - Type-check command: not configured yet
 - Production build command: not configured yet
 - Coverage config: not configured yet
-- Expected test duration: fast once the first tests exist
+- Expected test duration: fast
+- Current verification status: `python -m pytest` exits with `0` collected tests
 
-## Planned Verification Command
+## Active Verification Command
 
-Once the first implementation slice adds `pyproject.toml` and tests, the primary
-verification command is:
+The primary verification command is:
 
 ```bash
 python -m pytest
 ```
+
+Current observed result:
+
+- Pytest discovers the configured `tests/` root
+- Pytest collects `0` tests from the current working tree
 
 ## Required Workflow
 
@@ -36,7 +40,9 @@ Follow `AGENTS.md` and `SDLC-LOOP.md` for every code-shaped change:
 3. Run the test and confirm it fails for the expected reason.
 4. Implement the smallest useful change.
 5. Re-run the targeted test and then the full relevant suite.
-6. Self-review the diff before commit.
+6. If no test exists yet for a setup-only or documentation-only slice, define a
+   concrete observable and verify that instead.
+7. Self-review the diff before commit.
 
 For setup, auth, or environment repair where a unit test would be artificial,
 define a failing observable first and use a health check or file/config
@@ -62,10 +68,10 @@ network calls, paid APIs, credentials, time, randomness, email sends, deletes,
 admin changes, and tenant-affecting operations. Prefer real integration checks
 when a mocked test would hide the risk the change is meant to control.
 
-## Adding The First Test Stack
+## Maintaining The Test Stack
 
-When application code is introduced, update this file in the same slice that
-adds the first manifest or test framework. Record:
+Update this file in the same slice that changes the verification contract.
+Record:
 
 - The run-all-tests command.
 - The single-test-file command.
@@ -75,8 +81,9 @@ adds the first manifest or test framework. Record:
 
 ## Required First-Slice Tests
 
-The DataForSEO + TextRazor ranking-similarity scaffold must start with
-deterministic tests using fixtures and mocked providers:
+When test source files are added or restored, the DataForSEO + TextRazor
+ranking-similarity scaffold should start with deterministic tests using
+fixtures and mocked providers:
 
 - DataForSEO request construction and auth handling.
 - TextRazor request construction and auth handling.
