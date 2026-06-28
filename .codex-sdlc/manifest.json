@@ -63,7 +63,7 @@
   "setup_verification_command": "test -s TESTING.md && test -s ARCHITECTURE.md && test -s SDLC.md && test -s .codex-sdlc/manifest.json",
   "notes": [
     "Phase 1 offline CLI scaffold shipped: dataforseo, text, similarity, textrazor modules.",
-    "python -m pytest collects 10 unit tests; pre-commit proof uses manifest test_command.",
+    "python -m pytest collects 9 unit tests; pre-commit proof uses manifest test_command.",
     "Phase 2+ backlog: live providers, full cluster loop, live similarity, statsmodels analysis."
   ]
 }
