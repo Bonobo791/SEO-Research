@@ -41,8 +41,8 @@ Fixture wiring and artifact exposure are **done**. **Still required for Phase 4
 completion:**
 
 - **BGE:** local `FlagEmbedding` cross-encoder reranker
-- **Gemini Doc Retrieval:** Vertex AI `RETRIEVAL_QUERY` + `RETRIEVAL_DOCUMENT`
-- **Gemini Semantic Similarity:** Vertex AI `SEMANTIC_SIMILARITY` on keyword and page
+- **Gemini Doc Retrieval:** asymmetric **search result** prompts (query vs document)
+- **Gemini Semantic Similarity:** symmetric **sentence similarity** prompts on keyword and page
 
 Details: `GOALS.md` (developer instructions) and `ARCHITECTURE.md`.
 

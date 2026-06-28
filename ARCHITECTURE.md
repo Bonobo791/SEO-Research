@@ -13,7 +13,7 @@
 - Similarity backends: deterministic fixture passage aggregation plus
   offline-testable page-level fixtures for **BGE**, **Gemini Doc Retrieval**, and
   **Gemini Semantic Similarity**. **Live execution is not wired:** Phase 4 still
-  requires Vertex AI Text Embeddings (`google-cloud-aiplatform`) and `FlagEmbedding`
+  requires Gen AI SDK embeddings (`google-genai`, `gemini-embedding-2`) and `FlagEmbedding`
   (local BGE cross-encoder) as optional runtime dependencies — see
   [Live similarity backends (Phase 4 remaining)](#live-similarity-backends-phase-4-remaining).
 - Deployment: none
@@ -41,7 +41,7 @@ now loop over every capped cluster keyword, group provider outputs under
 **Phase 4 in progress:** page-level similarity emits fixture scores for **BGE**,
 **Gemini Doc Retrieval**, and **Gemini Semantic Similarity** per SERP row in JSON
 and Markdown artifacts. **Finishing Phase 4** requires replacing live-path fixtures
-with real Vertex Gemini embeddings and local BGE inference — see
+with real `gemini-embedding-2` embeddings and local BGE inference — see
 [Live similarity backends (Phase 4 remaining)](#live-similarity-backends-phase-4-remaining).
 Later phases add `statsmodels` OLS with Benjamini-Hochberg after OLS pre-analysis
 diagnostics.
@@ -109,8 +109,8 @@ in code yet.
   and Gemini Semantic Similarity (`similarity.py`).
 - **Broader provider integration (planned):** live coverage beyond the smoke
   path.
-- **Live similarity (Phase 4 remaining):** real Vertex Gemini Doc Retrieval +
-  Gemini Semantic Similarity, and local **BGE** — see [Live similarity backends
+- **Live similarity (Phase 4 remaining):** real **Gemini Doc Retrieval** +
+  **Gemini Semantic Similarity** via Gen AI SDK (`gemini-embedding-2`), and local **BGE** — see [Live similarity backends
   (Phase 4 remaining)](#live-similarity-backends-phase-4-remaining) and
   [Planned Page Similarity Run](#planned-page-similarity-run).
 - **Analysis engine (planned):** OLS pre-analysis, `statsmodels` OLS,
@@ -147,10 +147,10 @@ cluster. For each cluster keyword:
    other keywords in the cluster.
 2. For **each organic result** in that top 20 (Phase 4 **page scope** shipped):
    - Score the full parsed page with **BGE** (`bge`).
-   - Score with **Gemini Doc Retrieval** (`gemini_doc_retrieval`) — Vertex
-     `RETRIEVAL_QUERY` vs `RETRIEVAL_DOCUMENT`.
+   - Score with **Gemini Doc Retrieval** (`gemini_doc_retrieval`) — asymmetric
+     **search result** (query vs `title|text` document).
    - Score with **Gemini Semantic Similarity** (`gemini_semantic_similarity`) —
-     Vertex `SEMANTIC_SIMILARITY` on keyword and page.
+     symmetric **sentence similarity** on keyword and page.
 3. **Later (Phase 5.5):** passage and domain scopes for the same three signals.
 
 Each measurement produces page-level scores for the same top-20 SERP rows so
@@ -162,16 +162,16 @@ Fixture scorers in `similarity.py` implement the artifact shape today. **Phase
 4 is not complete** until live paths call the backends below. Offline tests and
 `--dry-run` keep fixtures.
 
-### Gemini Doc Retrieval & Gemini Semantic Similarity (Vertex AI)
+### Gemini Doc Retrieval & Gemini Semantic Similarity (Gen AI SDK)
 
 | Item | Requirement |
 |------|-------------|
-| Auth | GCP project + region; Application Default Credentials or service account |
-| SDK | `google-cloud-aiplatform` — `TextEmbeddingModel`, `TextEmbeddingInput` |
-| Model | `gemini-embedding-001` default (2048 tokens; up to 3072 dims) |
-| Gemini Doc Retrieval | `RETRIEVAL_QUERY` (keyword) + `RETRIEVAL_DOCUMENT` (page body; optional SERP `title`) → `gemini_doc_retrieval` |
-| Gemini Semantic Similarity | `SEMANTIC_SIMILARITY` on keyword and page → `gemini_semantic_similarity` |
-| Vectors | L2-normalize; cosine similarity; optional `outputDimensionality` |
+| Auth | `GEMINI_API_KEY` (Google AI Studio; local research runs) |
+| SDK | `google-genai` — `genai.Client(api_key=...)`, `models.embed_content` |
+| Model | `gemini-embedding-2` (8192 tokens; up to 3072 dims; MRL; task via prompt prefix, not `task_type`) |
+| Gemini Doc Retrieval | Asymmetric **search result**: `task: search result \| query: {keyword}` vs `title: {title\|none} \| text: {body}` → `gemini_doc_retrieval` |
+| Gemini Semantic Similarity | Symmetric **sentence similarity**: `task: sentence similarity \| query: {text}` on keyword and page → `gemini_semantic_similarity` |
+| Vectors | Cosine on API embeddings; optional `output_dimensionality`; truncation handled by Gemini |
 
 ### BGE (local cross-encoder)
 
@@ -186,8 +186,9 @@ Fixture scorers in `similarity.py` implement the artifact shape today. **Phase
 
 ### Analysis use
 
-**BGE** — local cross-encoder rerank signal. **Gemini Doc Retrieval** — retrieval
-task embedding cosine. **Gemini Semantic Similarity** — STS task embedding cosine.
+**BGE** — local cross-encoder rerank signal. **Gemini Doc Retrieval** — asymmetric
+search-result embedding cosine. **Gemini Semantic Similarity** — symmetric
+sentence-similarity embedding cosine. Do not use sentence similarity for retrieval.
 All three land in every live page-similarity path for comparability in downstream
 OLS work (Phase 5).
 

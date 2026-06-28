@@ -27,8 +27,8 @@ organic SERP result with **three** page-level measurements:
 | Name | JSON key | Live implementation |
 |------|----------|---------------------|
 | BGE | `bge` | FlagEmbedding cross-encoder reranker |
-| Gemini Doc Retrieval | `gemini_doc_retrieval` | Vertex `RETRIEVAL_QUERY` + `RETRIEVAL_DOCUMENT` |
-| Gemini Semantic Similarity | `gemini_semantic_similarity` | Vertex `SEMANTIC_SIMILARITY` on keyword and page |
+| Gemini Doc Retrieval | `gemini_doc_retrieval` | Asymmetric **search result** prompt prefixes (query vs document) |
+| Gemini Semantic Similarity | `gemini_semantic_similarity` | Symmetric **sentence similarity** prompt prefix on keyword and page |
 
 Store every score in artifacts for downstream analysis. Offline runs keep
 deterministic fixtures; live runs call real backends when credentials and optional
@@ -45,8 +45,8 @@ local compute are available.
 4. **Artifacts** — done: expose raw + normalized page similarity in `run.json` /
    `report.md`.
 5. **Live integration** — **remaining**: replace fixture scorers with real
-   Vertex Gemini embeddings (Doc Retrieval + Semantic Similarity) and local BGE
-   inference (see [Remaining live backend work](#remaining-live-backend-work)).
+   `gemini-embedding-2` calls (Gen AI SDK) and local BGE inference (see
+   [Remaining live backend work](#remaining-live-backend-work)).
 6. **Docs** — in progress: align `ARCHITECTURE.md`, `README.md`, `TESTING.md`,
    `ROADMAP.md`, `.env.example`.
 
@@ -80,162 +80,83 @@ reports; use the **JSON key** column in `run.json` only.
 
 ---
 
-#### Slice A — Gemini Doc Retrieval & Gemini Semantic Similarity (Vertex AI)
+#### Slice A — Gemini embeddings (Gen AI SDK)
 
-**Goal:** On live runs, replace the two Gemini fixture paths with real Vertex AI
-Text Embeddings. Offline tests and `--dry-run` keep fixtures (`fixture_embedding`
-→ Gemini Doc Retrieval, `fixture_semantic_embedding` → Gemini Semantic Similarity).
+**Goal:** Live runs call **`gemini-embedding-2`** via the **`google-genai`** SDK.
+Offline tests and `--dry-run` keep fixtures.
 
-**1. Dependencies**
-
-Add a `similarity` optional extra in `pyproject.toml`:
+**1. Dependency**
 
 ```toml
-similarity = ["google-cloud-aiplatform>=1.60"]
+similarity = ["google-genai>=1.0"]
 ```
 
-Document install: `pip install -e ".[similarity,dev]"`.
+Install: `pip install -e ".[similarity,dev]"`.
 
-**2. Environment**
+**2. Environment** (`.env`; loaded by CLI — do not rely on shell exports)
 
-Copy `.env.example` to `.env` at the project root. The CLI loads it automatically
-via `seo_rank.env.load_project_env()`; **do not** rely on shell exports. Values
-in `.env` override conflicting shell variables.
+| Variable | Purpose |
+|----------|---------|
+| `GEMINI_API_KEY` | [Google AI Studio](https://aistudio.google.com/apikey) API key for local runs |
 
-Extend `.env.example` with placeholders (no secrets in git):
+**3. Model**
 
-- `GOOGLE_CLOUD_PROJECT` — GCP project ID with Vertex AI enabled
-- `GOOGLE_CLOUD_REGION` — e.g. `us-central1`
-- Credentials via Application Default Credentials (`gcloud auth application-default login`)
-  or `GOOGLE_APPLICATION_CREDENTIALS` pointing at a service-account JSON file
+Pin **`gemini-embedding-2`** (GA; 8192 input tokens; up to 3072 dims with MRL).
+Use `output_dimensionality` when you want fewer dims.
 
-Remove or replace stale `GOOGLE_API_KEY` / `GEMINI_API_KEY` placeholders if they
-imply AI Studio; this integration uses **Vertex**, not the consumer Gemini chat
-API.
-
-**3. Model constant**
-
-Pin one model ID in code (module-level constant or CLI default):
-
-- **Default:** `gemini-embedding-001` (best quality; up to 3072 dims; 2048-token
-  max sequence length)
-- Alternatives only if you change the constant and docs together:
-  `text-embedding-005` (English/code, up to 768 dims),
-  `text-multilingual-embedding-002` (multilingual, up to 768 dims)
-
-**4. Implement `src/seo_rank/gemini_embeddings.py` (new module)**
-
-Build a small client with an injectable backend so unit tests never hit the network:
+**4. Client** — add `src/seo_rank/gemini_embeddings.py` with injectable backend and
+prompt formatters. **`gemini-embedding-2` has no `task_type` param** — task goes
+in the input string:
 
 ```python
-def embed_texts(
-    *,
-    model_id: str,
-    instances: list[dict[str, object]],  # content, task_type, optional title
-    output_dimensionality: int | None = None,
-    auto_truncate: bool = True,
-    client: GeminiEmbeddingClient | None = None,
-) -> list[list[float]]: ...
+from google import genai
+from google.genai.types import EmbedContentConfig
+
+def prepare_query(query: str) -> str:
+    return f"task: search result | query: {query}"
+
+def prepare_document(content: str, title: str | None = None) -> str:
+    return f"title: {title or 'none'} | text: {content}"
+
+def prepare_semantic_input(text: str) -> str:
+    return f"task: sentence similarity | query: {text}"
+
+client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+
+vector = client.models.embed_content(
+    model="gemini-embedding-2",
+    contents=prepare_query(keyword),
+    config=EmbedContentConfig(output_dimensionality=3072),
+).embeddings[0].values
 ```
 
-Use the Vertex AI Python SDK pattern:
+**5. Task formatting** — two scores per page; separate embed calls. Do **not** mix
+asymmetric retrieval with symmetric similarity.
 
-```python
-import vertexai
-from vertexai.language_models import TextEmbeddingInput, TextEmbeddingModel
+| Score | Pattern | Keyword / query side | Page / document side |
+|-------|---------|----------------------|----------------------|
+| `gemini_doc_retrieval` | Asymmetric **search result** | `task: search result \| query: {keyword}` | `title: {serp_title or none} \| text: {page body}` |
+| `gemini_semantic_similarity` | Symmetric **sentence similarity** | `task: sentence similarity \| query: {keyword}` | `task: sentence similarity \| query: {page body}` |
 
-vertexai.init(project=..., location=...)
-model = TextEmbeddingModel.from_pretrained("gemini-embedding-001")
-text_input = TextEmbeddingInput(text, "RETRIEVAL_QUERY")
-embedding = model.get_embeddings([text_input], output_dimensionality=3072)
-vector = embedding[0].values
-```
+Use **search result** for retrieval only. **Sentence similarity** is for STS
+(recommendations, dedup) — not search retrieval. Keep each task consistent across
+all inputs for that score.
 
-**5. Task types — set explicitly for each Gemini measurement**
+Cosine similarity on API embeddings; round to 6 decimals. Budget **41 embed calls
+per keyword** at depth 20. Overlong inputs: Gemini truncates and normalizes
+automatically (8192-token cap). No client-side truncation or re-normalization.
 
-You emit **two** Gemini scores per page. Use separate embed calls; do not reuse
-vectors across task types.
+**6. Wire + test**
 
-**A. Gemini Doc Retrieval → `gemini_doc_retrieval`**
+- Live path only in `build_live_keyword_result()` when env validates.
+- Append `genai.embed_content` to `network_calls`.
+- Tests first: `test_gemini_embeddings.py` (mock formatted inputs: search-result
+  query + title|text doc; sentence-similarity on keyword and page), existing
+  fixture tests unchanged, `test_cli_run.py` live-path selection, opt-in
+  integration gate.
 
-| Input | `task_type` | `content` | Optional fields |
-|-------|-------------|-----------|-----------------|
-| Target keyword | `RETRIEVAL_QUERY` | keyword string | — |
-| Each parsed page | `RETRIEVAL_DOCUMENT` | page body text | `title` = SERP title when available |
-
-Cosine between the two retrieval vectors → `page_similarity.gemini_doc_retrieval`.
-
-**B. Gemini Semantic Similarity → `gemini_semantic_similarity`**
-
-Google documents `SEMANTIC_SIMILARITY` for semantic textual similarity (STS), not
-for search retrieval. Keep it as a **separate analysis signal** alongside Gemini
-Doc Retrieval.
-
-| Input | `task_type` | `content` |
-|-------|-------------|-----------|
-| Target keyword | `SEMANTIC_SIMILARITY` | keyword string |
-| Each parsed page | `SEMANTIC_SIMILARITY` | page body text |
-
-Do **not** pass `title` with `SEMANTIC_SIMILARITY` (title is only valid with
-`RETRIEVAL_DOCUMENT`). Cosine between the two STS vectors →
-`page_similarity.gemini_semantic_similarity`.
-
-**6. Scoring logic in `similarity.py`**
-
-Add a live code path (e.g. `compute_page_similarity_scores_live`):
-
-**Gemini Doc Retrieval (`gemini_doc_retrieval`):**
-
-1. Embed keyword once with `RETRIEVAL_QUERY`.
-2. For each page, embed body with `RETRIEVAL_DOCUMENT` (+ optional SERP `title`).
-3. L2-normalize, cosine, round to 6 decimals → `gemini_doc_retrieval`.
-
-**Gemini Semantic Similarity (`gemini_semantic_similarity`):**
-
-1. Embed keyword with `SEMANTIC_SIMILARITY`.
-2. For each page, embed body with `SEMANTIC_SIMILARITY`.
-3. L2-normalize, cosine, round to 6 decimals → `gemini_semantic_similarity`.
-
-**Shared:**
-
-- `gemini-embedding-001` takes **one input per `get_embeddings` call** in the
-  official Python example — budget **41 embed calls per keyword** at depth 20
-  (1 retrieval query + 20 retrieval docs + 1 STS keyword + 20 STS docs).
-- Write `raw_score` and `normalized_score` (same value unless you add a separate
-  normalization policy later).
-
-**7. Long pages**
-
-Models cap at **2048 tokens**. Default API behavior: `autoTruncate=true` truncates
-overlong input. Log or store `statistics.truncated` and `statistics.token_count`
-when the SDK exposes them. Do not silently change page-level scope to passage
-chunking in this slice.
-
-**8. Wire the live CLI path only**
-
-In `build_live_keyword_result()` (`cli.py`), when live providers are enabled and
-Vertex env validates, call the live Gemini path instead of fixture
-`compute_page_similarity_scores()`. Keep `build_offline_keyword_result()` on
-fixtures.
-
-Append `"vertexai.text_embeddings"` (or similar) to `network_calls` once per
-keyword batch or per request — pick one convention and document it.
-
-**9. Tests (write these before implementation)**
-
-| Test | File | Assert |
-|------|------|--------|
-| Task types and instance shape | `tests/unit/test_gemini_embeddings.py` | Mock receives `RETRIEVAL_QUERY` + `RETRIEVAL_DOCUMENT` for Gemini Doc Retrieval; `SEMANTIC_SIMILARITY` for keyword and each page for Gemini Semantic Similarity |
-| Fixture triple scores | `tests/unit/test_similarity_features.py` | `gemini_doc_retrieval` and `gemini_semantic_similarity` both present and can differ |
-| Live path selection | `tests/unit/test_cli_run.py` | Injected mock: live keyword result uses live Gemini scorer, offline still fixtures |
-| Integration (opt-in) | `tests/integration/` | Mark `@pytest.mark.integration`; gate on project/region/ADC like existing live smoke |
-
-**10. Done when**
-
-- Live `--live-providers` run produces non-fixture **Gemini Doc Retrieval** and
-  **Gemini Semantic Similarity** scores when Vertex credentials are present.
-- Offline `python -m pytest` stays green with zero network calls.
-- `.env.example` and `TESTING.md` describe Vertex gates, not AI Studio keys.
+**Done when:** live run returns real Gemini scores with `GEMINI_API_KEY` set;
+offline pytest stays network-free.
 
 ---
 
@@ -250,7 +171,7 @@ bi-encoder embed model like `bge-base-en-v1.5`.
 Add to the same `similarity` extra:
 
 ```toml
-similarity = ["google-cloud-aiplatform>=1.60", "FlagEmbedding>=1.2"]
+similarity = ["google-genai>=1.0", "FlagEmbedding>=1.2"]
 ```
 
 **2. Model pin**
@@ -298,11 +219,10 @@ Mock the reranker in unit tests; optional integration test with
 #### Slice C — Shared cleanup
 
 1. **`validate_live_provider_gate()`** — extend credential validation to require
-   Vertex project + region when Gemini live similarity is requested (mirror
+   `GEMINI_API_KEY` when Gemini live similarity is requested (mirror
    DataForSEO/TextRazor error style: no secret values in exceptions).
 2. **`pyproject.toml` / README / ARCHITECTURE / ROADMAP / TESTING`** — sync with
-   Vertex + FlagEmbedding instructions above; remove stale `google-genai` /
-   `gemini-embedding-2` / 8192-token references.
+   Gen AI SDK + `gemini-embedding-2` + FlagEmbedding instructions above.
 3. **Acceptance criteria below** — check off items as slices land.
 
 ## In Scope (current and near-term)
@@ -334,7 +254,7 @@ Mock the reranker in unit tests; optional integration test with
 - [x] Offline fixture tests cover `bge`, `gemini_doc_retrieval`, and
   `gemini_semantic_similarity` at page scope.
 - [ ] Live **Gemini Doc Retrieval** and **Gemini Semantic Similarity** via
-  Vertex AI (`gemini-embedding-001` default) with env-gated GCP credentials.
+  Gen AI SDK (`gemini-embedding-2`) with `GEMINI_API_KEY` in `.env`.
 - [ ] Live **BGE** cross-encoder via FlagEmbedding with documented model pin
   and score calibration notes.
 - [ ] All three live scorers run on every non-dry live similarity path (fixtures

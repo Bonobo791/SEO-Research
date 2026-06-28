@@ -13,13 +13,13 @@ Fixture page-level wiring and artifacts shipped for **BGE**, **Gemini Doc
 Retrieval**, and **Gemini Semantic Similarity**. Still required to **finish**
 Phase 4:
 
-- **Gemini Doc Retrieval:** Vertex AI Text Embeddings; `RETRIEVAL_QUERY` +
-  `RETRIEVAL_DOCUMENT`; JSON key `gemini_doc_retrieval`
-- **Gemini Semantic Similarity:** Vertex AI Text Embeddings; `SEMANTIC_SIMILARITY`
-  on keyword and page; JSON key `gemini_semantic_similarity`
+- **Gemini Doc Retrieval:** asymmetric **search result** prompts; JSON key
+  `gemini_doc_retrieval`
+- **Gemini Semantic Similarity:** symmetric **sentence similarity** prompts; JSON key
+  `gemini_semantic_similarity`
 - **BGE:** local `FlagEmbedding` cross-encoder reranker; JSON key `bge`
 - **Repo integration:** optional `pyproject.toml` extras, live-path swap in
-  `similarity.py`, credential/env gates, `network_calls` for Vertex, env-gated
+  `similarity.py`, credential/env gates, `network_calls` for Gen AI embeds, env-gated
   integration tests, `.env.example` updates
 
 See `GOALS.md` § Remaining live backend work for full checklist.
@@ -85,7 +85,7 @@ See `GOALS.md` § Remaining live backend work for full checklist.
 - **Phase 4 started:** fixture page-level scoring for **BGE**, **Gemini Doc
   Retrieval**, and **Gemini Semantic Similarity** is wired through offline and
   gated live artifact generation, including JSON/Markdown exposure and unit
-  coverage. Live Vertex embeddings and local BGE integration remain pending; see
+  coverage. Live Gen AI SDK embeddings and local BGE integration remain pending; see
   Current Backlog § Phase 4.
 - **Env loading:** CLI and pytest auto-load project-root `.env` via
   `seo_rank.env` (`.env` overrides shell exports; no `source` required). Integration

@@ -30,6 +30,7 @@ sets the gates explicitly:
 # DATAFORSEO_LOGIN=...
 # DATAFORSEO_PASSWORD=...
 # TEXTRAZOR_API_KEY=...
+# GEMINI_API_KEY=...
 
 python -m pytest -m integration
 ```
@@ -76,14 +77,14 @@ exist.
 ## Planned tests (not yet in suite)
 
 - Broader live DataForSEO / TextRazor integration coverage beyond smoke checks
-- **Phase 4 live similarity:** env-gated Vertex AI for **Gemini Doc Retrieval**
-  and **Gemini Semantic Similarity**, plus local **BGE** (FlagEmbedding
-  cross-encoder) beyond fixture page scoring
+- **Phase 4 live similarity:** env-gated Gen AI SDK (`gemini-embedding-2`) for
+  **Gemini Doc Retrieval** and **Gemini Semantic Similarity**, plus local **BGE**
+  (FlagEmbedding cross-encoder) beyond fixture page scoring
 - Passage / domain similarity scopes
 - `statsmodels` OLS and Benjamini-Hochberg on synthetic ranking panels
 - OLS pre-analysis diagnostic loop
 
-When live similarity integration tests ship, document Vertex GCP gates alongside
+When live similarity integration tests ship, document `GEMINI_API_KEY` alongside
 existing provider env vars (see `.env.example`).
 
 See phased backlog in `ROADMAP.md` and planned pipeline in `ARCHITECTURE.md`.
