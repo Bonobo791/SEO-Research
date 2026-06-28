@@ -11,7 +11,7 @@ Pytest configuration and verification contract for SEO-Research.
 - Single-test-file command: `python -m pytest tests/unit/test_cli_run.py`
 - Lint / type-check / build / coverage: not configured
 - Expected test duration: fast (< 1s)
-- **Current verification status:** 23 tests collected; 22 passing, 1 live
+- **Current verification status:** 24 tests collected; 23 passing, 1 live
   integration smoke skipped by default
 
 ## Active Verification Command
@@ -32,11 +32,15 @@ TEXTRAZOR_API_KEY=... \
 python -m pytest -m integration
 ```
 
+Use `.env.example` as the local template for these values. Copy it to `.env`,
+fill in real credentials, then source `.env` in the shell before running live
+tests. `.env` is ignored by git; `.env.example` must contain placeholders only.
+
 ## Suite coverage (shipped)
 
 | Test file | What it verifies |
 |-----------|------------------|
-| `test_cli_run.py` | CLI writes artifacts; TextRazor skip vs include; live-provider gate |
+| `test_cli_run.py` | CLI writes grouped per-keyword artifacts; TextRazor skip vs include; live-provider gate; injected live cluster orchestration |
 | `test_keyword_expansion.py` | 25-keyword cap, deduplication, raw provider payload |
 | `test_serp_normalization.py` | Organic-only SERP rows, depth cap |
 | `test_dataforseo_requests.py` | DataForSEO request construction, credential validation, HTTP execution |
@@ -68,7 +72,6 @@ exist.
 ## Planned tests (not yet in suite)
 
 - Broader live DataForSEO / TextRazor integration coverage beyond smoke checks
-- Full cluster keyword orchestration (not first keyword only)
 - Live similarity backends (`BGE-reranker-v2`, Gemini cosine)
 - Passage / page / domain similarity scopes
 - `statsmodels` OLS and Benjamini-Hochberg on synthetic ranking panels

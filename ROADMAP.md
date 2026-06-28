@@ -7,14 +7,6 @@ scope contract; keep deferred and historical items here.
 
 Active scope contract: `GOALS.md` (Phase 3).
 
-### Phase 3 — Full cluster orchestration
-
-- Per-keyword offline orchestration for the full capped cluster (not first keyword
-  only)
-- Per-keyword live orchestration behind existing provider gates
-- Run artifacts grouped by target keyword with raw provider payloads preserved
-- Cluster orchestration tests (offline fixtures + injected live transports)
-
 ### Phase 4 — Live similarity
 
 - Cross-encoder `BGE-reranker-v2` and bi-encoder Gemini cosine — **both every run**
@@ -57,3 +49,6 @@ Active scope contract: `GOALS.md` (Phase 3).
   the minimal smoke path.
 - **GOALS retargeted to Phase 3:** full cluster orchestration for every capped
   keyword in offline and live paths.
+- **Phase 3 shipped:** offline and env-gated live provider orchestration now run
+  every capped cluster keyword, preserve per-keyword raw provider payloads in
+  `keyword_results`, and keep aggregate artifact fields for reporting.

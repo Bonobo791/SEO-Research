@@ -63,9 +63,19 @@ def test_run_writes_offline_json_and_markdown_artifacts(
         "technical seo checklist",
     ]
     assert payload["raw_provider_data"]["dataforseo"]["keyword_expansion"]["provider"] == "dataforseo"
-    assert len(payload["raw_provider_data"]["dataforseo"]["page_text"]) == 3
-    assert [result["rank"] for result in payload["serp_results"]] == [1, 2, 3]
-    assert [passage["url"] for passage in payload["passages"]] == [
+    assert len(payload["keyword_results"]) == 25
+    assert payload["keyword_results"][0]["target_keyword"] == "technical seo"
+    assert payload["keyword_results"][1]["target_keyword"] == "technical seo audit"
+    assert all(
+        len(keyword_result["raw_provider_data"]["dataforseo"]["page_text"]) == 3
+        for keyword_result in payload["keyword_results"]
+    )
+    assert [result["rank"] for result in payload["keyword_results"][0]["serp_results"]] == [
+        1,
+        2,
+        3,
+    ]
+    assert [passage["url"] for passage in payload["keyword_results"][0]["passages"]] == [
         "https://example.com/technical-seo/1",
         "https://example.com/technical-seo/1",
         "https://example.com/technical-seo/2",
@@ -73,12 +83,38 @@ def test_run_writes_offline_json_and_markdown_artifacts(
         "https://example.com/technical-seo/3",
         "https://example.com/technical-seo/3",
     ]
-    assert [feature["url"] for feature in payload["similarity_features"]] == [
+    assert {
+        passage["target_keyword"]
+        for passage in payload["keyword_results"][0]["passages"]
+    } == {"technical seo"}
+    assert [
+        feature["url"]
+        for feature in payload["keyword_results"][0]["similarity_features"]
+    ] == [
         "https://example.com/technical-seo/1",
         "https://example.com/technical-seo/2",
         "https://example.com/technical-seo/3",
     ]
-    assert payload["similarity_features"][0]["passage_count"] == 2
+    assert {
+        feature["target_keyword"]
+        for feature in payload["keyword_results"][0]["similarity_features"]
+    } == {"technical seo"}
+    assert (
+        payload["keyword_results"][0]["similarity_features"][0]["passage_count"]
+        == 2
+    )
+    assert len(payload["serp_results"]) == 75
+    assert len(payload["passages"]) == sum(
+        len(keyword_result["passages"])
+        for keyword_result in payload["keyword_results"]
+    )
+    assert len(payload["similarity_features"]) == 75
+    assert {passage["target_keyword"] for passage in payload["passages"]} == set(
+        payload["keywords"]
+    )
+    assert {
+        feature["target_keyword"] for feature in payload["similarity_features"]
+    } == set(payload["keywords"])
     assert payload["textrazor_entities"] == []
     assert "textrazor" not in payload["raw_provider_data"]
     assert payload["network_calls"] == []
@@ -87,6 +123,8 @@ def test_run_writes_offline_json_and_markdown_artifacts(
     assert "# SEO Rank Offline Run" in report
     assert "- Seed: technical seo" in report
     assert "- Network calls: 0" in report
+    assert "## Target Keyword: technical seo" in report
+    assert "## Target Keyword: technical seo audit" in report
 
 
 def test_run_includes_offline_textrazor_entities_when_not_skipped(tmp_path: Path) -> None:
@@ -108,11 +146,22 @@ def test_run_includes_offline_textrazor_entities_when_not_skipped(tmp_path: Path
     assert exit_code == 0
 
     payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
-    assert len(payload["raw_provider_data"]["textrazor"]["entities"]) == 1
-    assert [entity["entity_id"] for entity in payload["textrazor_entities"]] == [
+    assert len(payload["keyword_results"]) == 25
+    assert all(
+        len(keyword_result["raw_provider_data"]["textrazor"]["entities"]) == 1
+        for keyword_result in payload["keyword_results"]
+    )
+    assert [entity["entity_id"] for entity in payload["keyword_results"][0]["textrazor_entities"]] == [
         "technical-seo",
         "crawler",
     ]
+    assert {
+        entity["target_keyword"]
+        for entity in payload["keyword_results"][0]["textrazor_entities"]
+    } == {"technical seo"}
+    assert {
+        entity["target_keyword"] for entity in payload["textrazor_entities"]
+    } == set(payload["keywords"])
 
 
 def test_run_rejects_live_providers_without_explicit_env_gate(
@@ -198,6 +247,7 @@ def test_run_live_providers_writes_artifacts_with_injected_transports(
                     {
                         "result": [
                             {"keyword": "technical seo", "search_volume": 1000},
+                            {"keyword": "technical seo audit", "search_volume": 720},
                         ],
                     }
                 ],
@@ -278,15 +328,28 @@ def test_run_live_providers_writes_artifacts_with_injected_transports(
     )
 
     assert exit_code == 0
-    assert len(dataforseo_calls) == 3
-    assert len(textrazor_calls) == 1
+    assert len(dataforseo_calls) == 5
+    assert len(textrazor_calls) == 2
 
     payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
     assert payload["config"]["live_providers"] is True
-    assert payload["keywords"] == ["technical seo"]
-    assert payload["serp_results"] == [
+    assert payload["keywords"] == ["technical seo", "technical seo audit"]
+    assert [result["target_keyword"] for result in payload["keyword_results"]] == [
+        "technical seo",
+        "technical seo audit",
+    ]
+    assert payload["keyword_results"][0]["serp_results"] == [
         {
             "keyword": "technical seo",
+            "rank": 1,
+            "url": "https://example.com/live",
+            "title": "Live Result",
+            "description": "Live provider result.",
+        }
+    ]
+    assert payload["keyword_results"][1]["serp_results"] == [
+        {
+            "keyword": "technical seo audit",
             "rank": 1,
             "url": "https://example.com/live",
             "title": "Live Result",
@@ -298,10 +361,34 @@ def test_run_live_providers_writes_artifacts_with_injected_transports(
         "dataforseo.serp",
         "dataforseo.page_text",
         "textrazor.entities",
+        "dataforseo.serp",
+        "dataforseo.page_text",
+        "textrazor.entities",
     ]
     assert payload["raw_provider_data"]["dataforseo"]["keyword_expansion"]["tasks"]
-    assert payload["raw_provider_data"]["textrazor"]["entities"][0]["response"]
-    assert payload["textrazor_entities"][0]["entity_id"] == "technical-seo"
+    assert payload["keyword_results"][0]["raw_provider_data"]["textrazor"]["entities"][0]["response"]
+    assert payload["keyword_results"][0]["textrazor_entities"][0]["entity_id"] == "technical-seo"
+    assert payload["keyword_results"][0]["passages"][0]["target_keyword"] == "technical seo"
+    assert (
+        payload["keyword_results"][0]["similarity_features"][0]["target_keyword"]
+        == "technical seo"
+    )
+    assert (
+        payload["keyword_results"][0]["textrazor_entities"][0]["target_keyword"]
+        == "technical seo"
+    )
+    assert (
+        payload["keyword_results"][1]["passages"][0]["target_keyword"]
+        == "technical seo audit"
+    )
+    assert (
+        payload["keyword_results"][1]["similarity_features"][0]["target_keyword"]
+        == "technical seo audit"
+    )
+    assert (
+        payload["keyword_results"][1]["textrazor_entities"][0]["target_keyword"]
+        == "technical seo audit"
+    )
 
 
 def test_run_rejects_live_provider_client_failure_without_secret_leaks(

@@ -187,22 +187,69 @@ def write_artifacts(output_dir: Path, payload: dict[str, object]) -> None:
 def build_offline_payload(config: RunConfig) -> dict[str, object]:
     keyword_expansion = fixture_keyword_expansion_response(config.seed)
     keywords = normalize_keyword_expansion(keyword_expansion, seed=config.seed)
-    serp_response = fixture_serp_response(keywords[0])
+    keyword_results = [
+        build_offline_keyword_result(config, target_keyword=keyword)
+        for keyword in keywords
+    ]
+    raw_provider_data: dict[str, object] = {
+        "dataforseo": {
+            "keyword_expansion": keyword_expansion,
+            "page_text": [
+                response
+                for keyword_result in keyword_results
+                for response in keyword_result["raw_provider_data"]["dataforseo"][
+                    "page_text"
+                ]
+            ],
+            "serp": [
+                keyword_result["raw_provider_data"]["dataforseo"]["serp"]
+                for keyword_result in keyword_results
+            ],
+        },
+    }
+    textrazor_responses = [
+        response
+        for keyword_result in keyword_results
+        if "textrazor" in keyword_result["raw_provider_data"]
+        for response in keyword_result["raw_provider_data"]["textrazor"]["entities"]
+    ]
+    if textrazor_responses:
+        raw_provider_data["textrazor"] = {
+            "entities": textrazor_responses,
+        }
+    return build_payload_from_keyword_results(
+        config,
+        keywords=keywords,
+        keyword_results=keyword_results,
+        raw_provider_data=raw_provider_data,
+        network_calls=[],
+    )
+
+
+def build_offline_keyword_result(
+    config: RunConfig,
+    *,
+    target_keyword: str,
+) -> dict[str, object]:
+    serp_response = fixture_serp_response(target_keyword)
     serp_results = normalize_serp_results(
         serp_response,
-        keyword=keywords[0],
+        keyword=target_keyword,
         depth=config.depth,
     )
     page_text_responses = [
-        fixture_page_text_response(str(result["url"]), keywords[0])
+        fixture_page_text_response(str(result["url"]), target_keyword)
         for result in serp_results
     ]
     passages = [
-        passage
+        annotate_target_keyword(passage, target_keyword)
         for response in page_text_responses
         for passage in normalize_page_text(parsed_page_text(response))
     ]
-    similarity_features = compute_page_similarity_features(keywords[0], passages)
+    similarity_features = [
+        annotate_target_keyword(feature, target_keyword)
+        for feature in compute_page_similarity_features(target_keyword, passages)
+    ]
     textrazor_responses: list[dict[str, object]] = []
     textrazor_entities: list[dict[str, object]] = []
     if not config.skip_textrazor:
@@ -216,13 +263,12 @@ def build_offline_payload(config: RunConfig) -> dict[str, object]:
             if page_text
         ]
         textrazor_entities = [
-            entity
+            annotate_target_keyword(entity, target_keyword)
             for response in textrazor_responses
             for entity in normalize_entities(response, url=str(response["url"]))
         ]
-    raw_provider_data: dict[str, object] = {
+    raw_provider_data = {
         "dataforseo": {
-            "keyword_expansion": keyword_expansion,
             "page_text": page_text_responses,
             "serp": serp_response,
         },
@@ -232,14 +278,12 @@ def build_offline_payload(config: RunConfig) -> dict[str, object]:
             "entities": textrazor_responses,
         }
     return {
-        "config": serialized_config(config),
-        "keywords": keywords,
+        "target_keyword": target_keyword,
         "raw_provider_data": raw_provider_data,
         "passages": passages,
         "serp_results": serp_results,
         "similarity_features": similarity_features,
         "textrazor_entities": textrazor_entities,
-        "network_calls": [],
     }
 
 
@@ -266,8 +310,64 @@ def build_live_payload(
     )
     network_calls.append("dataforseo.keyword_expansion")
     keywords = normalize_keyword_expansion(keyword_expansion, seed=config.seed)
-    target_keyword = keywords[0]
+    keyword_results = [
+        build_live_keyword_result(
+            config,
+            target_keyword=keyword,
+            credentials=credentials,
+            location_code=location_code,
+            dataforseo_transport=dataforseo_transport,
+            textrazor_transport=textrazor_transport,
+            network_calls=network_calls,
+        )
+        for keyword in keywords
+    ]
 
+    raw_provider_data: dict[str, object] = {
+        "dataforseo": {
+            "keyword_expansion": keyword_expansion,
+            "page_text": [
+                response
+                for keyword_result in keyword_results
+                for response in keyword_result["raw_provider_data"]["dataforseo"][
+                    "page_text"
+                ]
+            ],
+            "serp": [
+                keyword_result["raw_provider_data"]["dataforseo"]["serp"]
+                for keyword_result in keyword_results
+            ],
+        },
+    }
+    textrazor_responses = [
+        response
+        for keyword_result in keyword_results
+        if "textrazor" in keyword_result["raw_provider_data"]
+        for response in keyword_result["raw_provider_data"]["textrazor"]["entities"]
+    ]
+    if textrazor_responses:
+        raw_provider_data["textrazor"] = {
+            "entities": textrazor_responses,
+        }
+    return build_payload_from_keyword_results(
+        config,
+        keywords=keywords,
+        keyword_results=keyword_results,
+        raw_provider_data=raw_provider_data,
+        network_calls=network_calls,
+    )
+
+
+def build_live_keyword_result(
+    config: RunConfig,
+    *,
+    target_keyword: str,
+    credentials: LiveProviderCredentials,
+    location_code: int,
+    dataforseo_transport,
+    textrazor_transport,
+    network_calls: list[str],
+) -> dict[str, object]:
     serp_response = execute_dataforseo_request(
         build_serp_request(
             target_keyword,
@@ -300,7 +400,7 @@ def build_live_payload(
     if page_text_responses:
         network_calls.append("dataforseo.page_text")
     passages = [
-        passage
+        annotate_target_keyword(passage, target_keyword)
         for response in page_text_responses
         for passage in normalize_page_text(parsed_page_text(response))
     ]
@@ -322,14 +422,13 @@ def build_live_payload(
         if textrazor_responses:
             network_calls.append("textrazor.entities")
         textrazor_entities = [
-            entity
+            annotate_target_keyword(entity, target_keyword)
             for response in textrazor_responses
             for entity in normalize_entities(response, url=str(response["url"]))
         ]
 
-    raw_provider_data: dict[str, object] = {
+    raw_provider_data = {
         "dataforseo": {
-            "keyword_expansion": keyword_expansion,
             "page_text": page_text_responses,
             "serp": serp_response,
         },
@@ -339,13 +438,61 @@ def build_live_payload(
             "entities": textrazor_responses,
         }
     return {
-        "config": serialized_config(config),
-        "keywords": keywords,
+        "target_keyword": target_keyword,
         "raw_provider_data": raw_provider_data,
         "passages": passages,
         "serp_results": serp_results,
-        "similarity_features": [],
+        "similarity_features": [
+            annotate_target_keyword(feature, target_keyword)
+            for feature in compute_page_similarity_features(
+                target_keyword,
+                passages,
+            )
+        ],
         "textrazor_entities": textrazor_entities,
+    }
+
+
+def annotate_target_keyword(
+    row: dict[str, object],
+    target_keyword: str,
+) -> dict[str, object]:
+    return {**row, "target_keyword": target_keyword}
+
+
+def build_payload_from_keyword_results(
+    config: RunConfig,
+    *,
+    keywords: list[str],
+    keyword_results: list[dict[str, object]],
+    raw_provider_data: dict[str, object],
+    network_calls: list[str],
+) -> dict[str, object]:
+    return {
+        "config": serialized_config(config),
+        "keywords": keywords,
+        "keyword_results": keyword_results,
+        "raw_provider_data": raw_provider_data,
+        "passages": [
+            passage
+            for keyword_result in keyword_results
+            for passage in keyword_result["passages"]
+        ],
+        "serp_results": [
+            result
+            for keyword_result in keyword_results
+            for result in keyword_result["serp_results"]
+        ],
+        "similarity_features": [
+            feature
+            for keyword_result in keyword_results
+            for feature in keyword_result["similarity_features"]
+        ],
+        "textrazor_entities": [
+            entity
+            for keyword_result in keyword_results
+            for entity in keyword_result["textrazor_entities"]
+        ],
         "network_calls": network_calls,
     }
 
@@ -367,8 +514,8 @@ def serialized_config(config: RunConfig) -> dict[str, object]:
 def render_markdown_report(payload: dict[str, object]) -> str:
     config = payload["config"]
     assert isinstance(config, dict)
-    serp_results = payload["serp_results"]
-    assert isinstance(serp_results, list)
+    keyword_results = payload["keyword_results"]
+    assert isinstance(keyword_results, list)
     network_calls = payload["network_calls"]
     assert isinstance(network_calls, list)
 
@@ -383,12 +530,22 @@ def render_markdown_report(payload: dict[str, object]) -> str:
         f"- Model: {config['model_name']}",
         f"- Network calls: {len(network_calls)}",
         "",
-        "## SERP Results",
-        "",
     ]
-    for result in serp_results:
-        lines.append(f"{result['rank']}. [{result['title']}]({result['url']})")
-    lines.append("")
+    for keyword_result in keyword_results:
+        assert isinstance(keyword_result, dict)
+        lines.extend(
+            [
+                f"## Target Keyword: {keyword_result['target_keyword']}",
+                "",
+                "### SERP Results",
+                "",
+            ]
+        )
+        serp_results = keyword_result["serp_results"]
+        assert isinstance(serp_results, list)
+        for result in serp_results:
+            lines.append(f"{result['rank']}. [{result['title']}]({result['url']})")
+        lines.append("")
     return "\n".join(lines)
 
 

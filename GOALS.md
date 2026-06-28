@@ -7,11 +7,11 @@
 
 Build Phase 3 full cluster orchestration for SEO ranking similarity research.
 
-### Current limitation
+### Current capability
 
 SERP, page text, passages, offline similarity features, and TextRazor entities
-run against the **first expanded keyword only**, not every keyword in the capped
-cluster (up to 25 keywords after seed expansion).
+run against **every keyword** in the capped cluster (up to 25 keywords after seed
+expansion).
 
 ### Phase 3 objective
 
@@ -29,10 +29,10 @@ Apply the same per-keyword loop in **offline** (`seo-rank run`) and **live**
 
 Phase 3 status:
 
-- Per-keyword offline orchestration: **Next**
-- Per-keyword live orchestration: **Next**
-- Run artifacts grouped by target keyword: **Next**
-- Cluster orchestration tests (offline + injected live transports): **Next**
+- Per-keyword offline orchestration: **Shipped**
+- Per-keyword live orchestration: **Shipped**
+- Run artifacts grouped by target keyword: **Shipped**
+- Cluster orchestration tests (offline + injected live transports): **Shipped**
 
 ## In Scope (current and near-term)
 
@@ -57,16 +57,16 @@ Phase 3 status:
 
 ## Acceptance Criteria (Phase 3)
 
-- [ ] Offline `seo-rank run` processes **every** keyword in the capped cluster,
+- [x] Offline `seo-rank run` processes **every** keyword in the capped cluster,
   not only the first.
-- [ ] Live `--live-providers` smoke orchestration processes **every** keyword in
+- [x] Live `--live-providers` smoke orchestration processes **every** keyword in
   the capped cluster when explicitly enabled.
-- [ ] Each keyword's SERP, page text, passages, similarity features, and
+- [x] Each keyword's SERP, page text, passages, similarity features, and
   TextRazor entities use that keyword as the target keyword.
-- [ ] `run.json` and `report.md` expose per-keyword results without losing raw
+- [x] `run.json` and `report.md` expose per-keyword results without losing raw
   provider payloads.
-- [ ] `python -m pytest` includes meaningful cluster-orchestration coverage.
-- [ ] Documentation aligned with `ARCHITECTURE.md`, `TESTING.md`, and
+- [x] `python -m pytest` includes meaningful cluster-orchestration coverage.
+- [x] Documentation aligned with `ARCHITECTURE.md`, `TESTING.md`, and
   `ROADMAP.md`.
 
 ## Operating Rules

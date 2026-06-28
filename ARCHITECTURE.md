@@ -28,13 +28,15 @@ fixtures, normalizes SERP rows, passages, page-level similarity features, and
 optional TextRazor entities, then writes `run.json` and `report.md` with no
 network calls.
 
-**Phase 2 in progress:** DataForSEO and TextRazor provider boundaries now
-include offline-verifiable request construction, credential validation, and a
+**Phase 3 shipped:** DataForSEO and TextRazor provider boundaries include
+offline-verifiable request construction, credential validation, and a
 non-default CLI live-provider gate. Standard-library HTTP clients and an
-env-gated live smoke test are available for the minimal provider path. Later
-phases keep the full cluster keyword loop, dual-backend live similarity
-(BGE-reranker-v2 + Gemini cosine), and `statsmodels` OLS with Benjamini-
-Hochberg after OLS pre-analysis diagnostics.
+env-gated live smoke test are available. Offline and explicitly gated live runs
+now loop over every capped cluster keyword, group provider outputs under
+`keyword_results`, and annotate flattened normalized rows with
+`target_keyword`. Later phases add dual-backend live similarity
+(BGE-reranker-v2 + Gemini cosine), and `statsmodels` OLS with
+Benjamini-Hochberg after OLS pre-analysis diagnostics.
 
 TextRazor entities are captured in offline runs for schema validation; entity-derived
 model features remain out of scope.
@@ -68,12 +70,11 @@ The repository contains an **offline-verifiable CLI scaffold** (Phase 1 shipped)
   `similarity.py`, `textrazor.py`
 - **CLI:** `seo-rank run` writes `run.json` and `report.md` from fixtures (no
   network calls)
-- **Tests:** 22 tests under `tests/`; gate: `python -m pytest`
+- **Tests:** 23 tests under `tests/`; gate: `python -m pytest`
 - **Product docs:** `ARCHITECTURE.md`, `GOALS.md`, `ROADMAP.md`, `README.md`,
   `TESTING.md`
-- **Not yet:** full cluster keyword loop, live similarity backends, `statsmodels`
-  analysis, `runs/RUN_ID/` layout; broader live provider integration beyond the
-  smoke path
+- **Not yet:** live similarity backends, `statsmodels` analysis,
+  `runs/RUN_ID/` layout; broader live provider integration beyond the smoke path
 
 Module and artifact details are in [Application Surface](#application-surface)
 and [Key Product Components](#key-product-components) below. Planned live
@@ -108,9 +109,11 @@ in code yet.
 
 ## Data Flow
 
-**Offline run today:** seed keyword → fixture keyword expansion → SERP fixture
-(first keyword) → page-text fixtures → passage normalize → fixture similarity →
-optional TextRazor entities → `run.json` + `report.md`.
+**Offline run today:** seed keyword → fixture keyword expansion → capped keyword
+cluster → per-keyword SERP fixtures → page-text fixtures → passage normalize →
+fixture similarity against the target keyword → optional TextRazor entities →
+grouped `keyword_results` plus `target_keyword`-annotated aggregate fields in
+`run.json` + `report.md`.
 
 **Planned live run:** seed keyword → keyword expansion → per-keyword top-20 SERP
 → page text → TextRazor entities → dual-backend similarity (passage / page /

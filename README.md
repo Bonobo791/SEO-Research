@@ -5,32 +5,37 @@ analysis.
 
 ## What works today
 
-Offline `seo-rank run` expands a seed keyword from fixtures, normalizes SERP
-rows, passages, page-level similarity features, and optional TextRazor
-entities, then writes JSON and Markdown artifacts with **no network calls**.
-Phase 2 provider request builders and credential validators are available for
-offline verification. The CLI also has a non-default `--live-providers` gate,
-standard-library HTTP clients, and an env-gated live smoke test.
+Offline `seo-rank run` expands a seed keyword from fixtures, loops over every
+capped cluster keyword, normalizes SERP rows, passages, page-level similarity
+features, and optional TextRazor entities, then writes JSON and Markdown
+artifacts with **no network calls**. Provider request builders and credential
+validators are available for offline verification. The CLI also has a
+non-default `--live-providers` gate, standard-library HTTP clients, and an
+env-gated live smoke test.
 
 ```bash
 python -m pytest
 seo-rank run --seed "technical seo" --dry-run --output-dir artifacts
 ```
 
-## Product direction (Phase 2)
+For live provider smoke tests, copy `.env.example` to `.env`, replace the
+placeholder values, and source it in your shell before running the integration
+test. The CLI reads environment variables from the process environment; it does
+not auto-load `.env`.
 
-Live provider boundaries are in progress: DataForSEO request construction,
-parsed-page TextRazor request construction, and credential validation are
-implemented. `--live-providers` now requires
+## Product direction (Phase 3)
+
+Full cluster orchestration is in place for offline and explicitly gated live
+provider runs. Each target keyword gets its own SERP, page text, passages,
+fixture similarity features, TextRazor entities, and raw provider payloads under
+`keyword_results`; flattened normalized rows also carry `target_keyword` for
+downstream consumers. `--live-providers` requires
 `SEO_RANK_ENABLE_LIVE_PROVIDERS=1` and valid provider credentials before
-executing the minimal live provider smoke path. Broader live integration
-coverage is next. The offline scaffold stays in place while those boundaries are
-added.
+executing live provider calls.
 
-Later phases remain planned after that: per-cluster keyword execution, top-20
-organic SERPs at passage / page / domain scope, dual similarity backends every
-run, and `statsmodels` OLS with Benjamini-Hochberg after OLS pre-analysis
-diagnostics.
+Later phases remain planned after that: top-20 organic SERPs at passage / page /
+domain scope, dual live similarity backends every run, and `statsmodels` OLS
+with Benjamini-Hochberg after OLS pre-analysis diagnostics.
 
 ## Repository layout
 
