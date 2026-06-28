@@ -14,6 +14,7 @@ from seo_rank.dataforseo import (
     normalize_serp_results,
     parsed_page_text,
 )
+from seo_rank.similarity import compute_page_similarity_features
 from seo_rank.text import normalize_page_text
 
 
@@ -119,6 +120,7 @@ def build_offline_payload(config: RunConfig) -> dict[str, object]:
         for response in page_text_responses
         for passage in normalize_page_text(parsed_page_text(response))
     ]
+    similarity_features = compute_page_similarity_features(keywords[0], passages)
     return {
         "config": serialized_config(config),
         "keywords": keywords,
@@ -131,6 +133,7 @@ def build_offline_payload(config: RunConfig) -> dict[str, object]:
         },
         "passages": passages,
         "serp_results": serp_results,
+        "similarity_features": similarity_features,
         "network_calls": [],
     }
 

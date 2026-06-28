@@ -67,6 +67,12 @@ def test_run_writes_offline_json_and_markdown_artifacts(tmp_path: Path) -> None:
         "https://example.com/technical-seo/3",
         "https://example.com/technical-seo/3",
     ]
+    assert [feature["url"] for feature in payload["similarity_features"]] == [
+        "https://example.com/technical-seo/1",
+        "https://example.com/technical-seo/2",
+        "https://example.com/technical-seo/3",
+    ]
+    assert payload["similarity_features"][0]["passage_count"] == 2
     assert payload["network_calls"] == []
 
     report = report_md.read_text(encoding="utf-8")
