@@ -11,12 +11,8 @@ Before editing:
 1. Restate the task in one sentence.
 2. Set a scope guard.
 3. State confidence as HIGH, MEDIUM, or LOW.
-4. Use task-based model selection: documentation `gpt-5.4-mini medium`,
-   planning `gpt-5.4 high`, coding `gpt-5.5 medium`, review/QA
-   `gpt-5.4 high`, security `gpt-5.5 high`, installs/configuration
-   `gpt-5.5 xhigh`.
-5. Define the red check first.
-6. Define the prove-it gate before coding.
+4. Define the red check first.
+5. Define the prove-it gate before coding.
 
 During implementation:
 - Make the smallest useful change.

@@ -6,23 +6,18 @@ Codex does not have a native `/sdlc` command. This file is the honest replacemen
 
 1. Frame the slice
    Restate the task, set a scope guard, state confidence (`HIGH` / `MEDIUM` / `LOW`), and say what will prove the work is done.
-2. Pick the reasoning level
-   Use `gpt-5.4-mini` with `medium` for documentation, `gpt-5.4` with `high`
-   for planning and review/QA, `gpt-5.5` with `medium` for coding,
-   `gpt-5.5` with `high` for security, and `gpt-5.5` with `xhigh` only for
-   installs and configuration.
-3. Red first
+2. Red first
    Write the failing test first when the task is code-shaped.
    If the task is setup, auth, or environment repair, define the failing observable first instead of pretending it is unit-testable.
-4. Green with the smallest change
+3. Green with the smallest change
    Make the narrowest change that can satisfy the red check.
-5. Prove it
+4. Prove it
    Run the targeted checks, capture the evidence, and make sure the result matches the original success condition.
-6. Review the diff
+5. Review the diff
    Read the diff back, note risks, and remove junk before thinking about a commit.
-7. Commit only after proof
+6. Commit only after proof
    Commits happen after tests and proof, not before.
-8. Escalate honestly
+7. Escalate honestly
    If blocked, name the blocker, show the evidence, and propose the next move.
 
 ## Task routing gate

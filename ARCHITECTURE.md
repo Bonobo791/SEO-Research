@@ -29,9 +29,8 @@ The detailed product architecture lives in
 
 ## Current Components
 
-- `AGENTS.md`: repo process contract. It requires task-based model selection,
-  strict TDD for code-shaped changes, and all configured tests passing before
-  commit.
+- `AGENTS.md`: repo process contract. It requires strict TDD for code-shaped
+  changes and all configured tests passing before commit.
 - `SDLC-LOOP.md`: operating loop for planning, red/green proof, review, and
   escalation.
 - `START-SDLC.md`: session-start prompt for working in SDLC mode.
@@ -42,7 +41,6 @@ The detailed product architecture lives in
 - `.codex/hooks.json`: portable hook wiring using Node entrypoints.
 - `.codex/hooks/*.cjs`: active hook implementations for session, git, and
   compaction guards.
-- `.codex-sdlc/model-profile.json`: selected task-based model profile.
 - `.codex-sdlc/manifest.json`: setup scan results and confirmed preferences.
 - `docs/architecture/`: product architecture and ADRs.
 - `docs/implementation/`: first implementation plan.

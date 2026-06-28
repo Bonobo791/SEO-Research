@@ -19,26 +19,17 @@ Do not treat `/sdlc` as a real Codex command for this repo.
 2. Restate the task in one sentence.
 3. Set a scope guard.
 4. State confidence as HIGH, MEDIUM, or LOW.
-5. Use task-based model selection and reasoning effort:
-   documentation uses `gpt-5.4-mini` with `medium`, planning uses
-   `gpt-5.4` with `high`, coding uses `gpt-5.5` with `medium`, review/QA uses
-   `gpt-5.4` with `high`, security uses `gpt-5.5` with `high`, and
-   installs/configuration uses `gpt-5.5` with `xhigh`.
-6. Define the red check before editing.
-7. Write the failing test first for code-shaped work.
-8. For setup, auth, or environment repair, define the failing observable first.
-9. Implement the smallest useful change.
-10. Run targeted verification, then the full relevant suite.
-11. Self-review the diff.
-12. Commit only after proof is current and all required checks pass.
+5. Define the red check before editing.
+6. Write the failing test first for code-shaped work.
+7. For setup, auth, or environment repair, define the failing observable first.
+8. Implement the smallest useful change.
+9. Run targeted verification, then the full relevant suite.
+10. Self-review the diff.
+11. Commit only after proof is current and all required checks pass.
 
 ## Current Setup Defaults
 
 - Response detail: concise by default, with proof details when results matter.
-- Model policy: use `gpt-5.4-mini` with `medium` for documentation,
-  `gpt-5.4` with `high` for planning and review/QA, `gpt-5.5` with `medium`
-  for coding, `gpt-5.5` with `high` for security, and `gpt-5.5` with `xhigh`
-  only for installs and configuration.
 - Testing approach: strict TDD and a practical test diamond once code exists.
 - Mocking philosophy: mock nondeterministic or destructive external side effects;
   prefer real integration checks at important boundaries.

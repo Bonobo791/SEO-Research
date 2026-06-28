@@ -3,16 +3,9 @@
 ## Before Every Task
 1. Plan before coding - outline steps, state confidence (HIGH/MEDIUM/LOW)
 2. LOW confidence? Research more or ASK USER
-3. Reasoning policy - select model and effort by task type
-4. Documentation tasks use `gpt-5.4-mini` with `medium` reasoning
-5. Coding tasks use `gpt-5.5` with `medium` reasoning
-6. Planning, review, and QA tasks use `gpt-5.4` with `high` reasoning
-7. Security tasks use `gpt-5.5` with `high` reasoning
-8. Installs and configuration tasks use `gpt-5.5` with `xhigh` reasoning
-9. Do not switch wizard-repo work to `mixed`, mini-only, or non-approved task profiles
-10. If `GOALS.md` exists, treat it as the active-scope contract and keep `ROADMAP.md` as backlog/history
-11. Write failing test FIRST (TDD RED), then implement (TDD GREEN)
-12. If tests exist, ALL tests must pass before commit - no exceptions
+3. If `GOALS.md` exists, treat it as the active-scope contract and keep `ROADMAP.md` as backlog/history
+4. Write failing test FIRST (TDD RED), then implement (TDD GREEN)
+5. If tests exist, ALL tests must pass before commit - no exceptions
 
 ## TDD Workflow (MANDATORY)
 1. Write the test file FIRST - the test MUST FAIL initially
