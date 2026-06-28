@@ -5,69 +5,63 @@
 
 ## Active Objective
 
-Build Phase 3 full cluster orchestration for SEO ranking similarity research.
+Build Phase 4 live **page-level** similarity scoring for SEO ranking similarity
+research.
 
 ### Current capability
 
-SERP, page text, passages, offline similarity features, and TextRazor entities
-run against **every keyword** in the capped cluster (up to 25 keywords after seed
-expansion).
+Phase 3 shipped: offline and gated live runs loop every capped cluster keyword,
+group outputs under `keyword_results`, and annotate flattened rows with
+`target_keyword`. Similarity today uses deterministic fixture embeddings only
+(aggregated from passages internally).
 
-### Phase 3 objective
+### Phase 4 objective
 
-For **each keyword** in the capped cluster, run the provider pipeline with that
-keyword as the **target keyword** for all SERP-derived outputs:
+For each cluster keyword, score **full parsed page text** for every top-20
+organic SERP result with **both** live similarity backends (BGE-reranker-v2 +
+Gemini cosine).
 
-1. Collect organic SERP results (depth-capped, default top 20).
-2. Fetch or fixture-load parsed page text for each organic result.
-3. Normalize passages from that page text.
-4. Compute offline fixture similarity features against the target keyword.
-5. Capture TextRazor entities from parsed text when not skipped.
+### Dev slices
 
-Apply the same per-keyword loop in **offline** (`seo-rank run`) and **live**
-(`--live-providers` with explicit env gates) paths.
-
-Phase 3 status:
-
-- Per-keyword offline orchestration: **Shipped**
-- Per-keyword live orchestration: **Shipped**
-- Run artifacts grouped by target keyword: **Shipped**
-- Cluster orchestration tests (offline + injected live transports): **Shipped**
+1. **Fixture backends** — offline-testable BGE-reranker-v2 and Gemini cosine
+   scorers behind a shared page-level interface.
+2. **Page scope** — score parsed page text vs `target_keyword` per organic
+   result.
+3. **Per-keyword wiring** — attach page similarity scores to `keyword_results`
+   in offline and live orchestration paths.
+4. **Artifacts** — expose raw + normalized page similarity in `run.json` /
+   `report.md`.
+5. **Live integration** — env-gated live backend calls; extend smoke/integration
+   tests.
+6. **Docs** — align `ARCHITECTURE.md`, `README.md`, `TESTING.md`, `ROADMAP.md`.
 
 ## In Scope (current and near-term)
 
 - Python CLI under `src/seo_rank/`.
-- Pytest coverage under `tests/unit/` and orchestration tests as needed.
-- Offline and live provider paths extended to the full capped keyword cluster.
-- JSON + Markdown run artifacts that preserve per-keyword raw and normalized
-  provider data.
-- Product documentation in root markdown: `ARCHITECTURE.md`, `GOALS.md`,
-  `ROADMAP.md`, `README.md`, `TESTING.md`.
+- Pytest under `tests/unit/` and integration tests as needed.
+- Dual-backend live similarity on every non-dry live run.
+- **Page-level** similarity per organic SERP row (full parsed page text).
+- JSON + Markdown artifacts with per-keyword page similarity payloads.
 
 ## Out Of Scope
 
-- Live similarity backends (`BGE-reranker-v2`, Gemini cosine) until Phase 4.
-- Passage / page / domain live similarity scopes until Phase 4.
-- `statsmodels` OLS, OLS pre-analysis, and Benjamini-Hochberg until Phase 5.
-- `runs/RUN_ID/` artifact layout and expanded reporting until Phase 6.
+- Passage-level similarity scoring.
+- Domain-level URL inventory scoring.
+- Storing and processing data with Parquet and Polars.
+- `statsmodels` OLS, OLS pre-analysis, Benjamini-Hochberg.
+- `runs/RUN_ID/` artifact layout and expanded reporting.
 - Entity-derived ranking features.
 - Direct page fetching outside DataForSEO.
 - Causal claims about ranking factors.
 - CI, deployment, databases, cache layers, production hosting.
 
-## Acceptance Criteria (Phase 3)
+## Acceptance Criteria (Phase 4)
 
-- [x] Offline `seo-rank run` processes **every** keyword in the capped cluster,
-  not only the first.
-- [x] Live `--live-providers` smoke orchestration processes **every** keyword in
-  the capped cluster when explicitly enabled.
-- [x] Each keyword's SERP, page text, passages, similarity features, and
-  TextRazor entities use that keyword as the target keyword.
-- [x] `run.json` and `report.md` expose per-keyword results without losing raw
-  provider payloads.
-- [x] `python -m pytest` includes meaningful cluster-orchestration coverage.
-- [x] Documentation aligned with `ARCHITECTURE.md`, `TESTING.md`, and
-  `ROADMAP.md`.
+- [ ] Both BGE-reranker-v2 and Gemini cosine run on every live similarity path.
+- [ ] Page-level scores computed per top-20 organic result vs `target_keyword`.
+- [ ] Scores land in `keyword_results` with `target_keyword` preserved.
+- [ ] Offline fixture tests cover both backends at page scope.
+- [ ] Documentation aligned with `ARCHITECTURE.md`, `TESTING.md`, `ROADMAP.md`.
 
 ## Operating Rules
 

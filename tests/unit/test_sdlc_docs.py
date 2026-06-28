@@ -11,8 +11,8 @@ def test_goals_and_roadmap_define_active_scope_and_backlog() -> None:
 
     assert "active-scope contract" in goals
     assert "Active Objective" in goals
-    assert "Phase 3" in goals
-    assert "full cluster orchestration" in goals
+    assert "Phase 4" in goals
+    assert "live similarity" in goals.lower()
     assert "Current Backlog" in roadmap
     assert "When `GOALS.md` exists, it is the active" in roadmap
 
@@ -21,8 +21,8 @@ def test_readme_reflects_phase_three_direction() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
     assert "What works today" in readme
-    assert "Product direction (Phase 3)" in readme
-    assert "Full cluster orchestration" in readme
+    assert "Product direction (Phase 4)" in readme
+    assert "Phase 3 shipped" in readme
 
 
 def test_manifest_records_resolved_pytest_commands() -> None:

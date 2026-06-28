@@ -5,19 +5,21 @@ scope contract; keep deferred and historical items here.
 
 ## Current Backlog
 
-Active scope contract: `GOALS.md` (Phase 3).
+Active scope contract: `GOALS.md` (Phase 4).
 
-### Phase 4 — Live similarity
-
-- Cross-encoder `BGE-reranker-v2` and bi-encoder Gemini cosine — **both every run**
-- Per keyword: top-20 SERP; passage, page, and domain URL scoring vs target
-  keyword; domain URL cap 1000; skip domains over 1000 URLs
+### Phase 4.5 — Database
+- Begin storing analysis data from DataForSEO and TextRazor.
+- All data to be stored in Parquet and processed with Polars.
 
 ### Phase 5 — Statistical analysis
 
 - OLS pre-analysis preparation (root `ARCHITECTURE.md`)
 - `statsmodels` OLS baseline vs similarity-feature models
 - Benjamini-Hochberg correction every run
+
+### Phase 5.5 - Analysis Expansion
+- Per keyword: top-20 SERP; passage and domain URL scoring vs target
+  keyword; domain URL cap 1000; skip domains over 1000 URLs
 
 ### Phase 6 — Reporting
 
@@ -49,6 +51,16 @@ Active scope contract: `GOALS.md` (Phase 3).
   the minimal smoke path.
 - **GOALS retargeted to Phase 3:** full cluster orchestration for every capped
   keyword in offline and live paths.
-- **Phase 3 shipped:** offline and env-gated live provider orchestration now run
-  every capped cluster keyword, preserve per-keyword raw provider payloads in
-  `keyword_results`, and keep aggregate artifact fields for reporting.
+- **Phase 3 shipped:** per-keyword cluster orchestration in offline and gated
+  live paths.
+  - `build_offline_keyword_result` / `build_live_keyword_result` loop every capped
+    keyword (up to 25) with that keyword as `target_keyword`.
+  - Per-keyword SERP, page text, passages, fixture similarity, TextRazor entities.
+  - `keyword_results[]` in `run.json` / `report.md` with per-keyword raw provider
+    payloads; top-level rollup preserved.
+  - Flattened aggregate rows annotated with `target_keyword`.
+  - `.env.example` documents live-provider and integration env gates.
+  - Tests: 25-keyword offline cluster + injected live cluster orchestration in
+    `test_cli_run.py`.
+- **GOALS retargeted to Phase 4:** live similarity backends and passage/page/domain
+  scoring.

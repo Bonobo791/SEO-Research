@@ -23,19 +23,16 @@ placeholder values, and source it in your shell before running the integration
 test. The CLI reads environment variables from the process environment; it does
 not auto-load `.env`.
 
-## Product direction (Phase 3)
+## Product direction (Phase 4)
 
-Full cluster orchestration is in place for offline and explicitly gated live
-provider runs. Each target keyword gets its own SERP, page text, passages,
-fixture similarity features, TextRazor entities, and raw provider payloads under
-`keyword_results`; flattened normalized rows also carry `target_keyword` for
-downstream consumers. `--live-providers` requires
-`SEO_RANK_ENABLE_LIVE_PROVIDERS=1` and valid provider credentials before
-executing live provider calls.
+Phase 3 shipped full cluster orchestration: offline and gated live runs process
+every capped keyword, group per-keyword outputs under `keyword_results`, and
+annotate flattened rows with `target_keyword`.
 
-Later phases remain planned after that: top-20 organic SERPs at passage / page /
-domain scope, dual live similarity backends every run, and `statsmodels` OLS
-with Benjamini-Hochberg after OLS pre-analysis diagnostics.
+Phase 4 adds dual live similarity backends (BGE-reranker-v2 + Gemini cosine) for
+**page-level** content scoring on each top-20 organic SERP row. Passage and domain
+scopes are Phase 5.5. Later: `statsmodels` OLS with Benjamini-Hochberg (Phase 5)
+and `runs/RUN_ID/` reporting (Phase 6).
 
 ## Repository layout
 
