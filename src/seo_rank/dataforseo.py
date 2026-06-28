@@ -170,3 +170,58 @@ def serp_items(response: Mapping[str, Any]) -> list[Mapping[str, Any]]:
                 continue
             items.extend(item for item in result_items if isinstance(item, Mapping))
     return items
+
+
+def fixture_page_text_response(url: str, keyword: str) -> dict[str, object]:
+    """Return a deterministic DataForSEO-shaped parsed page text fixture."""
+
+    return {
+        "provider": "dataforseo",
+        "endpoint": "on_page/content_parsing/live",
+        "tasks": [
+            {
+                "url": url,
+                "result": [
+                    {
+                        "url": url,
+                        "title": f"{keyword.title()} Fixture Page",
+                        "text": f"""
+                            {keyword.title()} Fixture Page
+
+                            {keyword.title()} helps crawlers discover and understand important pages.
+
+                            ok
+
+                            Site architecture, internal links, and index controls make audit findings actionable.
+                        """,
+                    }
+                ],
+            }
+        ],
+    }
+
+
+def parsed_page_text(response: Mapping[str, Any]) -> dict[str, str]:
+    tasks = response.get("tasks", [])
+    if not isinstance(tasks, list):
+        return {}
+
+    for task in tasks:
+        if not isinstance(task, Mapping):
+            continue
+        results = task.get("result", [])
+        if not isinstance(results, list):
+            continue
+        for result in results:
+            if not isinstance(result, Mapping):
+                continue
+            url = result.get("url")
+            title = result.get("title", "")
+            text = result.get("text")
+            if (
+                isinstance(url, str)
+                and isinstance(title, str)
+                and isinstance(text, str)
+            ):
+                return {"url": url, "title": title, "text": text}
+    return {}

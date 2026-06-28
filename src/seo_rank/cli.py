@@ -8,10 +8,13 @@ from pathlib import Path
 
 from seo_rank.dataforseo import (
     fixture_keyword_expansion_response,
+    fixture_page_text_response,
     fixture_serp_response,
     normalize_keyword_expansion,
     normalize_serp_results,
+    parsed_page_text,
 )
+from seo_rank.text import normalize_page_text
 
 
 @dataclass(frozen=True)
@@ -107,15 +110,26 @@ def build_offline_payload(config: RunConfig) -> dict[str, object]:
         keyword=keywords[0],
         depth=config.depth,
     )
+    page_text_responses = [
+        fixture_page_text_response(str(result["url"]), keywords[0])
+        for result in serp_results
+    ]
+    passages = [
+        passage
+        for response in page_text_responses
+        for passage in normalize_page_text(parsed_page_text(response))
+    ]
     return {
         "config": serialized_config(config),
         "keywords": keywords,
         "raw_provider_data": {
             "dataforseo": {
                 "keyword_expansion": keyword_expansion,
+                "page_text": page_text_responses,
                 "serp": serp_response,
             },
         },
+        "passages": passages,
         "serp_results": serp_results,
         "network_calls": [],
     }
