@@ -9,6 +9,9 @@ Pytest configuration and verification contract for SEO-Research.
 - Test framework: `pytest`
 - Run-all-tests command: `python -m pytest`
 - Single-test-file command: `python -m pytest tests/unit/test_cli_run.py`
+- Git-guard proof command: pinned in `.codex-sdlc/manifest.json` (`/usr/bin/python3`
+  plus explicit `PYTHONPATH`) so the Node hook can run pytest without the venv
+  interpreter
 - Lint / type-check / build / coverage: not configured
 - Expected test duration: fast (< 1s)
 - **Current verification status:** 34 tests collected; 33 passing, 1 live

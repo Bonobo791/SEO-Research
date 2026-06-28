@@ -3,6 +3,16 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
+PINNED_PROOF_TEST_COMMAND = (
+    "PYTHONPATH=/var/home/user/PycharmProjects/SEO-Research/src:"
+    "/var/home/user/PycharmProjects/SEO-Research/.venv/lib64/python3.14/site-packages "
+    "/usr/bin/python3 -m pytest"
+)
+PINNED_PROOF_SINGLE_TEST_COMMAND = (
+    "PYTHONPATH=/var/home/user/PycharmProjects/SEO-Research/src:"
+    "/var/home/user/PycharmProjects/SEO-Research/.venv/lib64/python3.14/site-packages "
+    "/usr/bin/python3 -m pytest tests/unit/test_cli_run.py"
+)
 
 
 def test_goals_and_roadmap_define_active_scope_and_backlog() -> None:
@@ -37,8 +47,8 @@ def test_manifest_records_resolved_pytest_commands() -> None:
         "single_test_file_command"
     )
 
-    assert test_command == "python -m pytest"
-    assert single_test_command == "python -m pytest tests/unit/test_cli_run.py"
+    assert test_command == PINNED_PROOF_TEST_COMMAND
+    assert single_test_command == PINNED_PROOF_SINGLE_TEST_COMMAND
     assert (resolved.get("test_framework") or scan.get("test_framework")) == "pytest"
 
 

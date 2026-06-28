@@ -59,8 +59,17 @@ Lint, type-check, build, and CI commands are not configured yet.
 
 ## Pre-Commit Proof
 
-Use `PROVE-IT.md` before committing. The manifest records `python -m pytest` as
-the proof command, so the git gate can run it directly:
+Use `PROVE-IT.md` before committing. The manifest records a host-pinned pytest
+command (`/usr/bin/python3` with explicit `PYTHONPATH`) so the Node git-guard
+hook can run tests without invoking the repo venv interpreter directly. Day-to-day
+verification still uses `python -m pytest` from an activated environment:
+
+```bash
+python -m pytest
+```
+
+The git gate reads the pinned command from `.codex-sdlc/manifest.json` and runs
+it directly:
 
 ```bash
 node .codex/hooks/git-guard.cjs prove --reviewed
