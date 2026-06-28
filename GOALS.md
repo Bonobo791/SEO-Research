@@ -34,6 +34,7 @@ Phase 2 status:
 - DataForSEO request construction: **Done**
 - TextRazor parsed-text request construction: **Done**
 - Credential validation without secrets in errors: **Done**
+- Non-default CLI live-provider gate: **Done**
 - Integration tests behind explicit flags: **Next**
 
 ## In Scope (current and near-term)

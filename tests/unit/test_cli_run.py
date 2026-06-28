@@ -4,8 +4,12 @@ from pathlib import Path
 from seo_rank.cli import main
 
 
-def test_run_writes_offline_json_and_markdown_artifacts(tmp_path: Path) -> None:
+def test_run_writes_offline_json_and_markdown_artifacts(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
     output_dir = tmp_path / "artifacts"
+    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
 
     exit_code = main(
         [
@@ -49,6 +53,7 @@ def test_run_writes_offline_json_and_markdown_artifacts(tmp_path: Path) -> None:
         "javascript_parsing": True,
         "dry_run": True,
         "skip_textrazor": True,
+        "live_providers": False,
     }
     assert len(payload["keywords"]) == 25
     assert payload["keywords"][:3] == [
@@ -107,3 +112,89 @@ def test_run_includes_offline_textrazor_entities_when_not_skipped(tmp_path: Path
         "technical-seo",
         "crawler",
     ]
+
+
+def test_run_rejects_live_providers_without_explicit_env_gate(
+    tmp_path: Path,
+    capsys,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--output-dir",
+            str(output_dir),
+            "--live-providers",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "SEO_RANK_ENABLE_LIVE_PROVIDERS" in captured.err
+    assert not (output_dir / "run.json").exists()
+
+
+def test_run_rejects_live_providers_with_missing_credentials_without_secret_leaks(
+    tmp_path: Path,
+    capsys,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.setenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", "1")
+    monkeypatch.setenv("DATAFORSEO_LOGIN", "analyst@example.com")
+    monkeypatch.setenv("DATAFORSEO_PASSWORD", "dataforseo-secret")
+    monkeypatch.delenv("TEXTRAZOR_API_KEY", raising=False)
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--output-dir",
+            str(output_dir),
+            "--live-providers",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "TEXTRAZOR_API_KEY" in captured.err
+    assert "analyst@example.com" not in captured.err
+    assert "dataforseo-secret" not in captured.err
+    assert not (output_dir / "run.json").exists()
+
+
+def test_run_rejects_live_providers_after_gate_until_clients_exist(
+    tmp_path: Path,
+    capsys,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.setenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", "1")
+    monkeypatch.setenv("DATAFORSEO_LOGIN", "analyst@example.com")
+    monkeypatch.setenv("DATAFORSEO_PASSWORD", "dataforseo-secret")
+    monkeypatch.setenv("TEXTRAZOR_API_KEY", "textrazor-secret")
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--output-dir",
+            str(output_dir),
+            "--live-providers",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "Live provider execution is not implemented" in captured.err
+    assert "analyst@example.com" not in captured.err
+    assert "dataforseo-secret" not in captured.err
+    assert "textrazor-secret" not in captured.err
+    assert not (output_dir / "run.json").exists()

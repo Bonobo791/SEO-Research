@@ -11,7 +11,7 @@ Pytest configuration and verification contract for SEO-Research.
 - Single-test-file command: `python -m pytest tests/unit/test_cli_run.py`
 - Lint / type-check / build / coverage: not configured
 - Expected test duration: fast (< 1s)
-- **Current verification status:** 16 tests collected, all passing
+- **Current verification status:** 19 tests collected, all passing
 
 ## Active Verification Command
 
@@ -23,7 +23,7 @@ python -m pytest
 
 | Test file | What it verifies |
 |-----------|------------------|
-| `test_cli_run.py` | CLI writes artifacts; TextRazor skip vs include |
+| `test_cli_run.py` | CLI writes artifacts; TextRazor skip vs include; live-provider gate |
 | `test_keyword_expansion.py` | 25-keyword cap, deduplication, raw provider payload |
 | `test_serp_normalization.py` | Organic-only SERP rows, depth cap |
 | `test_dataforseo_requests.py` | DataForSEO request construction and credential validation |

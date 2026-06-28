@@ -2,21 +2,32 @@
 
 import argparse
 import json
-from collections.abc import Sequence
+import os
+import sys
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from seo_rank.dataforseo import (
+    DataForSeoCredentialError,
     fixture_keyword_expansion_response,
     fixture_page_text_response,
     fixture_serp_response,
     normalize_keyword_expansion,
     normalize_serp_results,
     parsed_page_text,
+    validate_dataforseo_credentials,
 )
 from seo_rank.similarity import compute_page_similarity_features
 from seo_rank.text import normalize_page_text
-from seo_rank.textrazor import fixture_entity_response, normalize_entities
+from seo_rank.textrazor import (
+    TextRazorCredentialError,
+    fixture_entity_response,
+    normalize_entities,
+    validate_textrazor_credentials,
+)
+
+LIVE_PROVIDER_ENV_FLAG = "SEO_RANK_ENABLE_LIVE_PROVIDERS"
 
 
 @dataclass(frozen=True)
@@ -31,6 +42,11 @@ class RunConfig:
     javascript_parsing: bool
     dry_run: bool
     skip_textrazor: bool
+    live_providers: bool = False
+
+
+class LiveProviderGateError(ValueError):
+    """Raised when live provider execution is not explicitly allowed."""
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -41,6 +57,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "run":
         config = config_from_args(args)
+        if config.live_providers:
+            try:
+                validate_live_provider_gate(os.environ)
+            except LiveProviderGateError as error:
+                print(error, file=sys.stderr)
+                return 2
         write_offline_artifacts(config)
         return 0
 
@@ -63,6 +85,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--javascript-parsing", action="store_true")
     run.add_argument("--dry-run", action="store_true")
     run.add_argument("--skip-textrazor", action="store_true")
+    run.add_argument(
+        "--live-providers",
+        action="store_true",
+        help="Validate live provider readiness; live execution is not implemented yet",
+    )
 
     return parser
 
@@ -86,7 +113,21 @@ def config_from_args(args: argparse.Namespace) -> RunConfig:
         javascript_parsing=args.javascript_parsing,
         dry_run=args.dry_run,
         skip_textrazor=args.skip_textrazor,
+        live_providers=args.live_providers,
     )
+
+
+def validate_live_provider_gate(env: Mapping[str, str]) -> None:
+    if env.get(LIVE_PROVIDER_ENV_FLAG) != "1":
+        raise LiveProviderGateError(
+            f"Live provider execution requires {LIVE_PROVIDER_ENV_FLAG}=1"
+        )
+    try:
+        validate_dataforseo_credentials(env)
+        validate_textrazor_credentials(env)
+    except (DataForSeoCredentialError, TextRazorCredentialError) as error:
+        raise LiveProviderGateError(str(error)) from error
+    raise LiveProviderGateError("Live provider execution is not implemented yet")
 
 
 def write_offline_artifacts(config: RunConfig) -> None:

@@ -10,7 +10,7 @@ scope contract; keep deferred and historical items here.
 - DataForSEO request construction (keyword expansion, SERP, page-text parsing)
 - TextRazor request construction from parsed page text
 - Authentication validation without secrets in errors or artifacts
-- Live calls behind explicit integration checks or non-default flags
+- Live calls behind explicit integration checks (non-default CLI gate shipped)
 
 ### Phase 3 — Full cluster orchestration
 
