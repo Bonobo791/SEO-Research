@@ -3,42 +3,41 @@
 Python CLI research scaffold for DataForSEO/TextRazor SEO ranking similarity
 analysis.
 
-The intended implementation expands a seed keyword into a keyword cluster,
-collects top-20 organic SERP results per cluster keyword through DataForSEO,
-retrieves provider parsed page text, and scores cosine similarity at passage,
-page, and domain URL scope against the keyword that generated each SERP (domain
-URLs as a content proxy; up to 1000 URLs per domain, skip larger domains).
+## What works today
 
-**Every live run** must execute **both** similarity backends and **full**
-statistical analysis:
+Offline `seo-rank run` expands a seed keyword from fixtures, normalizes SERP
+rows, passages, page-level similarity features, and optional TextRazor
+entities, then writes JSON and Markdown artifacts with **no network calls**.
 
-- **Similarity (both required each run):** cross-encoder `BGE-reranker-v2` and
-  bi-encoder Gemini embedding with cosine similarity alone.
-- **Analysis (required each run):** `statsmodels` OLS residual/variance models
-  plus Benjamini-Hochberg multiple-testing correction on keyword- and
-  feature-level comparisons. Complete OLS pre-analysis diagnostics (linearity,
-  multicollinearity, exogeneity review, homoscedasticity, normality, influence)
-  **before** interpreting results; see `ARCHITECTURE.md` § OLS Pre-Analysis
-  Preparation.
+```bash
+python -m pytest
+seo-rank run --seed "technical seo" --dry-run --output-dir artifacts
+```
 
-TextRazor entities are captured for future work. The offline CLI scaffold today
-uses fixture embeddings only; dual-backend similarity and per-run stats analysis
-are the documented contract for live runs.
+## Product direction (planned)
 
-Current repository state:
+Per cluster keyword: top-20 organic SERP, similarity at passage / page / domain
+URL scope, dual backends every run (`BGE-reranker-v2` + Gemini cosine),
+`statsmodels` OLS with Benjamini-Hochberg after OLS pre-analysis diagnostics.
+Not implemented in code yet.
 
-- `pyproject.toml` defines the `seo-rank` console script and pytest config.
-- `src/seo_rank/` contains the package marker and an offline `run` CLI that
-  writes JSON and Markdown artifacts from fixtures.
-- `tests/unit/` contains the active pytest suite, including an offline CLI smoke
-  test and SDLC doc guards.
-- `python -m pytest` is the active verification command.
+## Repository layout
 
-Start here:
+| Path | Purpose |
+|------|---------|
+| `src/seo_rank/` | CLI and offline provider boundaries |
+| `tests/unit/` | 10 pytest unit tests |
+| `docs/architecture/` | Detailed product architecture and ADRs |
+| `docs/implementation/` | Phased implementation plan |
+| `GOALS.md` | Active-scope contract |
+| `ROADMAP.md` | Backlog and history |
 
-- Root architecture summary: `ARCHITECTURE.md`
-- Detailed architecture: `docs/architecture/ARCHITECTURE.md`
-- First implementation plan:
-  `docs/implementation/dataforseo-textrazor-ranking-similarity-plan.md`
-- Testing contract: `TESTING.md`
-- SDLC contract: `AGENTS.md`
+## Documentation
+
+- Root summary: `ARCHITECTURE.md`
+- Product detail: `docs/architecture/ARCHITECTURE.md`
+- Implementation phases: `docs/implementation/dataforseo-textrazor-ranking-similarity-plan.md`
+- Testing: `TESTING.md`
+- Process: `AGENTS.md`, `SDLC.md`
+
+Verification: `python -m pytest`

@@ -1,116 +1,65 @@
 # Testing
 
-This repository has a Python package scaffold, pytest configuration, and an
-initial unit test suite under `tests/unit/`.
+Pytest configuration and verification contract for SEO-Research.
 
 ## Current State
 
 - Source directory: `src/seo_rank/`
-- Test directory: `tests/`
+- Test directory: `tests/unit/`
 - Test framework: `pytest`
 - Run-all-tests command: `python -m pytest`
 - Single-test-file command: `python -m pytest tests/unit/test_cli_run.py`
-- Lint command: not configured yet
-- Type-check command: not configured yet
-- Production build command: not configured yet
-- Coverage config: not configured yet
-- Expected test duration: fast
-- Current verification status: `python -m pytest` collects and passes the active
-  unit suite
+- Lint / type-check / build / coverage: not configured
+- Expected test duration: fast (< 1s)
+- **Current verification status:** 10 tests collected, all passing
 
 ## Active Verification Command
-
-The primary verification command is:
 
 ```bash
 python -m pytest
 ```
 
-Current observed result:
+## Suite coverage (shipped)
 
-- Pytest discovers the configured `tests/` root
-- Pytest collects unit tests from `tests/unit/`
-- Current suite covers SDLC doc guards and the offline CLI smoke path
+| Test file | What it verifies |
+|-----------|------------------|
+| `test_cli_run.py` | CLI writes artifacts; TextRazor skip vs include |
+| `test_keyword_expansion.py` | 25-keyword cap, deduplication, raw provider payload |
+| `test_serp_normalization.py` | Organic-only SERP rows, depth cap |
+| `test_passage_normalization.py` | Passage split, short-text filter |
+| `test_similarity_features.py` | Fixture embedding cosine aggregation |
+| `test_textrazor_normalization.py` | Entity schema normalization |
+| `test_sdlc_docs.py` | GOALS/ROADMAP guards, manifest commands, product doc paths |
+
+All tests use fixtures/mocks only. No live provider or network tests.
 
 ## Required Workflow
 
-Follow `AGENTS.md` and `SDLC-LOOP.md` for every code-shaped change:
+Follow `AGENTS.md` and `SDLC-LOOP.md` for code-shaped changes:
 
 1. Define the red check before editing.
 2. Write the failing test first.
-3. Run the test and confirm it fails for the expected reason.
-4. Implement the smallest useful change.
-5. Re-run the targeted test and then the full relevant suite.
-6. If no test exists yet for a setup-only or documentation-only slice, define a
-   concrete observable and verify that instead.
-7. Self-review the diff before commit.
-
-For setup, auth, or environment repair where a unit test would be artificial,
-define a failing observable first and use a health check or file/config
-verification as the red/green gate.
-
-## Testing Approach
-
-Until the product shape is clearer, use a practical test diamond:
-
-- Unit tests for deterministic local logic.
-- Integration tests around real boundaries, including APIs, browsers,
-  filesystem behavior, auth handoffs, or external services that carry the
-  actual risk.
-- A small number of end-to-end checks for critical workflows.
-
-Do not use fake percentage targets before the architecture exists. Add coverage
-config only when there is code to measure and a meaningful threshold to enforce.
+3. Confirm RED, implement minimal fix, confirm GREEN.
+4. Run `python -m pytest` before commit.
 
 ## Mocking Philosophy
 
-Mock only nondeterministic or destructive external side effects by default:
-network calls, paid APIs, credentials, time, randomness, email sends, deletes,
-admin changes, and tenant-affecting operations. Prefer real integration checks
-when a mocked test would hide the risk the change is meant to control.
+Mock nondeterministic or destructive external effects (network, paid APIs,
+credentials). Prefer integration tests at real boundaries once live clients
+exist.
 
-## Maintaining The Test Stack
+## Planned tests (not yet in suite)
 
-Update this file in the same slice that changes the verification contract.
-Record:
+- DataForSEO / TextRazor request construction and auth handling
+- Full cluster keyword orchestration (not first keyword only)
+- Live similarity backends (`BGE-reranker-v2`, Gemini cosine)
+- Passage / page / domain similarity scopes
+- `statsmodels` OLS and Benjamini-Hochberg on synthetic ranking panels
+- OLS pre-analysis diagnostic loop
 
-- The run-all-tests command.
-- The single-test-file command.
-- Any lint, format, type-check, build, and coverage commands.
-- Which tests are required before commit.
-- Which checks CI runs, if CI exists.
+See `docs/implementation/dataforseo-textrazor-ranking-similarity-plan.md`.
 
-## Required First-Slice Tests
+## Maintaining This File
 
-When test source files are added or restored, the DataForSEO + TextRazor
-ranking-similarity scaffold should start with deterministic tests using
-fixtures and mocked providers:
-
-- DataForSEO request construction and auth handling.
-- TextRazor request construction and auth handling.
-- Keyword expansion deduplication and 25-keyword cap.
-- SERP normalization for organic top-20 results.
-- Page text normalization and empty/short passage filtering.
-- Cosine similarity aggregation for multi-passage pages (offline fixture
-  embeddings today).
-- Cross-encoder similarity with `BGE-reranker-v2` and bi-encoder Gemini
-  embedding plus cosine similarity alone when live similarity evaluation begins.
-  **Both backends are required on every live run.**
-- Per cluster keyword: organic top-20 SERP, then for each result score passages,
-  full page content, and domain URLs against that keyword (the SERP target
-  keyword). Domain URLs are a content proxy only; cap at 1000 URLs per domain
-  and skip domains over 1000 URLs.
-- Run orchestration with mocked provider clients.
-- Analysis model comparison with synthetic ranking data using `statsmodels` OLS
-  for residual/variance models and Benjamini-Hochberg correction for
-  multiple-testing scenarios. **Required on every run**, not only integration
-  tests.
-- OLS pre-analysis preparation on each run dataset before interpretation:
-  preliminary fit, diagnostic battery (linearity, multicollinearity, exogeneity,
-  homoscedasticity, normality, influence), refit-after-correction loop. See
-  `ARCHITECTURE.md` § OLS Pre-Analysis Preparation.
-- CLI smoke test that writes JSON and Markdown artifacts without network calls.
-
-Live provider tests are out of scope for the first slice. Network calls must be
-behind explicit integration tests or manual checks after the offline scaffold is
-stable.
+Update in the same slice that changes the verification contract (commands, test
+count, or required gates).

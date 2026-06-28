@@ -28,3 +28,24 @@ def test_manifest_records_resolved_pytest_commands() -> None:
     assert test_command == "python -m pytest"
     assert single_test_command == "python -m pytest tests/unit/test_cli_run.py"
     assert (resolved.get("test_framework") or scan.get("test_framework")) == "pytest"
+
+
+def test_product_docs_exist_and_reference_core_contracts() -> None:
+    architecture = ROOT / "docs/architecture/ARCHITECTURE.md"
+    implementation = ROOT / "docs/implementation/dataforseo-textrazor-ranking-similarity-plan.md"
+    adr_0001 = ROOT / "docs/architecture/adr/0001-keyword-cluster-observational-analysis.md"
+    adr_0002 = ROOT / "docs/architecture/adr/0002-censored-top20-validation-and-reporting.md"
+
+    for path in (architecture, implementation, adr_0001, adr_0002):
+        assert path.is_file(), f"missing product doc: {path.relative_to(ROOT)}"
+
+    architecture_text = architecture.read_text(encoding="utf-8")
+    implementation_text = implementation.read_text(encoding="utf-8")
+    adr_0001_text = adr_0001.read_text(encoding="utf-8")
+    adr_0002_text = adr_0002.read_text(encoding="utf-8")
+
+    assert "DataForSEO" in architecture_text
+    assert "TextRazor" in architecture_text
+    assert "offline" in implementation_text
+    assert "observational" in adr_0001_text
+    assert "top-20" in adr_0002_text or "top 20" in adr_0002_text

@@ -62,8 +62,8 @@
   },
   "setup_verification_command": "test -s TESTING.md && test -s ARCHITECTURE.md && test -s SDLC.md && test -s .codex-sdlc/manifest.json",
   "notes": [
-    "Initial CLI scaffold and pytest suite are present under src/seo_rank/ and tests/.",
-    "Pre-commit proof uses python -m pytest via manifest resolved_values.",
-    "Provider boundaries, normalization, and similarity features remain in GOALS.md backlog."
+    "Phase 1 offline CLI scaffold shipped: dataforseo, text, similarity, textrazor modules.",
+    "python -m pytest collects 10 unit tests; pre-commit proof uses manifest test_command.",
+    "Phase 2+ backlog: live providers, full cluster loop, live similarity, statsmodels analysis."
   ]
 }

@@ -21,17 +21,21 @@
 
 ## Overview
 
-SEO-Research is a Python CLI application scaffold for research-grade SEO
-ranking analysis. The first version will expand a seed keyword into a keyword
-cluster, collect top-20 organic SERP results through DataForSEO, retrieve
-provider-parsed page text, compute passage-to-keyword semantic similarity, and
-report whether similarity features explain variation in observed rankings.
+SEO-Research is a Python CLI for research-grade SEO ranking similarity analysis.
 
-TextRazor entities will be captured and normalized from the same DataForSEO page
-text, but entity-derived model features are out of scope for the first model.
+**Shipped today (Phase 1):** offline `seo-rank run` expands a seed keyword from
+fixtures, normalizes SERP rows, passages, page-level similarity features, and
+optional TextRazor entities, then writes `run.json` and `report.md` with no
+network calls.
 
-The detailed product architecture lives in
-`docs/architecture/ARCHITECTURE.md`. The first implementation plan lives in
+**Planned:** live DataForSEO and TextRazor clients, full cluster keyword loop,
+dual-backend live similarity (BGE-reranker-v2 + Gemini cosine), and
+`statsmodels` OLS with Benjamini-Hochberg after OLS pre-analysis diagnostics.
+
+TextRazor entities are captured in offline runs for schema validation; entity-derived
+model features remain out of scope.
+
+Detailed product architecture: `docs/architecture/ARCHITECTURE.md`. Phased plan:
 `docs/implementation/dataforseo-textrazor-ranking-similarity-plan.md`.
 
 ## Current Components
@@ -54,51 +58,49 @@ The detailed product architecture lives in
 
 ## Application Surface
 
-The repository now contains the first project scaffold:
+The repository contains an **offline-verifiable CLI scaffold** (Phase 1 shipped):
 
-- Source directory: present at `src/seo_rank/`
-- Test directory: present at `tests/`
-- Package manager or dependency manifest: present at `pyproject.toml`
-- Current package contents: `__init__.py` and `cli.py` with an offline `run`
-  command that writes JSON and Markdown artifacts from fixtures
-- Current test status: pytest collects unit tests under `tests/unit/`
-- Database: not present
-- Cache layer: not present
-- Deployment target: not present
-- CI workflow: not present
+- **Package:** `src/seo_rank/` — `cli.py`, `dataforseo.py`, `text.py`,
+  `similarity.py`, `textrazor.py`
+- **CLI:** `seo-rank run` writes `run.json` and `report.md` from fixtures (no
+  network calls)
+- **Tests:** 10 unit tests under `tests/unit/`; gate: `python -m pytest`
+- **Product docs:** `docs/architecture/`, `docs/implementation/`, ADRs under
+  `docs/architecture/adr/`
+- **Not yet:** live provider clients, full cluster keyword loop, live similarity
+  backends, `statsmodels` analysis, `runs/RUN_ID/` layout
 
-Implementation has started. The runnable product surface is still minimal, but
-`python -m pytest` now verifies the offline CLI smoke path and SDLC doc guards.
-Provider boundaries, normalization, and similarity features remain planned work.
+See `docs/architecture/ARCHITECTURE.md` for the current module and artifact
+contract. Planned live similarity and statistical analysis sections below are
+**not implemented** in code yet.
 
 ## Key Product Components
 
-- CLI: accepts seed keyword, location, language, device, cluster size, SERP
-  depth, output directory, model name, JavaScript parsing option, `--dry-run`,
-  and `--skip-textrazor`.
-- Provider clients: DataForSEO for keyword expansion, SERP collection, and page
-  text parsing; TextRazor for entity extraction from parsed page text.
-- Normalizers: preserve raw provider responses and normalize them into stable
-  internal schemas.
-- Text pipeline: split page text into paragraph/headings passages, embed keyword
-  and passages, compute cosine similarity, and aggregate page-level features.
-  Offline runs use deterministic fixture vectors. Live runs follow the planned
-  cosine-similarity procedure in [Planned Cosine Similarity Run](#planned-cosine-similarity-run).
-- Analysis engine: on every run, complete OLS pre-analysis preparation, then
-  compare baseline and similarity-feature models over observed top-20 rankings
-  with mandatory `statsmodels` OLS residual/variance modeling and
-  Benjamini-Hochberg multiple-testing correction. See [Planned Per-Run Statistical
-  Analysis](#planned-per-run-statistical-analysis) and [OLS Pre-Analysis
-  Preparation](#ols-pre-analysis-preparation).
-- Reporters: emit machine-readable JSON artifacts and a Markdown report.
+- **CLI (shipped):** `seo-rank run` — seed keyword, location, language, device,
+  depth, output directory, model name, JavaScript parsing, `--dry-run`,
+  `--skip-textrazor`.
+- **Provider fixtures + normalizers (shipped):** DataForSEO-shaped keyword/SERP/
+  page-text fixtures; TextRazor entity fixtures (`dataforseo.py`, `textrazor.py`).
+- **Text pipeline (shipped, offline):** passage split (`text.py`); page-level
+  similarity from fixture embeddings (`similarity.py`).
+- **Provider HTTP clients (planned):** live DataForSEO and TextRazor calls.
+- **Live similarity (planned):** dual-backend scoring — see
+  [Planned Cosine Similarity Run](#planned-cosine-similarity-run).
+- **Analysis engine (planned):** OLS pre-analysis, `statsmodels` OLS,
+  Benjamini-Hochberg — see [Planned Per-Run Statistical Analysis](#planned-per-run-statistical-analysis).
+- **Reporters (shipped):** JSON + Markdown under `--output-dir`; planned
+  `runs/RUN_ID/` layout in Phase 6.
 
 ## Data Flow
 
-Seed keyword input flows through keyword expansion, SERP collection, page text
-parsing, TextRazor entity capture, passage extraction, dual-backend similarity
-feature generation (cross-encoder and bi-encoder on every live run), rank-feature
-joining, mandatory `statsmodels` OLS analysis with Benjamini-Hochberg correction,
-and report generation.
+**Offline run today:** seed keyword → fixture keyword expansion → SERP fixture
+(first keyword) → page-text fixtures → passage normalize → fixture similarity →
+optional TextRazor entities → `run.json` + `report.md`.
+
+**Planned live run:** seed keyword → keyword expansion → per-keyword top-20 SERP
+→ page text → TextRazor entities → dual-backend similarity (passage / page /
+domain) → rank-feature join → OLS pre-analysis → `statsmodels` OLS →
+Benjamini-Hochberg → report generation.
 
 Raw provider responses and generated run artifacts should stay out of source
 control.
