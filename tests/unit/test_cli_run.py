@@ -50,7 +50,13 @@ def test_run_writes_offline_json_and_markdown_artifacts(tmp_path: Path) -> None:
         "dry_run": True,
         "skip_textrazor": True,
     }
-    assert payload["keywords"] == ["technical seo", "technical seo audit", "technical seo checklist"]
+    assert len(payload["keywords"]) == 25
+    assert payload["keywords"][:3] == [
+        "technical seo",
+        "technical seo audit",
+        "technical seo checklist",
+    ]
+    assert payload["raw_provider_data"]["dataforseo"]["keyword_expansion"]["provider"] == "dataforseo"
     assert [result["rank"] for result in payload["serp_results"]] == [1, 2, 3]
     assert payload["network_calls"] == []
 

@@ -6,6 +6,13 @@ from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from seo_rank.dataforseo import (
+    fixture_keyword_expansion_response,
+    fixture_serp_response,
+    normalize_keyword_expansion,
+    normalize_serp_results,
+)
+
 
 @dataclass(frozen=True)
 class RunConfig:
@@ -92,11 +99,24 @@ def write_offline_artifacts(config: RunConfig) -> None:
 
 
 def build_offline_payload(config: RunConfig) -> dict[str, object]:
-    keywords = fixture_keywords(config.seed)
+    keyword_expansion = fixture_keyword_expansion_response(config.seed)
+    keywords = normalize_keyword_expansion(keyword_expansion, seed=config.seed)
+    serp_response = fixture_serp_response(keywords[0])
+    serp_results = normalize_serp_results(
+        serp_response,
+        keyword=keywords[0],
+        depth=config.depth,
+    )
     return {
         "config": serialized_config(config),
         "keywords": keywords,
-        "serp_results": fixture_serp_results(keywords, config.depth),
+        "raw_provider_data": {
+            "dataforseo": {
+                "keyword_expansion": keyword_expansion,
+                "serp": serp_response,
+            },
+        },
+        "serp_results": serp_results,
         "network_calls": [],
     }
 
@@ -105,24 +125,6 @@ def serialized_config(config: RunConfig) -> dict[str, object]:
     serialized = asdict(config)
     serialized["output_dir"] = str(config.output_dir)
     return serialized
-
-
-def fixture_keywords(seed: str) -> list[str]:
-    return [seed, f"{seed} audit", f"{seed} checklist"]
-
-
-def fixture_serp_results(keywords: Sequence[str], depth: int) -> list[dict[str, object]]:
-    seed = keywords[0]
-    return [
-        {
-            "rank": rank,
-            "keyword": seed,
-            "url": f"https://example.com/{rank}",
-            "title": f"{seed.title()} Fixture Result {rank}",
-            "similarity": round(1.0 - (rank * 0.1), 2),
-        }
-        for rank in range(1, min(depth, 3) + 1)
-    ]
 
 
 def render_markdown_report(payload: dict[str, object]) -> str:
