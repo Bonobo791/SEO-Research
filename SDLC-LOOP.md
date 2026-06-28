@@ -7,9 +7,10 @@ Codex does not have a native `/sdlc` command. This file is the honest replacemen
 1. Frame the slice
    Restate the task, set a scope guard, state confidence (`HIGH` / `MEDIUM` / `LOW`), and say what will prove the work is done.
 2. Pick the reasoning level
-   Use `gpt-5.4` with `low` for documentation, `gpt-5.5` with `medium` for
-   coding, `gpt-5.4` with `high` for review/QA, `gpt-5.5` with `high` for
-   security, and `gpt-5.5` with `xhigh` only for installs and configuration.
+   Use `gpt-5.4-mini` with `medium` for documentation, `gpt-5.4` with `high`
+   for planning and review/QA, `gpt-5.5` with `medium` for coding,
+   `gpt-5.5` with `high` for security, and `gpt-5.5` with `xhigh` only for
+   installs and configuration.
 3. Red first
    Write the failing test first when the task is code-shaped.
    If the task is setup, auth, or environment repair, define the failing observable first instead of pretending it is unit-testable.

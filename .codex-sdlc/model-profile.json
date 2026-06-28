@@ -5,7 +5,8 @@
       "main_model": "gpt-5.5",
       "default_reasoning": "low",
       "reasoning_by_task": {
-        "documentation": "low",
+        "documentation": "medium",
+        "planning": "high",
         "coding": "medium",
         "review": "high",
         "qa": "high",
@@ -14,7 +15,8 @@
         "configuration": "xhigh"
       },
       "model_by_task": {
-        "documentation": "gpt-5.4",
+        "documentation": "gpt-5.4-mini",
+        "planning": "gpt-5.4",
         "coding": "gpt-5.5",
         "review": "gpt-5.4",
         "qa": "gpt-5.4",
@@ -24,7 +26,7 @@
       },
       "review_model": "gpt-5.4",
       "review_reasoning": "high",
-      "tradeoff": "Uses gpt-5.4 for documentation/review/QA and gpt-5.5 for coding, security, installs, and configuration."
+      "tradeoff": "Uses gpt-5.4-mini for documentation, gpt-5.4 for planning/review/QA, and gpt-5.5 for coding, security, installs, and configuration."
     }
   },
   "policy": {

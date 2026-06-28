@@ -4,9 +4,9 @@
 1. Plan before coding - outline steps, state confidence (HIGH/MEDIUM/LOW)
 2. LOW confidence? Research more or ASK USER
 3. Reasoning policy - select model and effort by task type
-4. Documentation tasks use `gpt-5.4` with `low` reasoning
+4. Documentation tasks use `gpt-5.4-mini` with `medium` reasoning
 5. Coding tasks use `gpt-5.5` with `medium` reasoning
-6. Review and QA tasks use `gpt-5.4` with `high` reasoning
+6. Planning, review, and QA tasks use `gpt-5.4` with `high` reasoning
 7. Security tasks use `gpt-5.5` with `high` reasoning
 8. Installs and configuration tasks use `gpt-5.5` with `xhigh` reasoning
 9. Do not switch wizard-repo work to `mixed`, mini-only, or non-approved task profiles
