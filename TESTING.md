@@ -11,7 +11,7 @@ Pytest configuration and verification contract for SEO-Research.
 - Single-test-file command: `python -m pytest tests/unit/test_cli_run.py`
 - Lint / type-check / build / coverage: not configured
 - Expected test duration: fast (< 1s)
-- **Current verification status:** 10 tests collected, all passing
+- **Current verification status:** 16 tests collected, all passing
 
 ## Active Verification Command
 
@@ -26,9 +26,11 @@ python -m pytest
 | `test_cli_run.py` | CLI writes artifacts; TextRazor skip vs include |
 | `test_keyword_expansion.py` | 25-keyword cap, deduplication, raw provider payload |
 | `test_serp_normalization.py` | Organic-only SERP rows, depth cap |
+| `test_dataforseo_requests.py` | DataForSEO request construction and credential validation |
 | `test_passage_normalization.py` | Passage split, short-text filter |
 | `test_similarity_features.py` | Fixture embedding cosine aggregation |
 | `test_textrazor_normalization.py` | Entity schema normalization |
+| `test_textrazor_requests.py` | TextRazor parsed-text request construction and credential validation |
 | `test_sdlc_docs.py` | GOALS/ROADMAP/README guards and manifest pytest commands |
 
 All tests use fixtures/mocks only. No live provider or network tests.
@@ -50,7 +52,7 @@ exist.
 
 ## Planned tests (not yet in suite)
 
-- DataForSEO / TextRazor request construction and auth handling
+- Live DataForSEO / TextRazor integration checks behind explicit flags
 - Full cluster keyword orchestration (not first keyword only)
 - Live similarity backends (`BGE-reranker-v2`, Gemini cosine)
 - Passage / page / domain similarity scopes

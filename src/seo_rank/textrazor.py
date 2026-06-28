@@ -1,7 +1,53 @@
 """Offline TextRazor fixture boundaries."""
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
+
+TEXTRAZOR_ENTITY_PATH = "/"
+
+
+@dataclass(frozen=True)
+class TextRazorRequest:
+    method: str
+    path: str
+    headers: dict[str, str]
+    body: dict[str, str]
+
+
+@dataclass(frozen=True)
+class TextRazorCredentials:
+    api_key: str
+
+
+class TextRazorCredentialError(ValueError):
+    """Raised when required TextRazor credentials are missing."""
+
+
+def build_entity_request(page_text: Mapping[str, str]) -> TextRazorRequest:
+    """Build a TextRazor entity extraction request from parsed page text."""
+
+    return TextRazorRequest(
+        method="POST",
+        path=TEXTRAZOR_ENTITY_PATH,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        body={
+            "extractors": "entities",
+            "text": page_text["text"],
+        },
+    )
+
+
+def validate_textrazor_credentials(
+    env: Mapping[str, str],
+    *,
+    required: str = "TEXTRAZOR_API_KEY",
+) -> TextRazorCredentials:
+    """Validate TextRazor credentials without exposing values in errors."""
+
+    if not env.get(required, "").strip():
+        raise TextRazorCredentialError(f"Missing TextRazor credential: {required}")
+    return TextRazorCredentials(api_key=env[required].strip())
 
 
 def fixture_entity_response(url: str, text: str) -> dict[str, object]:

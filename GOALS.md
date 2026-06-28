@@ -29,6 +29,13 @@ first expanded keyword only, not every keyword in the cluster.
 Live provider boundaries: DataForSEO and TextRazor request construction,
 authentication validation, and integration tests behind explicit flags.
 
+Phase 2 status:
+
+- DataForSEO request construction: **Done**
+- TextRazor parsed-text request construction: **Done**
+- Credential validation without secrets in errors: **Done**
+- Integration tests behind explicit flags: **Next**
+
 ## In Scope (current and near-term)
 
 - Python CLI under `src/seo_rank/`.

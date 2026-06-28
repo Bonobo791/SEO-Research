@@ -8,6 +8,8 @@ analysis.
 Offline `seo-rank run` expands a seed keyword from fixtures, normalizes SERP
 rows, passages, page-level similarity features, and optional TextRazor
 entities, then writes JSON and Markdown artifacts with **no network calls**.
+Phase 2 provider request builders and credential validators are available for
+offline verification, but live calls are not executed by default.
 
 ```bash
 python -m pytest
@@ -16,10 +18,10 @@ seo-rank run --seed "technical seo" --dry-run --output-dir artifacts
 
 ## Product direction (Phase 2)
 
-Live provider boundaries are next: DataForSEO request construction, parsed-page
-TextRazor request construction, credential validation, and explicit flags or
-integration checks for non-default live calls. The offline scaffold stays in
-place while those boundaries are added.
+Live provider boundaries are in progress: DataForSEO request construction,
+parsed-page TextRazor request construction, and credential validation are
+implemented. Explicit flags or integration checks for non-default live calls are
+next. The offline scaffold stays in place while those boundaries are added.
 
 Later phases remain planned after that: per-cluster keyword execution, top-20
 organic SERPs at passage / page / domain scope, dual similarity backends every

@@ -1,10 +1,121 @@
 """Offline DataForSEO fixture boundaries."""
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 DEFAULT_KEYWORD_LIMIT = 25
 DEFAULT_SERP_DEPTH = 20
+
+DATAFORSEO_KEYWORD_EXPANSION_PATH = (
+    "/v3/keywords_data/google_ads/keywords_for_keywords/live"
+)
+DATAFORSEO_SERP_PATH = "/v3/serp/google/organic/live/advanced"
+DATAFORSEO_PAGE_TEXT_PATH = "/v3/on_page/content_parsing/live"
+
+
+@dataclass(frozen=True)
+class ProviderRequest:
+    method: str
+    path: str
+    headers: dict[str, str]
+    body: object
+
+
+@dataclass(frozen=True)
+class DataForSeoCredentials:
+    login: str
+    password: str
+
+
+class DataForSeoCredentialError(ValueError):
+    """Raised when required DataForSEO credentials are missing."""
+
+
+def build_keyword_expansion_request(
+    seed: str,
+    *,
+    location_code: int,
+    language_code: str,
+) -> ProviderRequest:
+    """Build a DataForSEO keyword expansion request without executing it."""
+
+    return ProviderRequest(
+        method="POST",
+        path=DATAFORSEO_KEYWORD_EXPANSION_PATH,
+        headers={"Content-Type": "application/json"},
+        body=[
+            {
+                "keywords": [seed],
+                "location_code": location_code,
+                "language_code": language_code,
+            }
+        ],
+    )
+
+
+def build_serp_request(
+    keyword: str,
+    *,
+    location_code: int,
+    language_code: str,
+    device: str,
+    depth: int = DEFAULT_SERP_DEPTH,
+) -> ProviderRequest:
+    """Build a DataForSEO organic SERP request without executing it."""
+
+    return ProviderRequest(
+        method="POST",
+        path=DATAFORSEO_SERP_PATH,
+        headers={"Content-Type": "application/json"},
+        body=[
+            {
+                "keyword": keyword,
+                "location_code": location_code,
+                "language_code": language_code,
+                "device": device,
+                "depth": depth,
+            }
+        ],
+    )
+
+
+def build_page_text_request(
+    url: str,
+    *,
+    javascript_parsing: bool,
+) -> ProviderRequest:
+    """Build a DataForSEO parsed page text request without executing it."""
+
+    return ProviderRequest(
+        method="POST",
+        path=DATAFORSEO_PAGE_TEXT_PATH,
+        headers={"Content-Type": "application/json"},
+        body=[
+            {
+                "url": url,
+                "enable_javascript": javascript_parsing,
+            }
+        ],
+    )
+
+
+def validate_dataforseo_credentials(
+    env: Mapping[str, str],
+    *,
+    required: tuple[str, str] = ("DATAFORSEO_LOGIN", "DATAFORSEO_PASSWORD"),
+) -> DataForSeoCredentials:
+    """Validate DataForSEO credentials without exposing values in errors."""
+
+    missing = [name for name in required if not env.get(name, "").strip()]
+    if missing:
+        raise DataForSeoCredentialError(
+            "Missing DataForSEO credentials: " + ", ".join(missing)
+        )
+    return DataForSeoCredentials(
+        login=env[required[0]].strip(),
+        password=env[required[1]].strip(),
+    )
 
 
 def fixture_keyword_expansion_response(seed: str) -> dict[str, object]:

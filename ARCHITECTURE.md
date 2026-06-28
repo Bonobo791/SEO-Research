@@ -28,11 +28,12 @@ fixtures, normalizes SERP rows, passages, page-level similarity features, and
 optional TextRazor entities, then writes `run.json` and `report.md` with no
 network calls.
 
-**Phase 2 next:** live DataForSEO and TextRazor provider boundaries, including
-request construction, credential validation, and explicit live-call gating.
-Later phases keep the full cluster keyword loop, dual-backend live similarity
-(BGE-reranker-v2 + Gemini cosine), and `statsmodels` OLS with Benjamini-
-Hochberg after OLS pre-analysis diagnostics.
+**Phase 2 in progress:** DataForSEO and TextRazor provider boundaries now
+include offline-verifiable request construction and credential validation.
+Explicit live-call gating and integration checks remain next. Later phases keep
+the full cluster keyword loop, dual-backend live similarity (BGE-reranker-v2 +
+Gemini cosine), and `statsmodels` OLS with Benjamini-Hochberg after OLS
+pre-analysis diagnostics.
 
 TextRazor entities are captured in offline runs for schema validation; entity-derived
 model features remain out of scope.
@@ -66,7 +67,7 @@ The repository contains an **offline-verifiable CLI scaffold** (Phase 1 shipped)
   `similarity.py`, `textrazor.py`
 - **CLI:** `seo-rank run` writes `run.json` and `report.md` from fixtures (no
   network calls)
-- **Tests:** 10 unit tests under `tests/unit/`; gate: `python -m pytest`
+- **Tests:** 16 unit tests under `tests/unit/`; gate: `python -m pytest`
 - **Product docs:** `ARCHITECTURE.md`, `GOALS.md`, `ROADMAP.md`, `README.md`,
   `TESTING.md`
 - **Not yet:** live provider clients, full cluster keyword loop, live similarity
@@ -84,6 +85,9 @@ in code yet.
   `--skip-textrazor`.
 - **Provider fixtures + normalizers (shipped):** DataForSEO-shaped keyword/SERP/
   page-text fixtures; TextRazor entity fixtures (`dataforseo.py`, `textrazor.py`).
+- **Provider request boundaries (shipped):** DataForSEO keyword expansion,
+  organic SERP, and page-text request specs; TextRazor parsed-text entity
+  request specs; credential validation without secret values in errors.
 - **Text pipeline (shipped, offline):** passage split (`text.py`); page-level
   similarity from fixture embeddings (`similarity.py`).
 - **Provider HTTP clients (planned):** live DataForSEO and TextRazor calls.
