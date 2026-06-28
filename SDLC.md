@@ -75,11 +75,16 @@ node .codex/hooks/git-guard.cjs prove --reviewed --check "test -s TESTING.md && 
 
 ## Product Documentation
 
-- Root architecture summary: `ARCHITECTURE.md`
-- Detailed architecture: `docs/architecture/ARCHITECTURE.md`
-- First implementation plan:
-  `docs/implementation/dataforseo-textrazor-ranking-similarity-plan.md`
-- ADR 0001:
-  `docs/architecture/adr/0001-keyword-cluster-observational-analysis.md`
-- ADR 0002:
-  `docs/architecture/adr/0002-censored-top20-validation-and-reporting.md`
+Product architecture and planning live in root markdown files (there is no
+`docs/` tree in this repo):
+
+- **Architecture and planned pipeline:** `ARCHITECTURE.md` — stack, shipped
+  Phase 1 modules, offline data flow, planned live similarity and statistical
+  analysis
+- **Active scope:** `GOALS.md` — Phase 1 complete; Phase 2 = live provider
+  boundaries
+- **Backlog and history:** `ROADMAP.md` — Phases 2–6 backlog
+- **Verification contract:** `TESTING.md` — pytest suite and coverage map
+- **Quick start:** `README.md` — what works today and repo layout
+- **Implementation surface:** `src/seo_rank/` — `cli.py`, `dataforseo.py`,
+  `text.py`, `similarity.py`, `textrazor.py`
