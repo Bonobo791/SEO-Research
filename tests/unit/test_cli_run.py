@@ -73,9 +73,37 @@ def test_run_writes_offline_json_and_markdown_artifacts(tmp_path: Path) -> None:
         "https://example.com/technical-seo/3",
     ]
     assert payload["similarity_features"][0]["passage_count"] == 2
+    assert payload["textrazor_entities"] == []
+    assert "textrazor" not in payload["raw_provider_data"]
     assert payload["network_calls"] == []
 
     report = report_md.read_text(encoding="utf-8")
     assert "# SEO Rank Offline Run" in report
     assert "- Seed: technical seo" in report
     assert "- Network calls: 0" in report
+
+
+def test_run_includes_offline_textrazor_entities_when_not_skipped(tmp_path: Path) -> None:
+    output_dir = tmp_path / "artifacts"
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--depth",
+            "1",
+            "--output-dir",
+            str(output_dir),
+            "--dry-run",
+        ]
+    )
+
+    assert exit_code == 0
+
+    payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
+    assert len(payload["raw_provider_data"]["textrazor"]["entities"]) == 1
+    assert [entity["entity_id"] for entity in payload["textrazor_entities"]] == [
+        "technical-seo",
+        "crawler",
+    ]

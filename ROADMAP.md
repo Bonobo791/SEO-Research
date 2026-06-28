@@ -37,8 +37,23 @@ scope contract.
 - Add embedding and cosine similarity boundaries that can be tested with
   deterministic vectors.
 - Aggregate page-level similarity features.
+- Add live similarity backends for comparison when cosine-similarity evaluation
+  begins: cross-encoder `BGE-reranker-v2` and bi-encoder Gemini embedding with
+  cosine similarity alone. **Both backends run on every live run.**
+- For each keyword in the cluster: fetch organic top-20 SERP, then for each
+  result score (1) each passage, (2) full page content, and (3) domain URLs
+  against that keyword as the target keyword. Domain URL scoring uses the URL
+  list as a content proxy, caps at 1000 URLs per domain, and skips domains over
+  1000 URLs.
 - Add baseline and similarity-feature analysis outputs for observed top-20
   rankings.
+- On **every run**, fit OLS residual/variance models with `statsmodels` and
+  apply Benjamini-Hochberg multiple-testing correction; do not treat stats
+  analysis as optional or one-off.
+- Implement OLS pre-analysis preparation before interpreting run data: preliminary
+  OLS fit, diagnostic checks (linearity, multicollinearity, exogeneity review,
+  homoscedasticity, normality, influence), fix-only-when-flagged refits, then
+  Benjamini-Hochberg. Full procedure in `ARCHITECTURE.md`.
 
 ### 5. Reporting And Artifacts
 

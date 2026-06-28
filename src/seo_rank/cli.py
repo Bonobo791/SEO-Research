@@ -16,6 +16,7 @@ from seo_rank.dataforseo import (
 )
 from seo_rank.similarity import compute_page_similarity_features
 from seo_rank.text import normalize_page_text
+from seo_rank.textrazor import fixture_entity_response, normalize_entities
 
 
 @dataclass(frozen=True)
@@ -121,19 +122,42 @@ def build_offline_payload(config: RunConfig) -> dict[str, object]:
         for passage in normalize_page_text(parsed_page_text(response))
     ]
     similarity_features = compute_page_similarity_features(keywords[0], passages)
+    textrazor_responses: list[dict[str, object]] = []
+    textrazor_entities: list[dict[str, object]] = []
+    if not config.skip_textrazor:
+        textrazor_responses = [
+            fixture_entity_response(
+                url=str(page_text["url"]),
+                text=page_text["text"],
+            )
+            for response in page_text_responses
+            for page_text in [parsed_page_text(response)]
+            if page_text
+        ]
+        textrazor_entities = [
+            entity
+            for response in textrazor_responses
+            for entity in normalize_entities(response, url=str(response["url"]))
+        ]
+    raw_provider_data: dict[str, object] = {
+        "dataforseo": {
+            "keyword_expansion": keyword_expansion,
+            "page_text": page_text_responses,
+            "serp": serp_response,
+        },
+    }
+    if textrazor_responses:
+        raw_provider_data["textrazor"] = {
+            "entities": textrazor_responses,
+        }
     return {
         "config": serialized_config(config),
         "keywords": keywords,
-        "raw_provider_data": {
-            "dataforseo": {
-                "keyword_expansion": keyword_expansion,
-                "page_text": page_text_responses,
-                "serp": serp_response,
-            },
-        },
+        "raw_provider_data": raw_provider_data,
         "passages": passages,
         "serp_results": serp_results,
         "similarity_features": similarity_features,
+        "textrazor_entities": textrazor_entities,
         "network_calls": [],
     }
 

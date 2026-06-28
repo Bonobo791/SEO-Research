@@ -91,9 +91,24 @@ fixtures and mocked providers:
 - Keyword expansion deduplication and 25-keyword cap.
 - SERP normalization for organic top-20 results.
 - Page text normalization and empty/short passage filtering.
-- Cosine similarity aggregation for multi-passage pages.
+- Cosine similarity aggregation for multi-passage pages (offline fixture
+  embeddings today).
+- Cross-encoder similarity with `BGE-reranker-v2` and bi-encoder Gemini
+  embedding plus cosine similarity alone when live similarity evaluation begins.
+  **Both backends are required on every live run.**
+- Per cluster keyword: organic top-20 SERP, then for each result score passages,
+  full page content, and domain URLs against that keyword (the SERP target
+  keyword). Domain URLs are a content proxy only; cap at 1000 URLs per domain
+  and skip domains over 1000 URLs.
 - Run orchestration with mocked provider clients.
-- Analysis model comparison with synthetic ranking data.
+- Analysis model comparison with synthetic ranking data using `statsmodels` OLS
+  for residual/variance models and Benjamini-Hochberg correction for
+  multiple-testing scenarios. **Required on every run**, not only integration
+  tests.
+- OLS pre-analysis preparation on each run dataset before interpretation:
+  preliminary fit, diagnostic battery (linearity, multicollinearity, exogeneity,
+  homoscedasticity, normality, influence), refit-after-correction loop. See
+  `ARCHITECTURE.md` § OLS Pre-Analysis Preparation.
 - CLI smoke test that writes JSON and Markdown artifacts without network calls.
 
 Live provider tests are out of scope for the first slice. Network calls must be
