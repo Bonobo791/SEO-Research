@@ -6,22 +6,22 @@ analysis.
 ## What works today
 
 Offline `seo-rank run` expands a seed keyword from fixtures, loops over every
-capped cluster keyword, normalizes SERP rows, passages, page-level similarity
-features, and optional TextRazor entities, then writes JSON and Markdown
-artifacts with **no network calls**. Provider request builders and credential
-validators are available for offline verification. The CLI also has a
-non-default `--live-providers` gate, standard-library HTTP clients, and an
-env-gated live smoke test.
+capped cluster keyword, normalizes SERP rows and passages, computes fixture
+page-level **BGE**, **Gemini Doc Retrieval**, and **Gemini Semantic Similarity**
+scores, and writes JSON and Markdown artifacts with **no network calls**. Provider
+request builders and credential validators are available for offline
+verification. The CLI also has a non-default `--live-providers` gate,
+standard-library HTTP clients, and an env-gated live smoke test.
 
 ```bash
 python -m pytest
 seo-rank run --seed "technical seo" --dry-run --output-dir artifacts
 ```
 
-For live provider smoke tests, copy `.env.example` to `.env`, replace the
-placeholder values, and source it in your shell before running the integration
-test. The CLI reads environment variables from the process environment; it does
-not auto-load `.env`.
+For live provider smoke tests, copy `.env.example` to `.env` in the project root
+and fill in real credentials. The CLI and pytest **load `.env` automatically**
+(project root is detected via `pyproject.toml`); you do not need to `source` it in
+the shell. Values in `.env` override conflicting shell exports.
 
 ## Product direction (Phase 4)
 
@@ -29,10 +29,25 @@ Phase 3 shipped full cluster orchestration: offline and gated live runs process
 every capped keyword, group per-keyword outputs under `keyword_results`, and
 annotate flattened rows with `target_keyword`.
 
-Phase 4 adds dual live similarity backends (BGE-reranker-v2 + Gemini cosine) for
-**page-level** content scoring on each top-20 organic SERP row. Passage and domain
-scopes are Phase 5.5. Later: `statsmodels` OLS with Benjamini-Hochberg (Phase 5)
-and `runs/RUN_ID/` reporting (Phase 6).
+Phase 4 adds three page-level measurements on each top-20 organic SERP row:
+
+| Name | JSON key |
+|------|----------|
+| BGE | `bge` |
+| Gemini Doc Retrieval | `gemini_doc_retrieval` |
+| Gemini Semantic Similarity | `gemini_semantic_similarity` |
+
+Fixture wiring and artifact exposure are **done**. **Still required for Phase 4
+completion:**
+
+- **BGE:** local `FlagEmbedding` cross-encoder reranker
+- **Gemini Doc Retrieval:** Vertex AI `RETRIEVAL_QUERY` + `RETRIEVAL_DOCUMENT`
+- **Gemini Semantic Similarity:** Vertex AI `SEMANTIC_SIMILARITY` on keyword and page
+
+Details: `GOALS.md` (developer instructions) and `ARCHITECTURE.md`.
+
+Passage and domain scopes are Phase 5.5. Later: `statsmodels` OLS with
+Benjamini-Hochberg (Phase 5) and `runs/RUN_ID/` reporting (Phase 6).
 
 ## Repository layout
 

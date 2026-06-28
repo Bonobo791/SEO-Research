@@ -7,9 +7,27 @@ scope contract; keep deferred and historical items here.
 
 Active scope contract: `GOALS.md` (Phase 4).
 
+### Phase 4 — Live similarity backends (remaining)
+
+Fixture page-level wiring and artifacts shipped for **BGE**, **Gemini Doc
+Retrieval**, and **Gemini Semantic Similarity**. Still required to **finish**
+Phase 4:
+
+- **Gemini Doc Retrieval:** Vertex AI Text Embeddings; `RETRIEVAL_QUERY` +
+  `RETRIEVAL_DOCUMENT`; JSON key `gemini_doc_retrieval`
+- **Gemini Semantic Similarity:** Vertex AI Text Embeddings; `SEMANTIC_SIMILARITY`
+  on keyword and page; JSON key `gemini_semantic_similarity`
+- **BGE:** local `FlagEmbedding` cross-encoder reranker; JSON key `bge`
+- **Repo integration:** optional `pyproject.toml` extras, live-path swap in
+  `similarity.py`, credential/env gates, `network_calls` for Vertex, env-gated
+  integration tests, `.env.example` updates
+
+See `GOALS.md` § Remaining live backend work for full checklist.
+
 ### Phase 4.5 — Database
 - Begin storing analysis data from DataForSEO and TextRazor.
 - All data to be stored in Parquet and processed with Polars.
+- Add in a mechanism to get stored data instead of pulling from the API.
 
 ### Phase 5 — Statistical analysis
 
@@ -64,3 +82,12 @@ Active scope contract: `GOALS.md` (Phase 4).
     `test_cli_run.py`.
 - **GOALS retargeted to Phase 4:** live similarity backends and passage/page/domain
   scoring.
+- **Phase 4 started:** fixture page-level scoring for **BGE**, **Gemini Doc
+  Retrieval**, and **Gemini Semantic Similarity** is wired through offline and
+  gated live artifact generation, including JSON/Markdown exposure and unit
+  coverage. Live Vertex embeddings and local BGE integration remain pending; see
+  Current Backlog § Phase 4.
+- **Env loading:** CLI and pytest auto-load project-root `.env` via
+  `seo_rank.env` (`.env` overrides shell exports; no `source` required). Integration
+  gate now requires `SEO_RANK_RUN_LIVE_INTEGRATION=1` explicitly (fixes `"0"` being
+  treated as enabled).

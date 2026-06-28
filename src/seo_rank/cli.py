@@ -8,6 +8,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from seo_rank.env import ensure_project_env_loaded
 from seo_rank.dataforseo import (
     DataForSeoClientError,
     DataForSeoCredentialError,
@@ -24,7 +25,10 @@ from seo_rank.dataforseo import (
     parsed_page_text,
     validate_dataforseo_credentials,
 )
-from seo_rank.similarity import compute_page_similarity_features
+from seo_rank.similarity import (
+    compute_page_similarity_features,
+    compute_page_similarity_scores,
+)
 from seo_rank.text import normalize_page_text
 from seo_rank.textrazor import (
     TextRazorClientError,
@@ -73,6 +77,7 @@ class LiveProviderCredentials:
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the command-line interface."""
 
+    ensure_project_env_loaded()
     parser = build_parser()
     args = parser.parse_args(argv)
 
@@ -241,14 +246,24 @@ def build_offline_keyword_result(
         fixture_page_text_response(str(result["url"]), target_keyword)
         for result in serp_results
     ]
+    parsed_pages = [
+        page_text
+        for response in page_text_responses
+        for page_text in [parsed_page_text(response)]
+        if page_text
+    ]
     passages = [
         annotate_target_keyword(passage, target_keyword)
-        for response in page_text_responses
-        for passage in normalize_page_text(parsed_page_text(response))
+        for page_text in parsed_pages
+        for passage in normalize_page_text(page_text)
     ]
     similarity_features = [
         annotate_target_keyword(feature, target_keyword)
         for feature in compute_page_similarity_features(target_keyword, passages)
+    ]
+    page_similarity = [
+        annotate_target_keyword(score, target_keyword)
+        for score in compute_page_similarity_scores(target_keyword, parsed_pages)
     ]
     textrazor_responses: list[dict[str, object]] = []
     textrazor_entities: list[dict[str, object]] = []
@@ -258,9 +273,7 @@ def build_offline_keyword_result(
                 url=str(page_text["url"]),
                 text=page_text["text"],
             )
-            for response in page_text_responses
-            for page_text in [parsed_page_text(response)]
-            if page_text
+            for page_text in parsed_pages
         ]
         textrazor_entities = [
             annotate_target_keyword(entity, target_keyword)
@@ -283,6 +296,7 @@ def build_offline_keyword_result(
         "passages": passages,
         "serp_results": serp_results,
         "similarity_features": similarity_features,
+        "page_similarity": page_similarity,
         "textrazor_entities": textrazor_entities,
     }
 
@@ -399,10 +413,20 @@ def build_live_keyword_result(
     ]
     if page_text_responses:
         network_calls.append("dataforseo.page_text")
+    parsed_pages = [
+        page_text
+        for response in page_text_responses
+        for page_text in [parsed_page_text(response)]
+        if page_text
+    ]
     passages = [
         annotate_target_keyword(passage, target_keyword)
-        for response in page_text_responses
-        for passage in normalize_page_text(parsed_page_text(response))
+        for page_text in parsed_pages
+        for passage in normalize_page_text(page_text)
+    ]
+    page_similarity = [
+        annotate_target_keyword(score, target_keyword)
+        for score in compute_page_similarity_scores(target_keyword, parsed_pages)
     ]
 
     textrazor_responses: list[dict[str, object]] = []
@@ -415,9 +439,7 @@ def build_live_keyword_result(
                 transport=textrazor_transport,
             )
             | {"url": page_text["url"], "source_text": page_text["text"]}
-            for response in page_text_responses
-            for page_text in [parsed_page_text(response)]
-            if page_text
+            for page_text in parsed_pages
         ]
         if textrazor_responses:
             network_calls.append("textrazor.entities")
@@ -442,6 +464,7 @@ def build_live_keyword_result(
         "raw_provider_data": raw_provider_data,
         "passages": passages,
         "serp_results": serp_results,
+        "page_similarity": page_similarity,
         "similarity_features": [
             annotate_target_keyword(feature, target_keyword)
             for feature in compute_page_similarity_features(
@@ -487,6 +510,11 @@ def build_payload_from_keyword_results(
             feature
             for keyword_result in keyword_results
             for feature in keyword_result["similarity_features"]
+        ],
+        "page_similarity": [
+            score
+            for keyword_result in keyword_results
+            for score in keyword_result["page_similarity"]
         ],
         "textrazor_entities": [
             entity
@@ -545,6 +573,29 @@ def render_markdown_report(payload: dict[str, object]) -> str:
         assert isinstance(serp_results, list)
         for result in serp_results:
             lines.append(f"{result['rank']}. [{result['title']}]({result['url']})")
+        lines.append("")
+        lines.append("### Page Similarity")
+        lines.append("")
+        page_similarity = keyword_result["page_similarity"]
+        assert isinstance(page_similarity, list)
+        for score in page_similarity:
+            page_scores = score["page_similarity"]
+            bge_scores = page_scores["bge"]
+            doc_retrieval_scores = page_scores["gemini_doc_retrieval"]
+            semantic_scores = page_scores["gemini_semantic_similarity"]
+            lines.append(f"- {score['url']}")
+            lines.append(
+                "  - BGE: "
+                f"{bge_scores['raw_score']} (normalized {bge_scores['normalized_score']})"
+            )
+            lines.append(
+                "  - Gemini Doc Retrieval: "
+                f"{doc_retrieval_scores['raw_score']} (normalized {doc_retrieval_scores['normalized_score']})"
+            )
+            lines.append(
+                "  - Gemini Semantic Similarity: "
+                f"{semantic_scores['raw_score']} (normalized {semantic_scores['normalized_score']})"
+            )
         lines.append("")
     return "\n".join(lines)
 

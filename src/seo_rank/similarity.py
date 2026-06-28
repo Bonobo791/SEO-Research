@@ -47,6 +47,56 @@ def compute_page_similarity_features(
     return features
 
 
+def compute_page_similarity_scores(
+    keyword: str,
+    pages: Sequence[Mapping[str, Any]],
+) -> list[dict[str, object]]:
+    keyword_vector = fixture_embedding(keyword)
+    scores: list[dict[str, object]] = []
+
+    for page in pages:
+        url = page.get("url")
+        text = page.get("text", "")
+        if not isinstance(url, str):
+            continue
+        if not isinstance(text, str):
+            text = ""
+
+        gemini_score = round(
+            cosine_similarity(keyword_vector, fixture_embedding(text)),
+            6,
+        )
+        semantic_score = round(
+            cosine_similarity(
+                fixture_semantic_embedding(keyword),
+                fixture_semantic_embedding(text),
+            ),
+            6,
+        )
+        bge_score = round(fixture_bge_reranker_score(keyword, text), 6)
+        scores.append(
+            {
+                "url": url,
+                "page_similarity": {
+                    "bge": {
+                        "raw_score": bge_score,
+                        "normalized_score": bge_score,
+                    },
+                    "gemini_doc_retrieval": {
+                        "raw_score": gemini_score,
+                        "normalized_score": gemini_score,
+                    },
+                    "gemini_semantic_similarity": {
+                        "raw_score": semantic_score,
+                        "normalized_score": semantic_score,
+                    },
+                },
+            }
+        )
+
+    return scores
+
+
 def fixture_embedding(text: str) -> Vector:
     normalized = text.casefold()
     if "technical seo" in normalized or "crawling" in normalized:
@@ -54,6 +104,26 @@ def fixture_embedding(text: str) -> Vector:
     if "index" in normalized or "canonical" in normalized:
         return (1.0, 1.0)
     return (0.0, 1.0)
+
+
+def fixture_semantic_embedding(text: str) -> Vector:
+    normalized = text.casefold()
+    if "technical seo" in normalized or "crawling" in normalized:
+        return (1.0, 0.0, 0.0)
+    if "index" in normalized or "canonical" in normalized:
+        return (0.6, 0.8, 0.0)
+    return (0.0, 1.0, 0.0)
+
+
+def fixture_bge_reranker_score(keyword: str, text: str) -> float:
+    normalized_keyword = keyword.casefold()
+    normalized_text = text.casefold()
+
+    if normalized_keyword in normalized_text:
+        return 0.98
+    if "index" in normalized_text or "canonical" in normalized_text:
+        return 0.74
+    return 0.12
 
 
 def cosine_similarity(left: Vector, right: Vector) -> float:

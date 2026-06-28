@@ -103,18 +103,45 @@ def test_run_writes_offline_json_and_markdown_artifacts(
         payload["keyword_results"][0]["similarity_features"][0]["passage_count"]
         == 2
     )
+    assert [
+        score["url"] for score in payload["keyword_results"][0]["page_similarity"]
+    ] == [
+        "https://example.com/technical-seo/1",
+        "https://example.com/technical-seo/2",
+        "https://example.com/technical-seo/3",
+    ]
+    assert (
+        payload["keyword_results"][0]["page_similarity"][0]["page_similarity"][
+            "bge"
+        ]["raw_score"]
+        == 0.98
+    )
+    assert (
+        payload["keyword_results"][0]["page_similarity"][0]["page_similarity"][
+            "gemini_semantic_similarity"
+        ]["normalized_score"]
+        == 1.0
+    )
+    assert {
+        score["target_keyword"]
+        for score in payload["keyword_results"][0]["page_similarity"]
+    } == {"technical seo"}
     assert len(payload["serp_results"]) == 75
     assert len(payload["passages"]) == sum(
         len(keyword_result["passages"])
         for keyword_result in payload["keyword_results"]
     )
     assert len(payload["similarity_features"]) == 75
+    assert len(payload["page_similarity"]) == 75
     assert {passage["target_keyword"] for passage in payload["passages"]} == set(
         payload["keywords"]
     )
     assert {
         feature["target_keyword"] for feature in payload["similarity_features"]
     } == set(payload["keywords"])
+    assert {score["target_keyword"] for score in payload["page_similarity"]} == set(
+        payload["keywords"]
+    )
     assert payload["textrazor_entities"] == []
     assert "textrazor" not in payload["raw_provider_data"]
     assert payload["network_calls"] == []
@@ -125,6 +152,10 @@ def test_run_writes_offline_json_and_markdown_artifacts(
     assert "- Network calls: 0" in report
     assert "## Target Keyword: technical seo" in report
     assert "## Target Keyword: technical seo audit" in report
+    assert "### Page Similarity" in report
+    assert "BGE: 0.98 (normalized 0.98)" in report
+    assert "Gemini Doc Retrieval:" in report
+    assert "Gemini Semantic Similarity:" in report
 
 
 def test_run_includes_offline_textrazor_entities_when_not_skipped(tmp_path: Path) -> None:
@@ -374,6 +405,10 @@ def test_run_live_providers_writes_artifacts_with_injected_transports(
         == "technical seo"
     )
     assert (
+        payload["keyword_results"][0]["page_similarity"][0]["target_keyword"]
+        == "technical seo"
+    )
+    assert (
         payload["keyword_results"][0]["textrazor_entities"][0]["target_keyword"]
         == "technical seo"
     )
@@ -383,6 +418,10 @@ def test_run_live_providers_writes_artifacts_with_injected_transports(
     )
     assert (
         payload["keyword_results"][1]["similarity_features"][0]["target_keyword"]
+        == "technical seo audit"
+    )
+    assert (
+        payload["keyword_results"][1]["page_similarity"][0]["target_keyword"]
         == "technical seo audit"
     )
     assert (

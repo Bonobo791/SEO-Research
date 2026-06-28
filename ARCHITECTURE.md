@@ -10,10 +10,12 @@
 - Analysis library: `statsmodels` for observational ranking models (planned;
   not yet a runtime dependency); `numpy`, `scipy`, `patsy`, and `linearmodels`
   for OLS diagnostics, IV/panel extensions, and supporting tests (planned)
-- Similarity backends: deterministic fixture embeddings for offline tests today;
-  cross-encoder `BGE-reranker-v2` and bi-encoder Gemini embedding plus cosine
-  similarity alone when live similarity evaluation begins (planned; not yet
-  runtime dependencies)
+- Similarity backends: deterministic fixture passage aggregation plus
+  offline-testable page-level fixtures for **BGE**, **Gemini Doc Retrieval**, and
+  **Gemini Semantic Similarity**. **Live execution is not wired:** Phase 4 still
+  requires Vertex AI Text Embeddings (`google-cloud-aiplatform`) and `FlagEmbedding`
+  (local BGE cross-encoder) as optional runtime dependencies — see
+  [Live similarity backends (Phase 4 remaining)](#live-similarity-backends-phase-4-remaining).
 - Deployment: none
 - Databases: none
 - Cache layer: none
@@ -34,9 +36,15 @@ non-default CLI live-provider gate. Standard-library HTTP clients and an
 env-gated live smoke test are available. Offline and explicitly gated live runs
 now loop over every capped cluster keyword, group provider outputs under
 `keyword_results`, and annotate flattened normalized rows with
-`target_keyword`. Later phases add dual-backend live similarity
-(BGE-reranker-v2 + Gemini cosine), and `statsmodels` OLS with
-Benjamini-Hochberg after OLS pre-analysis diagnostics.
+`target_keyword`.
+
+**Phase 4 in progress:** page-level similarity emits fixture scores for **BGE**,
+**Gemini Doc Retrieval**, and **Gemini Semantic Similarity** per SERP row in JSON
+and Markdown artifacts. **Finishing Phase 4** requires replacing live-path fixtures
+with real Vertex Gemini embeddings and local BGE inference — see
+[Live similarity backends (Phase 4 remaining)](#live-similarity-backends-phase-4-remaining).
+Later phases add `statsmodels` OLS with Benjamini-Hochberg after OLS pre-analysis
+diagnostics.
 
 TextRazor entities are captured in offline runs for schema validation; entity-derived
 model features remain out of scope.
@@ -70,7 +78,7 @@ The repository contains an **offline-verifiable CLI scaffold** (Phase 1 shipped)
   `similarity.py`, `textrazor.py`
 - **CLI:** `seo-rank run` writes `run.json` and `report.md` from fixtures (no
   network calls)
-- **Tests:** 23 tests under `tests/`; gate: `python -m pytest`
+- **Tests:** 28 tests under `tests/`; gate: `python -m pytest`
 - **Product docs:** `ARCHITECTURE.md`, `GOALS.md`, `ROADMAP.md`, `README.md`,
   `TESTING.md`
 - **Not yet:** live similarity backends, `statsmodels` analysis,
@@ -92,16 +100,19 @@ in code yet.
   organic SERP, and page-text request specs; TextRazor parsed-text entity
   request specs; credential validation without secret values in errors.
 - **Live-provider gate (shipped):** `--live-providers` requires
-  `SEO_RANK_ENABLE_LIVE_PROVIDERS=1` and provider credentials before executing
-  the minimal live provider smoke path.
+  `SEO_RANK_ENABLE_LIVE_PROVIDERS=1` in `.env` (loaded automatically) and provider
+  credentials before executing the minimal live provider smoke path.
 - **Provider HTTP clients (shipped):** standard-library DataForSEO and TextRazor
   request execution with injectable transports for offline tests.
-- **Text pipeline (shipped, offline):** passage split (`text.py`); page-level
-  similarity from fixture embeddings (`similarity.py`).
+- **Text pipeline (shipped, offline):** passage split (`text.py`); passage
+  aggregation and page-level fixture similarity for BGE, Gemini Doc Retrieval,
+  and Gemini Semantic Similarity (`similarity.py`).
 - **Broader provider integration (planned):** live coverage beyond the smoke
   path.
-- **Live similarity (planned):** dual-backend scoring — see
-  [Planned Cosine Similarity Run](#planned-cosine-similarity-run).
+- **Live similarity (Phase 4 remaining):** real Vertex Gemini Doc Retrieval +
+  Gemini Semantic Similarity, and local **BGE** — see [Live similarity backends
+  (Phase 4 remaining)](#live-similarity-backends-phase-4-remaining) and
+  [Planned Page Similarity Run](#planned-page-similarity-run).
 - **Analysis engine (planned):** OLS pre-analysis, `statsmodels` OLS,
   Benjamini-Hochberg — see [Planned Per-Run Statistical Analysis](#planned-per-run-statistical-analysis).
 - **Reporters (shipped):** JSON + Markdown under `--output-dir`; planned
@@ -111,19 +122,21 @@ in code yet.
 
 **Offline run today:** seed keyword → fixture keyword expansion → capped keyword
 cluster → per-keyword SERP fixtures → page-text fixtures → passage normalize →
-fixture similarity against the target keyword → optional TextRazor entities →
-grouped `keyword_results` plus `target_keyword`-annotated aggregate fields in
-`run.json` + `report.md`.
+fixture passage aggregation plus page-level **BGE**, **Gemini Doc Retrieval**, and
+**Gemini Semantic Similarity** against the target keyword → optional TextRazor
+entities → grouped `keyword_results` plus `target_keyword`-annotated aggregate
+fields in `run.json` + `report.md`.
 
-**Planned live run:** seed keyword → keyword expansion → per-keyword top-20 SERP
-→ page text → TextRazor entities → dual-backend similarity (passage / page /
-domain) → rank-feature join → OLS pre-analysis → `statsmodels` OLS →
+**Planned live run (Phase 4 completion):** seed keyword → keyword expansion →
+per-keyword top-20 SERP → page text → TextRazor entities → **live** page
+similarity (BGE + Gemini Doc Retrieval + Gemini Semantic Similarity; fixtures
+only until wired) → rank-feature join → OLS pre-analysis → `statsmodels` OLS →
 Benjamini-Hochberg → report generation.
 
 Raw provider responses and generated run artifacts should stay out of source
 control.
 
-## Planned Cosine Similarity Run
+## Planned Page Similarity Run
 
 Live similarity evaluation runs once per keyword in the expanded keyword
 cluster. For each cluster keyword:
@@ -132,24 +145,51 @@ cluster. For each cluster keyword:
    **target keyword** for every similarity score derived from that SERP. Passage,
    page, and domain scores always use the keyword that generated the SERP, not
    other keywords in the cluster.
-2. For **each organic result** in that top 20:
-   - **Passage scope:** extract passages from the result's parsed page text and
-     score each passage against the target keyword.
-   - **Page scope:** score the full parsed page content of the result against
-     the target keyword.
-   - **Domain scope:** score the URLs on the result's domain against the target
-     keyword. Use the URL list as a proxy for site-wide content; do not require
-     a full body fetch for every URL. Keep at most **1000 URLs** per domain and
-     **skip domains whose URL inventory exceeds 1000**.
+2. For **each organic result** in that top 20 (Phase 4 **page scope** shipped):
+   - Score the full parsed page with **BGE** (`bge`).
+   - Score with **Gemini Doc Retrieval** (`gemini_doc_retrieval`) — Vertex
+     `RETRIEVAL_QUERY` vs `RETRIEVAL_DOCUMENT`.
+   - Score with **Gemini Semantic Similarity** (`gemini_semantic_similarity`) —
+     Vertex `SEMANTIC_SIMILARITY` on keyword and page.
+3. **Later (Phase 5.5):** passage and domain scopes for the same three signals.
 
-Compare **both** backends on **every** live similarity run (not a one-off
-experiment):
+Each measurement produces page-level scores for the same top-20 SERP rows so
+results stay comparable run to run.
 
-- Cross-encoder: `BGE-reranker-v2`
-- Bi-encoder: Gemini embedding with cosine similarity alone
+## Live similarity backends (Phase 4 remaining)
 
-Each backend produces passage-, page-, and domain-level scores for the same
-top-20 SERP rows so results stay comparable run to run.
+Fixture scorers in `similarity.py` implement the artifact shape today. **Phase
+4 is not complete** until live paths call the backends below. Offline tests and
+`--dry-run` keep fixtures.
+
+### Gemini Doc Retrieval & Gemini Semantic Similarity (Vertex AI)
+
+| Item | Requirement |
+|------|-------------|
+| Auth | GCP project + region; Application Default Credentials or service account |
+| SDK | `google-cloud-aiplatform` — `TextEmbeddingModel`, `TextEmbeddingInput` |
+| Model | `gemini-embedding-001` default (2048 tokens; up to 3072 dims) |
+| Gemini Doc Retrieval | `RETRIEVAL_QUERY` (keyword) + `RETRIEVAL_DOCUMENT` (page body; optional SERP `title`) → `gemini_doc_retrieval` |
+| Gemini Semantic Similarity | `SEMANTIC_SIMILARITY` on keyword and page → `gemini_semantic_similarity` |
+| Vectors | L2-normalize; cosine similarity; optional `outputDimensionality` |
+
+### BGE (local cross-encoder)
+
+| Item | Requirement |
+|------|-------------|
+| JSON key | `bge` |
+| Library | `FlagEmbedding` |
+| Model | BGE **reranker** (cross-encoder), e.g. pinned `BAAI/bge-reranker-v2-*` |
+| Query | Target keyword; prepend model-card instruction when required |
+| Scores | Relative rank within SERP (~0.6–1.0 typical); not calibrated vs Gemini |
+| Compute | Local GPU recommended; optional fp16; batch per keyword |
+
+### Analysis use
+
+**BGE** — local cross-encoder rerank signal. **Gemini Doc Retrieval** — retrieval
+task embedding cosine. **Gemini Semantic Similarity** — STS task embedding cosine.
+All three land in every live page-similarity path for comparability in downstream
+OLS work (Phase 5).
 
 ## Planned Per-Run Statistical Analysis
 
@@ -166,9 +206,9 @@ Preparation](#ols-pre-analysis-preparation) on the run dataset.
 3. Emit similarity-backend outputs, diagnostic artifacts, and statistical
    analysis into the run outputs (JSON plus Markdown report sections).
 
-Do not skip either similarity backend or the statistical analysis step on
-individual runs unless the run is an explicit offline fixture or dry-run test
-mode documented in the CLI contract.
+Do not skip any page-level scorer or the statistical analysis step on individual
+runs unless the run is an explicit offline fixture or dry-run test mode
+documented in the CLI contract.
 
 ## OLS Pre-Analysis Preparation
 
@@ -281,10 +321,10 @@ before proceeding to Benjamini-Hochberg correction and run reporting.
   correction on every run; complete [OLS Pre-Analysis
   Preparation](#ols-pre-analysis-preparation) before interpreting results; do not
   introduce a parallel stats stack for the same work.
-- Keep deterministic fixture embeddings for offline cosine-similarity tests.
-  Live runs follow [Planned Cosine Similarity Run](#planned-cosine-similarity-run):
-  per cluster keyword, top-20 SERP, then passage, page, and domain URL scoring
-  against that keyword's target keyword only.
+- Keep deterministic fixture embeddings for offline tests. Live runs follow
+  [Planned Page Similarity Run](#planned-page-similarity-run): per cluster keyword,
+  top-20 SERP, then BGE, Gemini Doc Retrieval, and Gemini Semantic Similarity at
+  page scope (passage and domain in Phase 5.5).
 - Capture TextRazor entities for future work but exclude entity-derived features
   from the first ranking-variation model.
 - Continue filling in the real package under `src/seo_rank/` and add

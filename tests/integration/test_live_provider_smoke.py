@@ -11,8 +11,8 @@ pytestmark = pytest.mark.integration
 
 
 def require_live_provider_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    if not os.environ.get("SEO_RANK_RUN_LIVE_INTEGRATION"):
-        pytest.skip("set SEO_RANK_RUN_LIVE_INTEGRATION=1 to run live provider smoke tests")
+    if os.environ.get("SEO_RANK_RUN_LIVE_INTEGRATION") != "1":
+        pytest.skip("set SEO_RANK_RUN_LIVE_INTEGRATION=1 in .env to run live provider smoke tests")
     required = [
         "SEO_RANK_ENABLE_LIVE_PROVIDERS",
         "DATAFORSEO_LOGIN",
