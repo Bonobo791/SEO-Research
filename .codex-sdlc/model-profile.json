@@ -1,7 +1,7 @@
 {
-  "selected_profile": "task-based-gpt-5.5",
+  "selected_profile": "task-based-mixed-gpt-5.4-gpt-5.5",
   "profiles": {
-    "task-based-gpt-5.5": {
+    "task-based-mixed-gpt-5.4-gpt-5.5": {
       "main_model": "gpt-5.5",
       "default_reasoning": "low",
       "reasoning_by_task": {
@@ -13,13 +13,22 @@
         "installs": "xhigh",
         "configuration": "xhigh"
       },
-      "review_model": "gpt-5.5",
+      "model_by_task": {
+        "documentation": "gpt-5.4",
+        "coding": "gpt-5.5",
+        "review": "gpt-5.4",
+        "qa": "gpt-5.4",
+        "security": "gpt-5.5",
+        "installs": "gpt-5.5",
+        "configuration": "gpt-5.5"
+      },
+      "review_model": "gpt-5.4",
       "review_reasoning": "high",
-      "tradeoff": "Keeps all work on gpt-5.5 while matching reasoning effort to task risk."
+      "tradeoff": "Uses gpt-5.4 for documentation/review/QA and gpt-5.5 for coding, security, installs, and configuration."
     }
   },
   "policy": {
     "high_confidence_threshold_percent": 95,
-    "low_confidence_rule": "Research more first. If confidence stays below 95%, use the next higher task tier without changing away from gpt-5.5. Reserve xhigh for installs and configuration."
+    "low_confidence_rule": "Research more first. If confidence stays below 95%, use the next higher task tier while staying within the approved task-based model policy. Reserve xhigh for installs and configuration."
   }
 }

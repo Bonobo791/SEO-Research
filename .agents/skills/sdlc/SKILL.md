@@ -17,7 +17,7 @@ Use this skill for implementation, bug-fix, refactor, testing, release, publish,
 2. Read `TESTING.md` and `ARCHITECTURE.md` when they exist and are relevant to the change.
 3. Plan before coding. State confidence as `HIGH`, `MEDIUM`, or `LOW`.
 4. Task routing gate: before giving execution steps, identify the execution lane as CLI, Desktop/computer-use, browser automation, or human-only setup. If Microsoft browser sign-in, developer program qualification, account pickers, MFA, tenant consent, Office UI, admin portal state, or other auth-heavy screens are involved, say `Desktop/computer-use` first, then provide handoff guardrails before CLI/browser steps.
-5. Use the repo model policy from `AGENTS.md`: `gpt-5.5` with `low` for documentation, `medium` for coding, `high` for review/QA/security, and `xhigh` only for installs and configuration.
+5. Use the repo model policy from `AGENTS.md`: `gpt-5.4` with `low` for documentation, `gpt-5.5` with `medium` for coding, `gpt-5.4` with `high` for review/QA, `gpt-5.5` with `high` for security, and `gpt-5.5` with `xhigh` only for installs and configuration.
 6. If confidence is below 95% for the next slice, research more before coding. Ask the user only if the uncertainty stays material.
    Keep slices small enough that confidence stays high in practice. If confidence is not high, say why plainly and tighten the slice.
 7. TDD is mandatory: write the failing test first, run it red, implement the minimum fix, then run it green.
