@@ -36,8 +36,7 @@ trees stay out of source control.
 
 #### Progress (2026-06-29)
 
-**Slices:** 9 of 10 shipped, 1 open. Phase 4.5 is not signed off pending
-validation-edge hardening (slice 10).
+**Slices:** 10 of 10 shipped, 0 open. Phase 4.5 is signed off.
 
 | # | Slice | Layer | Status | Primary deliverable |
 | - | ----- | ----- | ------ | ------------------- |
@@ -50,17 +49,16 @@ validation-edge hardening (slice 10).
 | 7 | Dependencies, docs, round-trip | Verify | Shipped | `pyarrow` + `polars` declared; docs aligned; `test_round_trip.py` CLI sweep |
 | 8 | Curated sink contract | Write | Shipped | Curated tables sink via Polars `sink_parquet(..., compression="zstd", statistics=True)` with sorted retrieval keys |
 | 9 | Mart sink contract | Write | Shipped | Feature marts and `analysis_mart` use lazy `sink_parquet` with statistics; drop eager `collect` + `write_parquet` in `write_feature_dataset` |
-| 10 | Validation lazy edge | Infra | Open | Row-level checks in `validate.py` without mid-plan `collect()`; validation stays lazy until sink boundary |
+| 10 | Validation lazy edge | Infra | Shipped | Schema-only validation before sink with row-level audit at the materialized edge; no mid-plan `collect()` in `validate.py` |
 
 **Library API (callable, with CLI surfaces):** `normalize_run`,
 `build_feature_marts`, `build_analysis_mart` under `src/seo_rank/data/`.
 
-**Remaining to close Phase 4.5:** slice 10 (validation lazy edge).
+**Remaining to close Phase 4.5:** none.
 
 **Residual risk:** curated normalization stays lazy through the Polars plan, but
 batch-level Python UDFs still parse JSON (`response_body_bytes`), split passages,
-normalize entities, and compute per-keyword similarity groups. Validation still
-collects selected columns before row-level checks (slice 10).
+normalize entities, and compute per-keyword similarity groups.
 
 **Post-sign-off polish:** optional hardening tracked in `FIXUPS.md` (empty-endpoint
 paths, CLI replay polish, normalize UDF schema guards, mart sink Parquet metadata
@@ -235,13 +233,12 @@ the write contract. Each slice is one reviewable unit with its own tests.
      optional Parquet-metadata hardening).
    - Slice 9 shipped.
 
-10. **[ ] Slice 10 — Validation lazy edge**
-    - Refactor `validate_frame_contract` so uniqueness, null, and range checks do
-      not call mid-plan `collect()` on selected columns.
-    - Acceptable outcomes: lazy-native checks, minimal streaming collect only at
-      the documented sink edge, or row-count-free schema-only validation before
-      sink with post-sink audit for row rules.
+10. **[x] Slice 10 — Validation lazy edge**
+    - `validate_frame_contract` is schema-only and stays lazy.
+    - Row-level uniqueness, null, and range checks run on materialized frames at
+      the sink edge.
     - Tests: guard against new non-edge `collect()` calls in `validate.py`.
+   - Slice 10 shipped.
 
 See `ROADMAP.md` for Phase 5 (OLS) and Phase 5.5 (passage/domain scoring).
 
@@ -268,9 +265,8 @@ See `ROADMAP.md` for Phase 5 (OLS) and Phase 5.5 (passage/domain scoring).
 
 ## Phase 4.5 acceptance criteria
 
-**Status (2026-06-29):** 8 acceptance items complete, 3 partial, 0 not started.
-Dev slices: 9 shipped, 1 open (slice 10). Phase 4.5 is not signed off pending
-validation-edge hardening.
+**Status (2026-06-29):** 11 acceptance items complete, 0 partial, 0 not started.
+Dev slices: 10 shipped, 0 open. Phase 4.5 is signed off.
 
 | Acceptance item | Slice(s) | Status |
 | --------------- | -------- | ------ |
@@ -279,8 +275,8 @@ validation-edge hardening.
 | Six curated Parquet tables with stable IDs | 2, 8 | Complete |
 | Feature marts + `analysis_mart` | 4, 5 | Complete |
 | `src/seo_rank/data/` LazyFrame transforms | 3 | Complete |
-| Parquet sinks: zstd, statistics, sorted keys; collect only at edges | 8, 9, 10 | Partial |
-| `validate.py` before every mart write | 3, 10 | Partial |
+| Parquet sinks: zstd, statistics, sorted keys; collect only at edges | 8, 9, 10 | Complete |
+| `validate.py` before every mart write | 3, 10 | Complete |
 | `raw_responses` excluded from analytical joins | 5, 6 | Complete |
 | CLI storage commands + `--stored-run` | 6 | Complete |
 | Offline round-trip tests (no network) | 7 | Complete |
@@ -304,12 +300,11 @@ validation-edge hardening.
 - [x] `src/seo_rank/data/` implements `scans`, `normalize`, `features`, `marts`,
   and `validate`; every transform accepts/returns `pl.LazyFrame`. *(Slice 3;
   curated normalization uses batch UDFs for JSON parse and similarity grouping.)*
-- [ ] Parquet sinks use Zstandard compression and statistics; tables sorted by
-  primary retrieval keys; `collect(engine="streaming")` only at CLI/report edges.
-  *(Partial: slices 8 and 9 shipped for curated and mart tables; slice 10 open
-  for validation `collect()`.)*
+- [x] Parquet sinks use Zstandard compression and statistics; tables sorted by
+  primary retrieval keys; materialized row audits stay at the sink edge.
+  *(Slices 8, 9, and 10.)*
 - [x] `validate.py` runs schema/key/null/range checks before every mart write.
-  *(Slice 3 shipped the hook; slice 10 open for lazy-edge row checks.)*
+  *(Slices 3 and 10.)*
 - [x] `raw_responses` excluded from normal analytical joins; `replay` path only.
   *(Slices 5, 6.)*
 - [x] CLI: `normalize`, `build-features`, `analyze`, `replay`; `--stored-run`

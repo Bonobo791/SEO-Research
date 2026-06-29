@@ -4,7 +4,11 @@ import polars as pl
 
 from seo_rank.data.normalize import build_curated_lazyframes
 from seo_rank.data.scans import scan_raw_responses
-from seo_rank.data.validate import validate_frame_contract, validate_required_columns
+from seo_rank.data.validate import (
+    validate_frame_contract,
+    validate_materialized_frame_contract,
+    validate_required_columns,
+)
 
 
 def test_scan_raw_responses_uses_lazy_parquet_scan(
@@ -66,7 +70,7 @@ def test_validate_required_columns_rejects_missing_columns() -> None:
         raise AssertionError("expected ValueError")
 
 
-def test_validate_frame_contract_checks_schema_keys_nulls_and_ranges() -> None:
+def test_validate_frame_contract_checks_schema_keys_and_expected_schema() -> None:
     valid_frame = pl.DataFrame(
         [
             {
@@ -87,6 +91,47 @@ def test_validate_frame_contract_checks_schema_keys_nulls_and_ranges() -> None:
             "serp_rank": pl.Int64,
             "response_id": pl.Utf8,
         },
+    ) is valid_frame
+
+
+def test_validate_frame_contract_does_not_collect_rows() -> None:
+    lazy_frame = pl.DataFrame(
+        [{"run_id": "run-1", "response_id": "abc123", "endpoint": "serp"}]
+    ).lazy()
+
+    def fail_collect(*args, **kwargs):  # noqa: ANN001, ANN003
+        raise AssertionError("validate_frame_contract should not collect rows")
+
+    original_collect = pl.LazyFrame.collect
+    pl.LazyFrame.collect = fail_collect
+    try:
+        assert validate_frame_contract(
+            lazy_frame,
+            required_columns={"run_id", "response_id", "endpoint"},
+            expected_schema={
+                "run_id": pl.Utf8,
+                "response_id": pl.Utf8,
+                "endpoint": pl.Utf8,
+            },
+        ) is lazy_frame
+    finally:
+        pl.LazyFrame.collect = original_collect
+
+
+def test_validate_materialized_frame_contract_checks_unique_nulls_and_ranges() -> None:
+    valid_frame = pl.DataFrame(
+        [
+            {
+                "run_id": "run-1",
+                "serp_item_id": "serp-1",
+                "serp_rank": 1,
+                "response_id": "resp-1",
+            }
+        ]
+    )
+
+    assert validate_materialized_frame_contract(
+        valid_frame,
         unique_columns={"serp_item_id"},
         non_null_columns={"serp_item_id", "serp_rank"},
         bounded_columns={"serp_rank": (1, 20)},
@@ -107,18 +152,11 @@ def test_validate_frame_contract_checks_schema_keys_nulls_and_ranges() -> None:
                 "response_id": "resp-2",
             },
         ]
-    ).lazy()
+    )
 
     try:
-        validate_frame_contract(
+        validate_materialized_frame_contract(
             invalid_frame,
-            required_columns={"run_id", "serp_item_id", "serp_rank", "response_id"},
-            expected_schema={
-                "run_id": pl.Utf8,
-                "serp_item_id": pl.Utf8,
-                "serp_rank": pl.Int64,
-                "response_id": pl.Utf8,
-            },
             unique_columns={"serp_item_id"},
             non_null_columns={"serp_item_id", "serp_rank", "response_id"},
             bounded_columns={"serp_rank": (1, 20)},

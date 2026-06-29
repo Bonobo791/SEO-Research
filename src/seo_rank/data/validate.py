@@ -35,35 +35,44 @@ def validate_frame_contract(
         if mismatched:
             raise ValueError("Schema mismatch: " + "; ".join(mismatched))
 
+    return frame
+
+
+def validate_materialized_frame_contract(
+    frame: pl.DataFrame,
+    *,
+    unique_columns: Iterable[str] = (),
+    non_null_columns: Iterable[str] = (),
+    bounded_columns: Mapping[str, tuple[float | int | None, float | int | None]] | None = None,
+) -> pl.DataFrame:
+    """Ensure a materialized frame satisfies row-level contract rules."""
+
     unique_columns = tuple(unique_columns)
     non_null_columns = tuple(non_null_columns)
     bounded_columns = dict(bounded_columns or {})
-    check_columns = sorted(
-        set(unique_columns) | set(non_null_columns) | set(bounded_columns)
-    )
-    if check_columns:
-        selected = frame.select([pl.col(column) for column in check_columns]).collect()
+    rows = frame.to_dicts()
+    if unique_columns:
+        duplicated = len(
+            {tuple(row.get(column) for column in unique_columns) for row in rows}
+        ) != len(rows)
+        if duplicated:
+            raise ValueError(
+                "Duplicate rows found for unique columns: "
+                + ", ".join(unique_columns)
+            )
 
-        if unique_columns:
-            duplicated = selected.select(list(unique_columns)).unique().height != selected.height
-            if duplicated:
-                raise ValueError(
-                    "Duplicate rows found for unique columns: "
-                    + ", ".join(unique_columns)
-                )
+    for column in non_null_columns:
+        if any(row.get(column) is None for row in rows):
+            raise ValueError("Null values found in required column: " + column)
 
-        for column in non_null_columns:
-            if selected.get_column(column).null_count() > 0:
-                raise ValueError("Null values found in required column: " + column)
-
-        for column, (minimum, maximum) in bounded_columns.items():
-            series = selected.get_column(column).drop_nulls()
-            if series.is_empty():
-                continue
-            if minimum is not None and series.min() < minimum:
-                raise ValueError(f"Column {column} is below minimum {minimum}")
-            if maximum is not None and series.max() > maximum:
-                raise ValueError(f"Column {column} is above maximum {maximum}")
+    for column, (minimum, maximum) in bounded_columns.items():
+        values = [row.get(column) for row in rows if row.get(column) is not None]
+        if not values:
+            continue
+        if minimum is not None and min(values) < minimum:
+            raise ValueError(f"Column {column} is below minimum {minimum}")
+        if maximum is not None and max(values) > maximum:
+            raise ValueError(f"Column {column} is above maximum {maximum}")
 
     return frame
 

@@ -188,18 +188,31 @@ def test_write_feature_dataset_uses_lazy_sink_parquet_with_statistics(
     monkeypatch,
 ) -> None:
     run_dir = tmp_path / "run-1"
-    frame = pl.DataFrame([{"run_id": "run-1", "target_keyword_id": "kw-1"}]).lazy()
+    frame = pl.DataFrame(
+        [
+            {
+                "run_id": "run-1",
+                "target_keyword_id": "kw-1",
+                "target_keyword": "technical seo",
+                "keyword_order": 1,
+                "source_response_id": "resp-1",
+                "serp_item_id": "serp-1",
+                "canonical_url_hash": "hash-1",
+                "url": "https://example.com",
+                "serp_rank": 1,
+                "title": "Example",
+                "description": "Example result",
+                "schema_version": "keyword_serp.v1",
+            }
+        ]
+    ).lazy()
     captured: dict[str, object] = {}
+    rows = frame.collect().to_dicts()
 
     def fake_sink_parquet(self, path, **kwargs):  # noqa: ANN001, ANN003
         captured["path"] = path
         captured["kwargs"] = kwargs
-        pq.write_table(
-            pa.Table.from_pylist(
-                [{"run_id": "run-1", "target_keyword_id": "kw-1"}],
-            ),
-            path,
-        )
+        pq.write_table(pa.Table.from_pylist(rows), path)
 
     def fail_collect(*args, **kwargs):  # noqa: ANN001, ANN003
         raise AssertionError("write_feature_dataset should not collect before sink")

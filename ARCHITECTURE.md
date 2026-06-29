@@ -84,12 +84,11 @@ The repository contains an **offline-verifiable CLI scaffold** (Phase 1 shipped)
 - **CLI:** `seo-rank run` writes `run.json` and `report.md` from fixtures (no
   network calls) or gated live providers; Phase 4.5 adds `normalize`,
   `build-features`, `analyze`, `replay`, and `run --stored-run` (Slice 6 shipped)
-- **Tests:** 72 tests under `tests/`; gate: `python -m pytest`; Phase 4.5 Slice 7
+- **Tests:** 74 tests under `tests/`; gate: `python -m pytest`; Phase 4.5 Slice 7
   shipped the round-trip regression sweep in `test_sdlc_docs.py`
 - **Product docs:** `ARCHITECTURE.md`, `GOALS.md`, `ROADMAP.md`, `README.md`,
   `TESTING.md`
-- **Not yet:** `statsmodels` analysis (Phase 5); validation lazy-edge hardening
-  in the Phase 4.5 write path
+- **Not yet:** `statsmodels` analysis (Phase 5)
 
 Module and artifact details are in [Application Surface](#application-surface)
 and [Key Product Components](#key-product-components) below. Planned live
@@ -283,7 +282,7 @@ Built by `marts.py` when Phase 5 analysis needs a single panel. One row per
 - Write `raw_responses` first, then derive curated tables so `response_id`
   lineage is consistent.
 - Run `validate.py` schema/key/null/range checks **before** every mart write;
-  refuse to sink invalid output.
+  row-level audits happen at the sink edge for materialized datasets.
 
 ### Read contract
 
@@ -336,13 +335,14 @@ src/seo_rank/data/
 | `normalize.py` | Scan `raw_responses`, filter by `endpoint`, parse `response_body_bytes` via batch UDFs (`map_batches` / `map_groups`); emit curated LazyFrames; no analytical reads of `raw_responses` elsewhere |
 | `features.py` | Build `keyword_serp`, `page_features`, `passage_features`, `domain_features` from curated scans |
 | `marts.py` | Join feature marts into `analysis_mart` at `target_keyword × SERP URL` grain |
-| `validate.py` | Schema contracts, primary/foreign keys, null and range checks; called before every `sink_parquet` |
+| `validate.py` | Schema contracts plus row-level uniqueness, null, and range audits; used before every mart write or at the sink edge |
 
-**Execution model:** scan lazily, filter/select early, join on IDs only, validate,
-then sink. Curated normalization keeps JSON parsing and similarity grouping in
-batch-level Python UDFs inside the lazy plan; each table collects once at write
-(`collect(engine="streaming")`). Further eager collection only at CLI boundaries,
-report generation, or tests that need in-memory assertions.
+**Execution model:** scan lazily, filter/select early, join on IDs only, validate
+schema contracts, then sink; materialized row audits run at the sink edge.
+Curated normalization keeps JSON parsing and similarity grouping in batch-level
+Python UDFs inside the lazy plan; each table collects once at write
+(`collect(engine="streaming")`). Further eager collection only at CLI
+boundaries, report generation, or tests that need in-memory assertions.
 
 ## Planned Page Similarity Run
 

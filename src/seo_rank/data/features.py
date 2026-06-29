@@ -10,7 +10,10 @@ import pyarrow.parquet as pq
 
 from seo_rank.data.marts import build_analysis_lazyframe
 from seo_rank.data.scans import scan_curated_table
-from seo_rank.data.validate import validate_frame_contract
+from seo_rank.data.validate import (
+    validate_frame_contract,
+    validate_materialized_frame_contract,
+)
 
 FEATURE_SCHEMA_VERSION = "feature_marts.v1"
 FEATURE_REQUIRED_COLUMNS = {
@@ -529,6 +532,13 @@ def write_feature_dataset(
     dataset_dir.mkdir(parents=True, exist_ok=True)
     file_path = dataset_dir / "part-0.parquet"
     frame.sink_parquet(file_path, compression="zstd", statistics=True)
+    validation = FEATURE_VALIDATION_RULES[name]
+    validate_materialized_frame_contract(
+        pl.from_arrow(pq.read_table(file_path)),
+        unique_columns=validation.get("unique_columns", ()),
+        non_null_columns=validation.get("non_null_columns", ()),
+        bounded_columns=validation.get("bounded_columns"),
+    )
     return {
         "schema_version": FEATURE_SCHEMA_VERSION,
         "row_count": pq.ParquetFile(file_path).metadata.num_rows,

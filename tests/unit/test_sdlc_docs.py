@@ -115,9 +115,11 @@ def test_phase_45_slice_9_regression_sweep_marks_mart_sink_docs_as_shipped() -> 
 
     assert "[x] Slice 9" in goals
     assert "Slice 9 shipped" in goals
-    assert "9 of 10 shipped, 1 open" in goals
-    assert "8 acceptance items complete" in goals
+    assert "[x] Slice 10" in goals
+    assert "Slice 10 shipped" in goals
+    assert "10 of 10 shipped, 0 open" in goals
+    assert "11 acceptance items complete" in goals
     assert "drop eager `collect` + `write_parquet` in `write_feature_dataset`" in goals
-    assert "72 tests" in architecture
-    assert "72 tests collected" in testing
+    assert "74 tests" in architecture
+    assert "74 tests collected" in testing
     assert "sink feature marts lazily with Parquet statistics" in testing

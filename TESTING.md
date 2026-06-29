@@ -14,8 +14,7 @@ Pytest configuration and verification contract for SEO-Research.
   interpreter
 - Lint / type-check / build / coverage: not configured
 - Expected test duration: fast (< 1s)
-- **Current verification status:** 72 tests collected; 71 passing, 1 live
-  integration smoke skipped by default
+- **Current verification status:** 74 tests collected; 73 passing, 1 skipped
 
 ## Active Verification Command
 
@@ -54,10 +53,10 @@ placeholders only.
 | `test_cli_run.py` | CLI writes grouped per-keyword artifacts, including BGE, Gemini Doc Retrieval, and Gemini Semantic Similarity rows; run-scoped `raw_responses` Parquet + `run.json` catalog metadata; offline TextRazor include/skip; explicit live-provider gates; opt-in live Gemini, BGE, and TextRazor orchestration |
 | `test_cli_surfaces.py` | Phase 4.5 storage CLI: subcommand parser wiring, `normalize` / `build-features` / `analyze` / `replay` dispatch, `run --stored-run` routing, exit code `2` on storage errors and unknown keyword/response |
 | `test_run_normalize.py` | Stored `raw_responses` normalize into curated Parquet tables via lazy scan + batch UDFs (no eager `load_raw_response_rows`); refresh the run catalog |
-| `test_data_scans_validate.py` | Raw-response scans use `pl.scan_parquet()`, lazy curated frames are built, and validation rejects missing columns |
+| `test_data_scans_validate.py` | Raw-response scans use `pl.scan_parquet()`, lazy curated frames are built, schema-only validation rejects missing columns, and materialized row-rule checks stay off the lazy edge |
 | `test_data_marts.py` | Analysis mart lazy join lives in `seo_rank.data.marts` and preserves the feature-mart contract |
-| `test_feature_marts.py` | Feature marts materialize lazy joins, validate before sink, sink feature marts lazily with Parquet statistics, and refresh the run catalog |
-| `test_analysis_mart.py` | Feature marts materialize the lazy analysis mart, validate before sink, and refresh the run catalog |
+| `test_feature_marts.py` | Feature marts materialize lazy joins, validate before sink, sink feature marts lazily with Parquet statistics, audit the written parquet row rules, and refresh the run catalog |
+| `test_analysis_mart.py` | Feature marts materialize the lazy analysis mart, validate before sink, audit the written parquet row rules, and refresh the run catalog |
 | `test_round_trip.py` | Dedicated Parquet lake write → normalize → build-features → analyze round-trip regression sweep on real Parquet artifacts; validates `run.json` updates and keyword-filtered `analyze` output |
 | `test_keyword_expansion.py` | 25-keyword cap, deduplication, raw provider payload |
 | `test_serp_normalization.py` | Organic-only SERP rows, depth cap |
@@ -96,12 +95,6 @@ exist.
 
 - Feature marts and `analysis_mart` join keys (`run_id`, `target_keyword_id`,
   `canonical_url_hash`, `response_id`, `passage_id`)
-- `validate.py` refuses invalid schema/key/null/range output before sink
-- `src/seo_rank/data/` LazyFrame contract: scan in, lazy transforms (curated
-  normalize uses batch UDFs for JSON parse and similarity grouping), validate
-  before every write; curated tables and feature/analysis marts use Polars
-  `sink_parquet` with `compression="zstd"` and statistics; `collect(engine="streaming")`
-  only at sink/CLI edges
 - Passage / domain similarity scopes (feature marts; Phase 5.5 scoring)
 - `statsmodels` OLS and Benjamini-Hochberg on `analysis_mart` panels
 - OLS pre-analysis diagnostic loop

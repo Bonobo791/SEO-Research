@@ -9,7 +9,10 @@ import polars as pl
 import pyarrow as pa
 
 from seo_rank.data.scans import scan_raw_responses
-from seo_rank.data.validate import validate_frame_contract
+from seo_rank.data.validate import (
+    validate_frame_contract,
+    validate_materialized_frame_contract,
+)
 from seo_rank.dataforseo import normalize_keyword_expansion, normalize_serp_results
 from seo_rank.similarity import compute_page_similarity_scores
 from seo_rank.text import normalize_page_text
@@ -672,7 +675,14 @@ def write_curated_lazyframe_dataset(
         non_null_columns=validation.get("non_null_columns", ()),
         bounded_columns=validation.get("bounded_columns"),
     )
-    rows = frame.collect(engine="streaming").to_dicts()
+    materialized_frame = frame.collect(engine="streaming")
+    validate_materialized_frame_contract(
+        materialized_frame,
+        unique_columns=validation.get("unique_columns", ()),
+        non_null_columns=validation.get("non_null_columns", ()),
+        bounded_columns=validation.get("bounded_columns"),
+    )
+    rows = materialized_frame.to_dicts()
     return write_curated_dataset(run_dir, name=name, rows=rows, schema=schema)
 
 
