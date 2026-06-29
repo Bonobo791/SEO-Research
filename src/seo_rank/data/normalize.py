@@ -10,7 +10,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from seo_rank.data.scans import scan_raw_responses
-from seo_rank.data.validate import validate_required_columns
+from seo_rank.data.validate import validate_frame_contract
 from seo_rank.dataforseo import normalize_keyword_expansion, normalize_serp_results
 from seo_rank.similarity import compute_page_similarity_scores
 from seo_rank.text import normalize_page_text
@@ -110,6 +110,193 @@ CURATED_SCHEMAS = {
             ("schema_version", pa.string()),
         ]
     ),
+}
+
+CURATED_VALIDATION_RULES = {
+    "keywords": {
+        "expected_schema": {
+            "run_id": pl.Utf8,
+            "target_keyword_id": pl.Utf8,
+            "target_keyword": pl.Utf8,
+            "source_seed": pl.Utf8,
+            "source_response_id": pl.Utf8,
+            "keyword_order": pl.Int64,
+            "schema_version": pl.Utf8,
+        },
+        "unique_columns": ("target_keyword_id",),
+        "non_null_columns": (
+            "run_id",
+            "target_keyword_id",
+            "target_keyword",
+            "source_seed",
+            "source_response_id",
+            "keyword_order",
+            "schema_version",
+        ),
+    },
+    "serp_items": {
+        "expected_schema": {
+            "run_id": pl.Utf8,
+            "target_keyword_id": pl.Utf8,
+            "target_keyword": pl.Utf8,
+            "response_id": pl.Utf8,
+            "serp_item_id": pl.Utf8,
+            "canonical_url_hash": pl.Utf8,
+            "url": pl.Utf8,
+            "serp_rank": pl.Int64,
+            "title": pl.Utf8,
+            "description": pl.Utf8,
+            "schema_version": pl.Utf8,
+        },
+        "unique_columns": ("serp_item_id",),
+        "non_null_columns": (
+            "run_id",
+            "target_keyword_id",
+            "target_keyword",
+            "response_id",
+            "serp_item_id",
+            "canonical_url_hash",
+            "url",
+            "serp_rank",
+            "title",
+            "description",
+            "schema_version",
+        ),
+        "bounded_columns": {"serp_rank": (1, 20)},
+    },
+    "pages": {
+        "expected_schema": {
+            "run_id": pl.Utf8,
+            "target_keyword_id": pl.Utf8,
+            "target_keyword": pl.Utf8,
+            "response_id": pl.Utf8,
+            "page_id": pl.Utf8,
+            "canonical_url_hash": pl.Utf8,
+            "url": pl.Utf8,
+            "title": pl.Utf8,
+            "text": pl.Utf8,
+            "schema_version": pl.Utf8,
+        },
+        "unique_columns": ("page_id",),
+        "non_null_columns": (
+            "run_id",
+            "target_keyword_id",
+            "target_keyword",
+            "response_id",
+            "page_id",
+            "canonical_url_hash",
+            "url",
+            "title",
+            "text",
+            "schema_version",
+        ),
+    },
+    "passages": {
+        "expected_schema": {
+            "run_id": pl.Utf8,
+            "target_keyword_id": pl.Utf8,
+            "target_keyword": pl.Utf8,
+            "response_id": pl.Utf8,
+            "page_id": pl.Utf8,
+            "canonical_url_hash": pl.Utf8,
+            "url": pl.Utf8,
+            "passage_id": pl.Utf8,
+            "source": pl.Utf8,
+            "text": pl.Utf8,
+            "word_count": pl.Int64,
+            "schema_version": pl.Utf8,
+        },
+        "unique_columns": ("passage_id",),
+        "non_null_columns": (
+            "run_id",
+            "target_keyword_id",
+            "target_keyword",
+            "response_id",
+            "page_id",
+            "canonical_url_hash",
+            "url",
+            "passage_id",
+            "source",
+            "text",
+            "word_count",
+            "schema_version",
+        ),
+        "bounded_columns": {"word_count": (1, None)},
+    },
+    "entities": {
+        "expected_schema": {
+            "run_id": pl.Utf8,
+            "target_keyword_id": pl.Utf8,
+            "target_keyword": pl.Utf8,
+            "response_id": pl.Utf8,
+            "canonical_url_hash": pl.Utf8,
+            "url": pl.Utf8,
+            "entity_row_id": pl.Utf8,
+            "entity_id": pl.Utf8,
+            "matched_text": pl.Utf8,
+            "confidence": pl.Float64,
+            "relevance": pl.Float64,
+            "types": pl.List(pl.Utf8),
+            "schema_version": pl.Utf8,
+        },
+        "unique_columns": ("entity_row_id",),
+        "non_null_columns": (
+            "run_id",
+            "target_keyword_id",
+            "target_keyword",
+            "response_id",
+            "canonical_url_hash",
+            "url",
+            "entity_row_id",
+            "entity_id",
+            "matched_text",
+            "confidence",
+            "relevance",
+            "types",
+            "schema_version",
+        ),
+        "bounded_columns": {"confidence": (0, None), "relevance": (0, 1)},
+    },
+    "similarity_scores": {
+        "expected_schema": {
+            "run_id": pl.Utf8,
+            "target_keyword_id": pl.Utf8,
+            "target_keyword": pl.Utf8,
+            "response_id": pl.Utf8,
+            "canonical_url_hash": pl.Utf8,
+            "url": pl.Utf8,
+            "score_row_id": pl.Utf8,
+            "bge_raw_score": pl.Float64,
+            "bge_normalized_score": pl.Float64,
+            "gemini_doc_retrieval_raw_score": pl.Float64,
+            "gemini_doc_retrieval_normalized_score": pl.Float64,
+            "gemini_semantic_similarity_raw_score": pl.Float64,
+            "gemini_semantic_similarity_normalized_score": pl.Float64,
+            "schema_version": pl.Utf8,
+        },
+        "unique_columns": ("score_row_id",),
+        "non_null_columns": (
+            "run_id",
+            "target_keyword_id",
+            "target_keyword",
+            "response_id",
+            "canonical_url_hash",
+            "url",
+            "score_row_id",
+            "bge_raw_score",
+            "bge_normalized_score",
+            "gemini_doc_retrieval_raw_score",
+            "gemini_doc_retrieval_normalized_score",
+            "gemini_semantic_similarity_raw_score",
+            "gemini_semantic_similarity_normalized_score",
+            "schema_version",
+        ),
+        "bounded_columns": {
+            "bge_normalized_score": (0, 1),
+            "gemini_doc_retrieval_normalized_score": (0, 1),
+            "gemini_semantic_similarity_normalized_score": (0, 1),
+        },
+    },
 }
 
 
@@ -349,7 +536,7 @@ def build_curated_lazyframes(
     for name, rows in datasets.items():
         frame = pl.DataFrame(rows).lazy()
         if rows:
-            frame = validate_required_columns(
+            frame = validate_frame_contract(
                 frame,
                 required_columns=rows[0].keys(),
             )
@@ -364,7 +551,16 @@ def write_curated_lazyframe_dataset(
     frame: pl.LazyFrame,
     schema: pa.Schema,
 ) -> dict[str, object]:
-    rows = frame.collect().to_dicts()
+    validation = CURATED_VALIDATION_RULES[name]
+    frame = validate_frame_contract(
+        frame,
+        required_columns=schema.names,
+        expected_schema=validation.get("expected_schema"),
+        unique_columns=validation.get("unique_columns", ()),
+        non_null_columns=validation.get("non_null_columns", ()),
+        bounded_columns=validation.get("bounded_columns"),
+    )
+    rows = frame.collect(engine="streaming").to_dicts()
     return write_curated_dataset(run_dir, name=name, rows=rows, schema=schema)
 
 

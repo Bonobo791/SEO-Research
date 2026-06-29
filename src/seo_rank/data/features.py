@@ -9,7 +9,7 @@ import polars as pl
 
 from seo_rank.data.marts import build_analysis_lazyframe
 from seo_rank.data.scans import scan_curated_table
-from seo_rank.data.validate import validate_required_columns
+from seo_rank.data.validate import validate_frame_contract
 
 FEATURE_SCHEMA_VERSION = "feature_marts.v1"
 FEATURE_REQUIRED_COLUMNS = {
@@ -94,6 +94,207 @@ ANALYSIS_REQUIRED_COLUMNS = (
     "gemini_semantic_similarity_normalized_score",
     "schema_version",
 )
+
+FEATURE_VALIDATION_RULES = {
+    "keyword_serp": {
+        "expected_schema": {
+            "run_id": pl.Utf8,
+            "target_keyword_id": pl.Utf8,
+            "target_keyword": pl.Utf8,
+            "keyword_order": pl.Int64,
+            "source_response_id": pl.Utf8,
+            "serp_item_id": pl.Utf8,
+            "canonical_url_hash": pl.Utf8,
+            "url": pl.Utf8,
+            "serp_rank": pl.Int64,
+            "title": pl.Utf8,
+            "description": pl.Utf8,
+            "schema_version": pl.Utf8,
+        },
+        "unique_columns": ("serp_item_id",),
+        "non_null_columns": (
+            "run_id",
+            "target_keyword_id",
+            "target_keyword",
+            "keyword_order",
+            "source_response_id",
+            "serp_item_id",
+            "canonical_url_hash",
+            "url",
+            "serp_rank",
+            "title",
+            "description",
+            "schema_version",
+        ),
+        "bounded_columns": {"serp_rank": (1, 20)},
+    },
+    "page_features": {
+        "expected_schema": {
+            "run_id": pl.Utf8,
+            "target_keyword_id": pl.Utf8,
+            "target_keyword": pl.Utf8,
+            "page_id": pl.Utf8,
+            "response_id": pl.Utf8,
+            "canonical_url_hash": pl.Utf8,
+            "url": pl.Utf8,
+            "title": pl.Utf8,
+            "page_text_length": pl.UInt32,
+            "bge_raw_score": pl.Float64,
+            "bge_normalized_score": pl.Float64,
+            "gemini_doc_retrieval_raw_score": pl.Float64,
+            "gemini_doc_retrieval_normalized_score": pl.Float64,
+            "gemini_semantic_similarity_raw_score": pl.Float64,
+            "gemini_semantic_similarity_normalized_score": pl.Float64,
+            "schema_version": pl.Utf8,
+        },
+        "unique_columns": ("page_id",),
+        "non_null_columns": (
+            "run_id",
+            "target_keyword_id",
+            "target_keyword",
+            "page_id",
+            "response_id",
+            "canonical_url_hash",
+            "url",
+            "title",
+            "page_text_length",
+            "bge_raw_score",
+            "bge_normalized_score",
+            "gemini_doc_retrieval_raw_score",
+            "gemini_doc_retrieval_normalized_score",
+            "gemini_semantic_similarity_raw_score",
+            "gemini_semantic_similarity_normalized_score",
+            "schema_version",
+        ),
+        "bounded_columns": {
+            "page_text_length": (0, None),
+            "bge_normalized_score": (0, 1),
+            "gemini_doc_retrieval_normalized_score": (0, 1),
+            "gemini_semantic_similarity_normalized_score": (0, 1),
+        },
+    },
+    "passage_features": {
+        "expected_schema": {
+            "run_id": pl.Utf8,
+            "target_keyword_id": pl.Utf8,
+            "target_keyword": pl.Utf8,
+            "page_id": pl.Utf8,
+            "response_id": pl.Utf8,
+            "passage_id": pl.Utf8,
+            "canonical_url_hash": pl.Utf8,
+            "url": pl.Utf8,
+            "source": pl.Utf8,
+            "word_count": pl.Int64,
+            "passage_text_length": pl.UInt32,
+            "schema_version": pl.Utf8,
+        },
+        "unique_columns": ("passage_id",),
+        "non_null_columns": (
+            "run_id",
+            "target_keyword_id",
+            "target_keyword",
+            "page_id",
+            "response_id",
+            "passage_id",
+            "canonical_url_hash",
+            "url",
+            "source",
+            "word_count",
+            "passage_text_length",
+            "schema_version",
+        ),
+        "bounded_columns": {
+            "word_count": (1, None),
+            "passage_text_length": (0, None),
+        },
+    },
+    "domain_features": {
+        "expected_schema": {
+            "run_id": pl.Utf8,
+            "target_keyword_id": pl.Utf8,
+            "target_keyword": pl.Utf8,
+            "domain_feature_id": pl.Utf8,
+            "domain": pl.Utf8,
+            "serp_item_count": pl.UInt32,
+            "best_serp_rank": pl.Int64,
+            "worst_serp_rank": pl.Int64,
+            "schema_version": pl.Utf8,
+        },
+        "unique_columns": ("domain_feature_id",),
+        "non_null_columns": (
+            "run_id",
+            "target_keyword_id",
+            "target_keyword",
+            "domain_feature_id",
+            "domain",
+            "serp_item_count",
+            "best_serp_rank",
+            "worst_serp_rank",
+            "schema_version",
+        ),
+        "bounded_columns": {
+            "serp_item_count": (1, None),
+            "best_serp_rank": (1, 20),
+            "worst_serp_rank": (1, 20),
+        },
+    },
+    "analysis_mart": {
+        "expected_schema": {
+            "run_id": pl.Utf8,
+            "target_keyword_id": pl.Utf8,
+            "target_keyword": pl.Utf8,
+            "keyword_order": pl.Int64,
+            "source_response_id": pl.Utf8,
+            "serp_item_id": pl.Utf8,
+            "page_id": pl.Utf8,
+            "response_id": pl.Utf8,
+            "canonical_url_hash": pl.Utf8,
+            "url": pl.Utf8,
+            "serp_rank": pl.Int64,
+            "title": pl.Utf8,
+            "description": pl.Utf8,
+            "page_text_length": pl.UInt32,
+            "bge_raw_score": pl.Float64,
+            "bge_normalized_score": pl.Float64,
+            "gemini_doc_retrieval_raw_score": pl.Float64,
+            "gemini_doc_retrieval_normalized_score": pl.Float64,
+            "gemini_semantic_similarity_raw_score": pl.Float64,
+            "gemini_semantic_similarity_normalized_score": pl.Float64,
+            "schema_version": pl.Utf8,
+        },
+        "unique_columns": ("serp_item_id",),
+        "non_null_columns": (
+            "run_id",
+            "target_keyword_id",
+            "target_keyword",
+            "keyword_order",
+            "source_response_id",
+            "serp_item_id",
+            "page_id",
+            "response_id",
+            "canonical_url_hash",
+            "url",
+            "serp_rank",
+            "title",
+            "description",
+            "page_text_length",
+            "bge_raw_score",
+            "bge_normalized_score",
+            "gemini_doc_retrieval_raw_score",
+            "gemini_doc_retrieval_normalized_score",
+            "gemini_semantic_similarity_raw_score",
+            "gemini_semantic_similarity_normalized_score",
+            "schema_version",
+        ),
+        "bounded_columns": {
+            "serp_rank": (1, 20),
+            "page_text_length": (0, None),
+            "bge_normalized_score": (0, 1),
+            "gemini_doc_retrieval_normalized_score": (0, 1),
+            "gemini_semantic_similarity_normalized_score": (0, 1),
+        },
+    },
+}
 
 
 def build_feature_lazyframes(
@@ -255,9 +456,14 @@ def build_feature_marts(run_dir: Path) -> dict[str, object]:
     feature_frames = build_feature_lazyframes(curated_frames)
 
     for name, frame in feature_frames.items():
-        frame = validate_required_columns(
+        validation = FEATURE_VALIDATION_RULES[name]
+        frame = validate_frame_contract(
             frame,
             required_columns=FEATURE_REQUIRED_COLUMNS[name],
+            expected_schema=validation.get("expected_schema"),
+            unique_columns=validation.get("unique_columns", ()),
+            non_null_columns=validation.get("non_null_columns", ()),
+            bounded_columns=validation.get("bounded_columns"),
         )
         dataset_catalog[name] = write_feature_dataset(
             run_dir,
@@ -290,9 +496,13 @@ def build_analysis_mart(run_dir: Path) -> dict[str, object]:
         for name in ("keyword_serp", "page_features", "passage_features", "domain_features")
     }
     analysis_frame = build_analysis_lazyframe(feature_frames)
-    analysis_frame = validate_required_columns(
+    analysis_frame = validate_frame_contract(
         analysis_frame,
         required_columns=ANALYSIS_REQUIRED_COLUMNS,
+        expected_schema=FEATURE_VALIDATION_RULES["analysis_mart"]["expected_schema"],
+        unique_columns=FEATURE_VALIDATION_RULES["analysis_mart"]["unique_columns"],
+        non_null_columns=FEATURE_VALIDATION_RULES["analysis_mart"]["non_null_columns"],
+        bounded_columns=FEATURE_VALIDATION_RULES["analysis_mart"]["bounded_columns"],
     )
     dataset_catalog["analysis_mart"] = write_feature_dataset(
         run_dir,

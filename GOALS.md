@@ -42,7 +42,7 @@ trees stay out of source control.
 | ----- | ------ | ----- |
 | 1 Raw lake | Shipped | `seo-rank run` writes `parquet/raw_responses/` + `run.json` catalog via `--output-dir` |
 | 2 Curated normalize | Shipped | `normalize_run()` → six curated tables; library + `test_run_normalize.py` |
-| 3 Polars data package | In progress | `scans`, `validate`, `marts` shipped; `normalize` still eager between scan and sink |
+| 3 Polars data package | In progress | `scans`, `validate`, `marts` shipped; `normalize` still eager between scan and sink; `validate` now does schema/key/null/range checks on curated and mart writes |
 | 4 Feature marts | Shipped | `build_feature_marts()` with lazy joins; `test_feature_marts.py` |
 | 5 Analysis mart | Shipped | `build_analysis_mart()` + `marts.build_analysis_lazyframe`; `test_analysis_mart.py` |
 | 6 CLI surfaces | Not started | Only `seo-rank run` exists; no `normalize` / `build-features` / `analyze` / `replay` / `--stored-run` |
@@ -51,9 +51,15 @@ trees stay out of source control.
 **Library API (callable, no CLI yet):** `normalize_run`, `build_feature_marts`,
 `build_analysis_mart` under `src/seo_rank/data/`.
 
-**Remaining to close Phase 4.5:** lazy normalization write path, validation before
-every mart sink, CLI subcommands, `replay`, declare `polars`, canonical
-`runs/{run_id}/` path (optional), dedicated round-trip test, doc alignment.
+**Remaining to close Phase 4.5:** lazy normalization write path, CLI
+subcommands, `replay`, declare `polars`, canonical `runs/{run_id}/` path
+(optional), dedicated round-trip test, doc alignment.
+
+**Residual risk:** the curated normalize path still materializes Python rows
+before sink, so Slice 3 is not finished yet.
+
+**Next useful slice:** finish the lazy normalization write path (Slice 3),
+then widen CLI surfaces once that write path is fully lazy.
 
 #### Polars data layer
 
@@ -63,7 +69,7 @@ src/seo_rank/data/
   normalize.py    # raw_responses → typed curated tables
   features.py     # page, passage, domain, similarity feature marts
   marts.py        # analysis-ready joins (Phase 5 prep)
-  validate.py     # schemas, keys, null/range checks before every write
+  validate.py     # schema/key/null/range checks before every write
 ```
 
 #### Storage layout
@@ -118,8 +124,9 @@ runs/{run_id}/
 5. **Materialize reusable marts only** — `sink_parquet(..., compression="zstd")`
    with statistics enabled; use `collect(engine="streaming")` only at CLI/report
    boundaries or when a DataFrame is actually needed.
-6. **Validate before every write** — `validate.py` runs schema/key/null/range
-   checks; refuse to sink invalid marts.
+6. **Validate before every write** — `validate.py` refuses to sink invalid marts.
+   Curated, feature, and analysis writes all run schema/key/null/range checks
+   before sink.
 7. **No nested provider schemas** — keep the raw body as bytes/JSON plus extracted
    typed columns. Do not use the Parquet `Variant` type (interoperability risk).
 8. **Partition only `raw_responses` by low-cardinality `endpoint`** — do not
@@ -163,8 +170,7 @@ first. Downstream commands scan lazily and sink only the marts they own.
    before each sink. *(In progress: package layout complete (`scans`, `normalize`,
    `features`, `marts`, `validate`); feature/analysis paths are lazy; curated
    normalization still collects raw rows and builds Python lists before sink;
-   `validate` is column-presence only; feature/analysis marts now validate before
-   sink.)*
+   `validate` is richer now; next: lazy normalize write path.)*
 4. **[x] Slice 4 — Feature marts** — build and persist `keyword_serp`,
    `page_features`, `passage_features`, and `domain_features` from curated tables
    with stable-ID joins, filter/select before joins, Zstandard compression, and
@@ -234,9 +240,8 @@ Phase 4.5 is not signed off until Slices 3, 6, and 7 close.
   *(Partial: Zstd + sorted keys on curated and mart writes; feature marts use
   streaming collect; curated writes use PyArrow not Polars `sink_parquet`;
   statistics not explicitly enabled.)*
-- [ ] `validate.py` runs schema/key/null/range checks before every mart write.
-  *(Partial: column-presence check on non-empty curated LazyFrames only; feature
-  and analysis marts now validate before sink.)*
+- [x] `validate.py` runs schema/key/null/range checks before every mart write.
+  *(Shipped for curated, feature, and analysis writes.)*
 - [ ] `raw_responses` excluded from normal analytical joins; `replay` path only.
   *(Partial: analytical joins use curated/feature scans only; `replay` not
   implemented.)*

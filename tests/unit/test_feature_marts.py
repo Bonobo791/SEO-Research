@@ -80,8 +80,8 @@ def test_build_feature_marts_validates_each_feature_frame_before_sinking(
             "domain_features": pl.DataFrame([{"run_id": "run-1"}]).lazy(),
         }
 
-    def fake_validate_required_columns(frame, *, required_columns):
-        calls.append(("validate", tuple(required_columns)))
+    def fake_validate_frame_contract(frame, **kwargs):
+        calls.append(("validate", tuple(kwargs["required_columns"])))
         return frame
 
     def fake_write_feature_dataset(run_dir: Path, *, name: str, frame: pl.LazyFrame):
@@ -96,8 +96,8 @@ def test_build_feature_marts_validates_each_feature_frame_before_sinking(
     monkeypatch.setattr("seo_rank.data.features.scan_curated_table", fake_scan_curated_table)
     monkeypatch.setattr("seo_rank.data.features.build_feature_lazyframes", fake_build_feature_lazyframes)
     monkeypatch.setattr(
-        "seo_rank.data.features.validate_required_columns",
-        fake_validate_required_columns,
+        "seo_rank.data.features.validate_frame_contract",
+        fake_validate_frame_contract,
         raising=False,
     )
     monkeypatch.setattr("seo_rank.data.features.write_feature_dataset", fake_write_feature_dataset)
