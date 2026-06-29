@@ -14,7 +14,7 @@ Pytest configuration and verification contract for SEO-Research.
   interpreter
 - Lint / type-check / build / coverage: not configured
 - Expected test duration: fast (< 1s)
-- **Current verification status:** 51 tests collected; 50 passing, 1 live
+- **Current verification status:** 52 tests collected; 51 passing, 1 live
   integration smoke skipped by default
 
 ## Active Verification Command
@@ -54,6 +54,7 @@ placeholders only.
 | `test_cli_run.py` | CLI writes grouped per-keyword artifacts, including BGE, Gemini Doc Retrieval, and Gemini Semantic Similarity rows; run-scoped `raw_responses` Parquet + `run.json` catalog metadata; offline TextRazor include/skip; explicit live-provider gates; opt-in live Gemini, BGE, and TextRazor orchestration |
 | `test_run_normalize.py` | Stored `raw_responses` normalize into curated Parquet tables and refresh the run catalog |
 | `test_data_scans_validate.py` | Raw-response scans use `pl.scan_parquet()`, lazy curated frames are built, and validation rejects missing columns |
+| `test_feature_marts.py` | Curated tables materialize lazy feature marts and refresh the run catalog |
 | `test_keyword_expansion.py` | 25-keyword cap, deduplication, raw provider payload |
 | `test_serp_normalization.py` | Organic-only SERP rows, depth cap |
 | `test_env.py` | `.env` discovery, parsing, and override of shell exports |
