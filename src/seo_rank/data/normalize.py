@@ -5,10 +5,12 @@ import json
 from collections.abc import Mapping
 from pathlib import Path
 
+import polars as pl
 import pyarrow as pa
-import pyarrow.dataset as ds
 import pyarrow.parquet as pq
 
+from seo_rank.data.scans import scan_raw_responses
+from seo_rank.data.validate import validate_required_columns
 from seo_rank.dataforseo import normalize_keyword_expansion, normalize_serp_results
 from seo_rank.similarity import compute_page_similarity_scores
 from seo_rank.text import normalize_page_text
@@ -314,11 +316,12 @@ def normalize_run(run_dir: Path) -> dict[str, object]:
     dataset_catalog = catalog.setdefault("datasets", {})
     assert isinstance(dataset_catalog, dict)
 
+    curated_lazyframes = build_curated_lazyframes(datasets)
     for name, rows in datasets.items():
-        dataset_catalog[name] = write_curated_dataset(
+        dataset_catalog[name] = write_curated_lazyframe_dataset(
             run_dir,
             name=name,
-            rows=rows,
+            frame=curated_lazyframes[name],
             schema=CURATED_SCHEMAS[name],
         )
 
@@ -328,12 +331,7 @@ def normalize_run(run_dir: Path) -> dict[str, object]:
 
 
 def load_raw_response_rows(run_dir: Path) -> list[dict[str, object]]:
-    dataset = ds.dataset(
-        run_dir / "parquet" / "raw_responses",
-        format="parquet",
-        partitioning="hive",
-    )
-    rows = dataset.to_table().to_pylist()
+    rows = scan_raw_responses(run_dir).collect().to_dicts()
     rows.sort(
         key=lambda row: (
             str(row["endpoint"]),
@@ -342,6 +340,32 @@ def load_raw_response_rows(run_dir: Path) -> list[dict[str, object]]:
         )
     )
     return rows
+
+
+def build_curated_lazyframes(
+    datasets: Mapping[str, list[dict[str, object]]],
+) -> dict[str, pl.LazyFrame]:
+    lazyframes: dict[str, pl.LazyFrame] = {}
+    for name, rows in datasets.items():
+        frame = pl.DataFrame(rows).lazy()
+        if rows:
+            frame = validate_required_columns(
+                frame,
+                required_columns=rows[0].keys(),
+            )
+        lazyframes[name] = frame
+    return lazyframes
+
+
+def write_curated_lazyframe_dataset(
+    run_dir: Path,
+    *,
+    name: str,
+    frame: pl.LazyFrame,
+    schema: pa.Schema,
+) -> dict[str, object]:
+    rows = frame.collect().to_dicts()
+    return write_curated_dataset(run_dir, name=name, rows=rows, schema=schema)
 
 
 def write_curated_dataset(

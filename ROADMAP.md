@@ -122,3 +122,6 @@ layout, and dev slices.
 - **Phase 4.5 Slice 3 started:** `src/seo_rank/data/` gained lazy raw-response
   scan helpers and column validation helpers as the Polars data-layer
   foundation.
+- **Phase 4.5 Slice 3 advanced:** stored-run curated normalization now builds
+  LazyFrames before the write boundary and reads raw responses through the lazy
+  scan helper.

@@ -2,6 +2,7 @@ from pathlib import Path
 
 import polars as pl
 
+from seo_rank.data.normalize import build_curated_lazyframes
 from seo_rank.data.scans import scan_raw_responses
 from seo_rank.data.validate import validate_required_columns
 
@@ -63,3 +64,15 @@ def test_validate_required_columns_rejects_missing_columns() -> None:
         assert "response_id" in str(error)
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_build_curated_lazyframes_returns_lazyframes() -> None:
+    frames = build_curated_lazyframes(
+        {
+            "keywords": [{"run_id": "run-1", "target_keyword": "technical seo"}],
+            "pages": [{"run_id": "run-1", "url": "https://example.com"}],
+        }
+    )
+
+    assert isinstance(frames["keywords"], pl.LazyFrame)
+    assert isinstance(frames["pages"], pl.LazyFrame)
