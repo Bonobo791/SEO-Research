@@ -10,6 +10,7 @@ import polars as pl
 from seo_rank.data.scans import scan_curated_table
 
 FEATURE_SCHEMA_VERSION = "feature_marts.v1"
+ANALYSIS_SCHEMA_VERSION = "analysis_mart.v1"
 
 
 def build_feature_lazyframes(
@@ -152,6 +153,44 @@ def build_feature_lazyframes(
     }
 
 
+def build_analysis_lazyframe(feature_frames: Mapping[str, pl.LazyFrame]) -> pl.LazyFrame:
+    return (
+        feature_frames["keyword_serp"]
+        .join(
+            feature_frames["page_features"],
+            on=["run_id", "target_keyword_id", "canonical_url_hash", "url"],
+            how="left",
+            suffix="_page",
+        )
+        .select(
+            [
+                "run_id",
+                "target_keyword_id",
+                "target_keyword",
+                "keyword_order",
+                "source_response_id",
+                "serp_item_id",
+                "page_id",
+                "response_id",
+                "canonical_url_hash",
+                "url",
+                "serp_rank",
+                "title",
+                "description",
+                "page_text_length",
+                "bge_raw_score",
+                "bge_normalized_score",
+                "gemini_doc_retrieval_raw_score",
+                "gemini_doc_retrieval_normalized_score",
+                "gemini_semantic_similarity_raw_score",
+                "gemini_semantic_similarity_normalized_score",
+            ]
+        )
+        .with_columns(pl.lit(ANALYSIS_SCHEMA_VERSION).alias("schema_version"))
+        .sort(["target_keyword_id", "serp_rank", "canonical_url_hash"])
+    )
+
+
 def build_feature_marts(run_dir: Path) -> dict[str, object]:
     """Materialize feature marts from stored curated tables."""
 
@@ -176,6 +215,37 @@ def build_feature_marts(run_dir: Path) -> dict[str, object]:
             name=name,
             frame=frame,
         )
+
+    run_payload["catalog"] = catalog
+    run_json_path.write_text(
+        json.dumps(run_payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return catalog
+
+
+def build_analysis_mart(run_dir: Path) -> dict[str, object]:
+    """Materialize the analysis mart from feature marts."""
+
+    run_dir = Path(run_dir)
+    run_json_path = run_dir / "run.json"
+    run_payload = json.loads(run_json_path.read_text(encoding="utf-8"))
+    catalog: dict[str, object] = run_payload.get("catalog", {})
+    if not isinstance(catalog, dict):
+        catalog = {}
+    dataset_catalog = catalog.setdefault("datasets", {})
+    assert isinstance(dataset_catalog, dict)
+
+    feature_frames = {
+        name: scan_curated_table(run_dir, name)
+        for name in ("keyword_serp", "page_features", "passage_features", "domain_features")
+    }
+    analysis_frame = build_analysis_lazyframe(feature_frames)
+    dataset_catalog["analysis_mart"] = write_feature_dataset(
+        run_dir,
+        name="analysis_mart",
+        frame=analysis_frame,
+    )
 
     run_payload["catalog"] = catalog
     run_json_path.write_text(

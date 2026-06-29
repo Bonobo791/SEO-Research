@@ -84,11 +84,11 @@ The repository contains an **offline-verifiable CLI scaffold** (Phase 1 shipped)
 - **CLI:** `seo-rank run` writes `run.json` and `report.md` from fixtures (no
   network calls) or gated live providers; Phase 4.5 adds `normalize`,
   `build-features`, `analyze`, and `replay`
-- **Tests:** 52 tests under `tests/`; gate: `python -m pytest`
+- **Tests:** 53 tests under `tests/`; gate: `python -m pytest`
 - **Product docs:** `ARCHITECTURE.md`, `GOALS.md`, `ROADMAP.md`, `README.md`,
   `TESTING.md`
-- **Not yet:** `statsmodels` analysis; analysis mart, CLI stored-run surfaces,
-  and the remaining lazy Polars mart + CLI surfaces (Phase 4.5 in progress)
+- **Not yet:** `statsmodels` analysis; CLI stored-run surfaces and the remaining
+  lazy Polars CLI surfaces (Phase 4.5 in progress)
 
 Module and artifact details are in [Application Surface](#application-surface)
 and [Key Product Components](#key-product-components) below. Planned live

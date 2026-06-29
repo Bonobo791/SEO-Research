@@ -128,3 +128,5 @@ layout, and dev slices.
 - **Phase 4.5 Slice 4 shipped:** feature marts (`keyword_serp`,
   `page_features`, `passage_features`, `domain_features`) are now materialized
   from curated tables via lazy Polars joins.
+- **Phase 4.5 Slice 5 shipped:** `analysis_mart` now materializes as a lazy
+  panel joined from feature marts and written back into the run-scoped lake.
