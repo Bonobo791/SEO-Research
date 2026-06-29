@@ -52,7 +52,7 @@ placeholders only.
 | Test file | What it verifies |
 |-----------|------------------|
 | `test_cli_run.py` | CLI writes grouped per-keyword artifacts, including BGE, Gemini Doc Retrieval, and Gemini Semantic Similarity rows; run-scoped `raw_responses` Parquet + `run.json` catalog metadata; offline TextRazor include/skip; explicit live-provider gates; opt-in live Gemini, BGE, and TextRazor orchestration |
-| `test_run_normalize.py` | Stored `raw_responses` normalize into curated Parquet tables and refresh the run catalog |
+| `test_run_normalize.py` | Stored `raw_responses` normalize into curated Parquet tables via lazy scan + batch UDFs (no eager `load_raw_response_rows`); refresh the run catalog |
 | `test_data_scans_validate.py` | Raw-response scans use `pl.scan_parquet()`, lazy curated frames are built, and validation rejects missing columns |
 | `test_data_marts.py` | Analysis mart lazy join lives in `seo_rank.data.marts` and preserves the feature-mart contract |
 | `test_feature_marts.py` | Curated tables materialize lazy feature marts, validate before sink, and refresh the run catalog |
@@ -97,8 +97,11 @@ exist.
 - Feature marts and `analysis_mart` join keys (`run_id`, `target_keyword_id`,
   `canonical_url_hash`, `response_id`, `passage_id`)
 - `validate.py` refuses invalid schema/key/null/range output before sink
-- `src/seo_rank/data/` LazyFrame contract: scan in, lazy transforms, `sink_parquet`
-  with `compression="zstd"`; `collect(engine="streaming")` only at CLI edges
+- `src/seo_rank/data/` LazyFrame contract: scan in, lazy transforms (curated
+  normalize uses batch UDFs for JSON parse and similarity grouping), validate
+  before every write; feature/analysis marts use Polars `sink_parquet` with
+  `compression="zstd"`; curated tables use PyArrow today;
+  `collect(engine="streaming")` only at sink/CLI edges
 - `seo-rank replay` re-derives one `response_id` from `raw_responses`
 - `run.json` catalog: counts, checksums, `schema_version`, no duplicate raw
   payloads in JSON

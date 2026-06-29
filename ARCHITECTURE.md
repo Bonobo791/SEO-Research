@@ -87,8 +87,8 @@ The repository contains an **offline-verifiable CLI scaffold** (Phase 1 shipped)
 - **Tests:** 53 tests under `tests/`; gate: `python -m pytest`
 - **Product docs:** `ARCHITECTURE.md`, `GOALS.md`, `ROADMAP.md`, `README.md`,
   `TESTING.md`
-- **Not yet:** `statsmodels` analysis; CLI stored-run surfaces and the remaining
-  lazy Polars CLI surfaces (Phase 4.5 in progress)
+- **Not yet:** `statsmodels` analysis; CLI stored-run surfaces (`normalize`,
+  `build-features`, `analyze`, `replay`, `--stored-run`; Phase 4.5 Slice 6)
 
 Module and artifact details are in [Application Surface](#application-surface)
 and [Key Product Components](#key-product-components) below. Planned live
@@ -223,9 +223,12 @@ for `seo-rank replay` and explicit re-normalization paths.
 
 ### Layer 2 — curated tables (typed, analysis-ready)
 
-Normalized tables derived from `raw_responses` via `normalize.py`. Every row
-includes join keys: `run_id`, `target_keyword_id`, `response_id`, `schema_version`,
-plus stable entity IDs (`canonical_url_hash`, `passage_id`, etc.).
+Normalized tables derived from `raw_responses` via `normalize.py`. The write path
+scans lazily, filters by `endpoint`, and applies batch UDFs for JSON parsing,
+passage splitting, entity normalization, and per-keyword similarity scoring;
+each table collects once at sink. Every row includes join keys: `run_id`,
+`target_keyword_id`, `response_id`, `schema_version`, plus stable entity IDs
+(`canonical_url_hash`, `passage_id`, etc.).
 
 | Table | Contents |
 |-------|----------|
@@ -328,14 +331,16 @@ src/seo_rank/data/
 | Module | Responsibility |
 |--------|----------------|
 | `scans.py` | `scan_raw_responses(run_id)`, `scan_keywords(run_id)`, etc.; stable paths under `runs/{run_id}/parquet/` |
-| `normalize.py` | Parse `response_body_bytes` once; emit curated LazyFrames; no analytical reads of `raw_responses` elsewhere |
+| `normalize.py` | Scan `raw_responses`, filter by `endpoint`, parse `response_body_bytes` via batch UDFs (`map_batches` / `map_groups`); emit curated LazyFrames; no analytical reads of `raw_responses` elsewhere |
 | `features.py` | Build `keyword_serp`, `page_features`, `passage_features`, `domain_features` from curated scans |
 | `marts.py` | Join feature marts into `analysis_mart` at `target_keyword × SERP URL` grain |
 | `validate.py` | Schema contracts, primary/foreign keys, null and range checks; called before every `sink_parquet` |
 
 **Execution model:** scan lazily, filter/select early, join on IDs only, validate,
-then sink. Collect to eager DataFrames only at CLI boundaries, report generation,
-or tests that need in-memory assertions.
+then sink. Curated normalization keeps JSON parsing and similarity grouping in
+batch-level Python UDFs inside the lazy plan; each table collects once at write
+(`collect(engine="streaming")`). Further eager collection only at CLI boundaries,
+report generation, or tests that need in-memory assertions.
 
 ## Planned Page Similarity Run
 

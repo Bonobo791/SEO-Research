@@ -50,17 +50,21 @@ on each top-20 organic SERP row:
 Offline and default live runs use deterministic fixtures. Opt-in flags swap in
 real backends when env gates and credentials are set.
 
-**Next:** Phase 4.5 run-scoped Parquet lake (`runs/{run_id}/` with authoritative
-`raw_responses`, curated tables, feature marts, and `analysis_mart`), Polars
-LazyFrame pipeline in `src/seo_rank/data/`, and CLI commands `normalize`,
-`build-features`, `analyze`, and `replay`. Later: passage/domain scopes
+**Phase 4.5 (in progress):** run-scoped Parquet lake (`runs/{run_id}/` with
+authoritative `raw_responses`, curated tables, feature marts, and `analysis_mart`)
+and a Polars LazyFrame library in `src/seo_rank/data/` (`normalize_run`,
+`build_feature_marts`, `build_analysis_mart`) are callable today; CLI commands
+`normalize`, `build-features`, `analyze`, and `replay` are not wired yet.
+**Next:** CLI surfaces and round-trip docs/deps. Later: passage/domain scopes
 (Phase 5.5), `statsmodels` OLS with Benjamini-Hochberg (Phase 5), and expanded
 report sections (Phase 6).
 
 Details: `GOALS.md` and `ARCHITECTURE.md` (see **Run-scoped Parquet lake** and
 **Polars data layer**).
 
-### Planned storage layout (Phase 4.5)
+### Storage layout (Phase 4.5)
+
+Library writes this layout today via `--output-dir`; CLI subcommands are planned.
 
 ```text
 runs/{run_id}/
@@ -81,7 +85,9 @@ runs/{run_id}/
     analysis_mart/part-*.parquet
 ```
 
-### Planned CLI (Phase 4.5)
+### CLI (Phase 4.5)
+
+Library API is callable; dedicated subcommands are planned.
 
 ```bash
 seo-rank normalize --run RUN_ID
@@ -105,6 +111,7 @@ response.
 | `tests/unit/` | pytest unit tests |
 | `ARCHITECTURE.md` | Product architecture, data flow, planned pipeline |
 | `GOALS.md` | Active-scope contract |
+| `FIXUPS.md` | Slice-scoped small fixes backlog (phase-tagged hardening) |
 | `ROADMAP.md` | Phased backlog and history |
 | `TESTING.md` | Verification contract |
 

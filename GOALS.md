@@ -36,30 +36,31 @@ trees stay out of source control.
 
 #### Progress (2026-06-29)
 
-**Slices:** 4 of 7 shipped, 1 in progress, 2 open. Phase 4.5 is not signed off.
+**Slices:** 5 of 7 shipped, 2 open. Phase 4.5 is not signed off.
 
 | Slice | Status | Notes |
 | ----- | ------ | ----- |
 | 1 Raw lake | Shipped | `seo-rank run` writes `parquet/raw_responses/` + `run.json` catalog via `--output-dir` |
 | 2 Curated normalize | Shipped | `normalize_run()` → six curated tables; library + `test_run_normalize.py` |
-| 3 Polars data package | In progress | `scans`, `validate`, `marts` shipped; `normalize` still eager between scan and sink; `validate` now does schema/key/null/range checks on curated and mart writes |
+| 3 Polars data package | Shipped | `scans`, `validate`, `features`, `marts`, and lazy `normalize` (`scan_raw_responses` → endpoint filters → `map_batches` / `map_groups`); per-table `collect(engine="streaming")` at curated sink only |
 | 4 Feature marts | Shipped | `build_feature_marts()` with lazy joins; `test_feature_marts.py` |
 | 5 Analysis mart | Shipped | `build_analysis_mart()` + `marts.build_analysis_lazyframe`; `test_analysis_mart.py` |
 | 6 CLI surfaces | Not started | Only `seo-rank run` exists; no `normalize` / `build-features` / `analyze` / `replay` / `--stored-run` |
-| 7 Deps + docs + round-trip | Partial | `pyarrow` declared; `polars` used but undeclared; chained round-trip in `test_analysis_mart.py` only |
+| 7 Deps + docs + round-trip | Partial | `pyarrow` declared; `polars` used but undeclared; curated sinks still use PyArrow not Polars `sink_parquet`; chained round-trip in `test_analysis_mart.py` only |
 
 **Library API (callable, no CLI yet):** `normalize_run`, `build_feature_marts`,
 `build_analysis_mart` under `src/seo_rank/data/`.
 
-**Remaining to close Phase 4.5:** lazy normalization write path, CLI
-subcommands, `replay`, declare `polars`, canonical `runs/{run_id}/` path
-(optional), dedicated round-trip test, doc alignment.
+**Remaining to close Phase 4.5:** CLI subcommands, `replay`, declare `polars`,
+canonical `runs/{run_id}/` path (optional), dedicated round-trip test, curated
+`sink_parquet` alignment, doc alignment.
 
-**Residual risk:** the curated normalize path still materializes Python rows
-before sink, so Slice 3 is not finished yet.
+**Residual risk:** curated normalization stays lazy through the Polars plan, but
+batch-level Python UDFs still parse JSON (`response_body_bytes`), split passages,
+normalize entities, and compute per-keyword similarity groups. Each curated table
+also collects once at the write boundary (PyArrow sink today).
 
-**Next useful slice:** finish the lazy normalization write path (Slice 3),
-then widen CLI surfaces once that write path is fully lazy.
+**Next useful slice:** CLI surfaces (Slice 6), then deps/docs/round-trip (Slice 7).
 
 #### Polars data layer
 
@@ -164,13 +165,13 @@ first. Downstream commands scan lazily and sink only the marts they own.
    `pages`, `passages`, `entities`, and `similarity_scores`, preserving
    `run_id`, `target_keyword_id`, `response_id`, `schema_version`, and stable row
    IDs.
-3. **[ ] Slice 3 — Polars data package** — add `src/seo_rank/data/` with `scans`,
+3. **[x] Slice 3 — Polars data package** — add `src/seo_rank/data/` with `scans`,
    `normalize`, `features`, `marts`, and `validate`; every transform accepts/returns
    `pl.LazyFrame`, every read boundary uses `pl.scan_parquet()`, and validation runs
-   before each sink. *(In progress: package layout complete (`scans`, `normalize`,
-   `features`, `marts`, `validate`); feature/analysis paths are lazy; curated
-   normalization still collects raw rows and builds Python lists before sink;
-   `validate` is richer now; next: lazy normalize write path.)*
+   before each sink. *(Shipped: package layout complete; feature/analysis paths are
+   lazy; curated normalization scans `raw_responses` lazily and builds typed tables
+   via endpoint filters plus batch UDFs; per-table streaming collect at sink only;
+   residual: JSON/similarity UDFs and PyArrow curated writes.)*
 4. **[x] Slice 4 — Feature marts** — build and persist `keyword_serp`,
    `page_features`, `passage_features`, and `domain_features` from curated tables
    with stable-ID joins, filter/select before joins, Zstandard compression, and
@@ -214,9 +215,9 @@ See `ROADMAP.md` for Phase 5 (OLS) and Phase 5.5 (passage/domain scoring).
 
 ## Phase 4.5 acceptance criteria
 
-**Status (2026-06-29):** 3 acceptance items complete, 7 partial, 1 not started
-(CLI). Dev slices: 4 shipped, 1 in progress (Slice 3), 2 open (Slices 6–7).
-Phase 4.5 is not signed off until Slices 3, 6, and 7 close.
+**Status (2026-06-29):** 4 acceptance items complete, 6 partial, 1 not started
+(CLI). Dev slices: 5 shipped, 2 open (Slices 6–7). Phase 4.5 is not signed off
+until Slices 6 and 7 close.
 
 - [ ] `runs/{run_id}/` layout written for each completed run with `run.json`
   catalog (schemas, row counts, source response IDs, file checksums; no duplicate
@@ -231,10 +232,11 @@ Phase 4.5 is not signed off until Slices 3, 6, and 7 close.
   `response_id`, `schema_version`, and stable row IDs; page text in `pages` only.
 - [x] Feature marts (`keyword_serp`, `page_features`, `passage_features`,
   `domain_features`) and `analysis_mart` (one row per `target_keyword × SERP URL`).
-- [ ] `src/seo_rank/data/` implements `scans`, `normalize`, `features`, `marts`,
-  and `validate`; every transform accepts/returns `pl.LazyFrame`. *(Partial: all
-  five modules exist; feature/analysis transforms are lazy; curated normalization
-  still eager between scan and sink.)*
+- [x] `src/seo_rank/data/` implements `scans`, `normalize`, `features`, `marts`,
+  and `validate`; every transform accepts/returns `pl.LazyFrame`. *(Shipped: all
+  five modules exist; transforms build lazy plans from `pl.scan_parquet()`; curated
+  normalization uses batch UDFs for JSON parse and similarity grouping; collect
+  only at per-table sink.)*
 - [ ] Parquet sinks use Zstandard compression and statistics; tables sorted by
   primary retrieval keys; `collect(engine="streaming")` only at CLI/report edges.
   *(Partial: Zstd + sorted keys on curated and mart writes; feature marts use

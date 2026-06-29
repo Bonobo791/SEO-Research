@@ -10,7 +10,7 @@ Active scope contract: `GOALS.md` (Phase 4.5).
 ### Phase 4.5 — Run-scoped Parquet lake (Polars)
 
 Active contract: `GOALS.md` § Phase 4.5 objective, Polars data layer, storage
-layout, and dev slices.
+layout, and dev slices. Slice-scoped hardening and polish: `FIXUPS.md`.
 
 - **Run-scoped layout** under `runs/{run_id}/`: authoritative `raw_responses`
   (one row per DataForSEO HTTP response, partitioned by `endpoint` only), curated
@@ -125,6 +125,11 @@ layout, and dev slices.
 - **Phase 4.5 Slice 3 advanced:** stored-run curated normalization now builds
   LazyFrames before the write boundary and reads raw responses through the lazy
   scan helper; feature and analysis mart writes now validate before sink.
+- **Phase 4.5 Slice 3 shipped:** `normalize_run()` no longer eagerly loads all
+  raw rows; it scans `raw_responses`, filters by `endpoint`, and normalizes via
+  lazy `map_batches` / `map_groups` UDFs with per-table streaming collect at
+  sink. Residual: batch-level Python UDFs for JSON parsing and similarity
+  grouping; curated writes still use PyArrow (not Polars `sink_parquet`).
 - **Phase 4.5 Slice 4 shipped:** feature marts (`keyword_serp`,
   `page_features`, `passage_features`, `domain_features`) are now materialized
   from curated tables via lazy Polars joins.

@@ -1,10 +1,11 @@
 import json
 from pathlib import Path
 
+import polars as pl
 import pyarrow.dataset as ds
 
 from seo_rank.cli import main
-from seo_rank.data.normalize import normalize_run
+from seo_rank.data.normalize import build_similarity_scores_frame, normalize_run
 
 
 def test_normalize_run_materializes_curated_tables_from_raw_responses(
@@ -62,3 +63,54 @@ def test_normalize_run_materializes_curated_tables_from_raw_responses(
     run_json = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
     assert run_json["catalog"]["datasets"]["keywords"]["row_count"] == 25
     assert run_json["catalog"]["datasets"]["similarity_scores"]["row_count"] == 25
+
+
+def test_normalize_run_does_not_load_raw_rows_eagerly(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--depth",
+            "1",
+            "--output-dir",
+            str(output_dir),
+            "--dry-run",
+        ]
+    )
+
+    assert exit_code == 0
+
+    def fail_if_called(*args, **kwargs):  # noqa: ANN001, ANN002
+        raise AssertionError("normalize_run should not eagerly load raw rows")
+
+    monkeypatch.setattr("seo_rank.data.normalize.load_raw_response_rows", fail_if_called)
+
+    catalog = normalize_run(output_dir)
+
+    assert catalog["datasets"]["keywords"]["row_count"] == 25
+
+
+def test_build_similarity_scores_frame_handles_empty_group() -> None:
+    frame = pl.DataFrame(
+        {
+            "run_id": [],
+            "target_keyword_id": [],
+            "target_keyword": [],
+            "response_id": [],
+            "canonical_url_hash": [],
+            "url": [],
+            "title": [],
+            "text": [],
+        }
+    )
+
+    result = build_similarity_scores_frame(frame, run_id="run-1")
+
+    assert result.is_empty()
