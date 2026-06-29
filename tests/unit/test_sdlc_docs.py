@@ -1,4 +1,5 @@
 import json
+import tomllib
 from pathlib import Path
 
 
@@ -76,3 +77,12 @@ def test_env_example_documents_live_provider_gates_without_real_secrets() -> Non
     assert ".env" in gitignore
     assert "analyst@example.com" not in env_example
     assert "secret" not in env_example.lower()
+
+
+def test_pyproject_declares_runtime_parquet_and_polars_dependencies() -> None:
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+    dependencies = pyproject["project"]["dependencies"]
+
+    assert "pyarrow>=21.0" in dependencies
+    assert "polars>=1.0" in dependencies

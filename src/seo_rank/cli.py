@@ -12,8 +12,11 @@ from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+import polars as pl
 
 from seo_rank.env import ensure_project_env_loaded
+from seo_rank.data import build_analysis_mart, build_feature_marts, normalize_run
+from seo_rank.data.scans import scan_curated_table, scan_raw_responses
 from seo_rank.dataforseo import (
     DataForSeoClientError,
     DataForSeoCredentialError,
@@ -107,6 +110,19 @@ class LiveProviderGateError(ValueError):
     """Raised when live provider execution is not explicitly allowed."""
 
 
+class CliCommandError(ValueError):
+    """Raised when a CLI storage command cannot complete cleanly."""
+
+
+STORAGE_COMMAND_EXCEPTIONS = (
+    FileNotFoundError,
+    OSError,
+    ValueError,
+    json.JSONDecodeError,
+    pl.exceptions.PolarsError,
+)
+
+
 @dataclass(frozen=True)
 class LiveProviderCredentials:
     dataforseo: DataForSeoCredentials
@@ -126,21 +142,49 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "run":
         assert config is not None
-        if config.live_providers:
-            try:
+        try:
+            if args.stored_run is not None:
+                replay_stored_run(Path(args.stored_run), config)
+            elif config.live_providers:
                 write_live_artifacts(config, os.environ)
-            except (
-                BgeRerankerError,
-                DataForSeoClientError,
-                GeminiEmbeddingError,
-                LiveProviderGateError,
-                TextRazorClientError,
-            ) as error:
-                print(error, file=sys.stderr)
-                return 2
-        else:
-            write_offline_artifacts(config)
+            else:
+                write_offline_artifacts(config)
+        except (
+            BgeRerankerError,
+            CliCommandError,
+            DataForSeoClientError,
+            GeminiEmbeddingError,
+            LiveProviderGateError,
+            TextRazorClientError,
+        ) as error:
+            print(error, file=sys.stderr)
+            return 2
         return 0
+
+    try:
+        if args.command == "normalize":
+            normalize_run(Path(args.run))
+            return 0
+
+        if args.command == "build-features":
+            build_feature_marts(Path(args.run))
+            return 0
+
+        if args.command == "analyze":
+            build_analysis_mart(Path(args.run))
+            if args.keyword:
+                emit_keyword_analysis(Path(args.run), args.keyword)
+            return 0
+
+        if args.command == "replay":
+            replay_raw_response(Path(args.run), args.response_id)
+            return 0
+    except STORAGE_COMMAND_EXCEPTIONS as error:
+        print(error, file=sys.stderr)
+        return 2
+    except CliCommandError as error:
+        print(error, file=sys.stderr)
+        return 2
 
     parser.print_help()
     return 0
@@ -162,6 +206,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--dry-run", action="store_true")
     run.add_argument("--skip-textrazor", action="store_true")
     run.add_argument(
+        "--stored-run",
+        type=Path,
+        help="Replay a prior run tree instead of fetching provider data",
+    )
+    run.add_argument(
         "--live-providers",
         action="store_true",
         help="Run the env-gated live provider smoke path",
@@ -169,6 +218,32 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--live-bge", action="store_true")
     run.add_argument("--live-gemini", action="store_true")
     run.add_argument("--live-textrazor", action="store_true")
+
+    normalize = subparsers.add_parser(
+        "normalize",
+        help="Materialize curated tables from a stored run",
+    )
+    normalize.add_argument("--run", type=Path, required=True)
+
+    build_features = subparsers.add_parser(
+        "build-features",
+        help="Materialize feature marts from curated tables",
+    )
+    build_features.add_argument("--run", type=Path, required=True)
+
+    analyze = subparsers.add_parser(
+        "analyze",
+        help="Materialize the analysis mart from feature marts",
+    )
+    analyze.add_argument("--run", type=Path, required=True)
+    analyze.add_argument("--keyword")
+
+    replay = subparsers.add_parser(
+        "replay",
+        help="Replay one stored raw response",
+    )
+    replay.add_argument("--run", type=Path, required=True)
+    replay.add_argument("--response-id", required=True)
 
     return parser
 
@@ -193,7 +268,7 @@ def config_from_args(args: argparse.Namespace) -> RunConfig:
         language=args.language,
         device=args.device,
         depth=args.depth,
-        output_dir=args.output_dir,
+        output_dir=args.stored_run if args.stored_run is not None else args.output_dir,
         model_name=args.model_name,
         javascript_parsing=args.javascript_parsing,
         dry_run=args.dry_run,
@@ -262,6 +337,61 @@ def write_live_artifacts(config: RunConfig, env: Mapping[str, str]) -> None:
         textrazor_transport=DEFAULT_TEXTRAZOR_TRANSPORT,
     )
     write_artifacts(config.output_dir, payload)
+
+
+def replay_stored_run(stored_run: Path, config: RunConfig) -> None:
+    del config
+    try:
+        normalize_run(stored_run)
+        build_feature_marts(stored_run)
+        build_analysis_mart(stored_run)
+    except STORAGE_COMMAND_EXCEPTIONS as error:
+        raise CliCommandError(str(error)) from error
+
+
+def scan_analysis_mart(run_dir: Path) -> pl.LazyFrame:
+    return scan_curated_table(run_dir, "analysis_mart")
+
+
+def emit_keyword_analysis(run_dir: Path, keyword: str) -> None:
+    try:
+        rows = (
+            scan_analysis_mart(run_dir)
+            .filter(pl.col("target_keyword") == keyword)
+            .collect()
+            .to_dicts()
+        )
+    except STORAGE_COMMAND_EXCEPTIONS as error:
+        raise CliCommandError(str(error)) from error
+    if not rows:
+        raise CliCommandError(
+            f"Stored run {run_dir} does not contain target_keyword={keyword!r}"
+        )
+    print(json.dumps(rows, separators=(",", ":"), sort_keys=True))
+
+
+def replay_raw_response(run_dir: Path, response_id: str) -> None:
+    try:
+        rows = (
+            scan_raw_responses(run_dir)
+            .filter(pl.col("response_id") == response_id)
+            .select(["response_body_bytes"])
+            .collect()
+            .to_dicts()
+        )
+    except STORAGE_COMMAND_EXCEPTIONS as error:
+        raise CliCommandError(str(error)) from error
+    if not rows:
+        raise CliCommandError(
+            f"Stored run {run_dir} does not contain response_id={response_id}"
+        )
+    response_body_bytes = rows[0]["response_body_bytes"]
+    if isinstance(response_body_bytes, (bytes, bytearray)):
+        print(bytes(response_body_bytes).decode("utf-8"))
+        return
+    raise CliCommandError(
+        f"Stored response {response_id} does not contain raw bytes"
+    )
 
 
 def write_artifacts(output_dir: Path, payload: dict[str, object]) -> None:

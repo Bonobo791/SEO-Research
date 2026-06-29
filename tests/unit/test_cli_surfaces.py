@@ -1,0 +1,216 @@
+from pathlib import Path
+
+import polars as pl
+
+from seo_rank.cli import build_parser, main
+
+
+def test_build_parser_exposes_phase_45_commands() -> None:
+    parser = build_parser()
+
+    subparser_actions = [
+        action for action in parser._actions if getattr(action, "choices", None)
+    ]
+    assert subparser_actions, "expected parser to define subcommands"
+    subcommands = set(subparser_actions[0].choices)
+
+    assert {"run", "normalize", "build-features", "analyze", "replay"} <= subcommands
+
+    parsed = parser.parse_args(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--stored-run",
+            "/tmp/run-1",
+        ]
+    )
+    assert parsed.stored_run == Path("/tmp/run-1")
+
+
+def test_storage_commands_dispatch_to_data_layer(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    run_dir = tmp_path / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+
+    calls: list[tuple[str, object]] = []
+
+    monkeypatch.setattr(
+        "seo_rank.cli.normalize_run",
+        lambda path: calls.append(("normalize", path)) or {"datasets": {}},
+    )
+    monkeypatch.setattr(
+        "seo_rank.cli.build_feature_marts",
+        lambda path: calls.append(("build-features", path)) or {"datasets": {}},
+    )
+    monkeypatch.setattr(
+        "seo_rank.cli.build_analysis_mart",
+        lambda path: calls.append(("analyze", path)) or {"datasets": {}},
+    )
+    monkeypatch.setattr(
+        "seo_rank.cli.scan_raw_responses",
+        lambda path: pl.DataFrame(
+            [
+                {
+                    "run_id": "run-1",
+                    "response_id": "resp-1",
+                    "endpoint": "serp",
+                    "response_body_bytes": b'{"id": 1}',
+                }
+            ]
+        ).lazy(),
+    )
+    monkeypatch.setattr(
+        "seo_rank.cli.scan_analysis_mart",
+        lambda path: pl.DataFrame(
+            [
+                {
+                    "target_keyword": "technical seo",
+                    "url": "https://example.com/seo",
+                    "serp_rank": 1,
+                },
+                {
+                    "target_keyword": "other keyword",
+                    "url": "https://example.com/other",
+                    "serp_rank": 2,
+                },
+            ]
+        ).lazy(),
+    )
+
+    assert main(["normalize", "--run", str(run_dir)]) == 0
+    assert main(["build-features", "--run", str(run_dir)]) == 0
+    assert main(["analyze", "--run", str(run_dir), "--keyword", "technical seo"]) == 0
+
+    exit_code = main(
+        [
+            "replay",
+            "--run",
+            str(run_dir),
+            "--response-id",
+            "resp-1",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    output_lines = captured.out.strip().splitlines()
+    assert output_lines == [
+        '[{"serp_rank":1,"target_keyword":"technical seo","url":"https://example.com/seo"}]',
+        '{"id": 1}',
+    ]
+    assert calls == [
+        ("normalize", run_dir),
+        ("build-features", run_dir),
+        ("analyze", run_dir),
+    ]
+
+
+def test_run_stored_run_replays_existing_tree_without_provider_calls(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    stored_run = tmp_path / "runs" / "run-1"
+    stored_run.mkdir(parents=True)
+
+    calls: list[tuple[str, object]] = []
+
+    monkeypatch.setattr(
+        "seo_rank.cli.replay_stored_run",
+        lambda path, config: calls.append(("replay", path, config.output_dir)),
+    )
+    monkeypatch.setattr(
+        "seo_rank.cli.write_offline_artifacts",
+        lambda config: (_ for _ in ()).throw(AssertionError("offline run should not execute")),
+    )
+    monkeypatch.setattr(
+        "seo_rank.cli.write_live_artifacts",
+        lambda config, env: (_ for _ in ()).throw(AssertionError("live run should not execute")),
+    )
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--stored-run",
+            str(stored_run),
+        ]
+    )
+
+    assert exit_code == 0
+    assert calls == [("replay", stored_run, stored_run)]
+
+
+def test_analyze_rejects_unknown_keyword_with_exit_code_2(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    run_dir = tmp_path / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+
+    monkeypatch.setattr(
+        "seo_rank.cli.build_analysis_mart",
+        lambda path: {"datasets": {}},
+    )
+    monkeypatch.setattr(
+        "seo_rank.cli.scan_analysis_mart",
+        lambda path: pl.DataFrame(
+            [{"target_keyword": "other keyword", "url": "https://example.com"}]
+        ).lazy(),
+    )
+
+    exit_code = main(
+        ["analyze", "--run", str(run_dir), "--keyword", "technical seo"]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "technical seo" in captured.err
+
+
+def test_storage_commands_return_exit_code_2_on_storage_errors(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    run_dir = tmp_path / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+
+    def fail(path: Path):
+        del path
+        raise FileNotFoundError("run.json missing")
+
+    monkeypatch.setattr("seo_rank.cli.normalize_run", fail)
+
+    exit_code = main(["normalize", "--run", str(run_dir)])
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "run.json missing" in captured.err
+
+
+def test_replay_returns_exit_code_2_without_traceback_on_missing_response(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    run_dir = tmp_path / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+
+    monkeypatch.setattr(
+        "seo_rank.cli.scan_raw_responses",
+        lambda path: pl.DataFrame(
+            [{"response_id": "other-id", "response_body_bytes": b"{}"}]
+        ).lazy(),
+    )
+
+    exit_code = main(["replay", "--run", str(run_dir), "--response-id", "resp-1"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "response_id=resp-1" in captured.err

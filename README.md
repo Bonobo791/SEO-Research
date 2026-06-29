@@ -52,19 +52,21 @@ real backends when env gates and credentials are set.
 
 **Phase 4.5 (in progress):** run-scoped Parquet lake (`runs/{run_id}/` with
 authoritative `raw_responses`, curated tables, feature marts, and `analysis_mart`)
-and a Polars LazyFrame library in `src/seo_rank/data/` (`normalize_run`,
-`build_feature_marts`, `build_analysis_mart`) are callable today; CLI commands
-`normalize`, `build-features`, `analyze`, and `replay` are not wired yet.
-**Next:** CLI surfaces and round-trip docs/deps. Later: passage/domain scopes
-(Phase 5.5), `statsmodels` OLS with Benjamini-Hochberg (Phase 5), and expanded
-report sections (Phase 6).
+plus a Polars LazyFrame library in `src/seo_rank/data/` (`normalize_run`,
+`build_feature_marts`, `build_analysis_mart`). CLI commands `normalize`,
+`build-features`, `analyze`, and `replay` are wired; `run --stored-run` re-materializes
+marts from a stored run tree without provider calls.
+**Next:** round-trip test module and final doc pass (Slice 7). Later: passage/domain
+scopes (Phase 5.5), `statsmodels` OLS with Benjamini-Hochberg (Phase 5), and
+expanded report sections (Phase 6).
 
 Details: `GOALS.md` and `ARCHITECTURE.md` (see **Run-scoped Parquet lake** and
 **Polars data layer**).
 
 ### Storage layout (Phase 4.5)
 
-Library writes this layout today via `--output-dir`; CLI subcommands are planned.
+Library writes this layout via `--output-dir`; CLI subcommands materialize layers
+in place on an existing run tree.
 
 ```text
 runs/{run_id}/
@@ -87,15 +89,16 @@ runs/{run_id}/
 
 ### CLI (Phase 4.5)
 
-Library API is callable; dedicated subcommands are planned.
-
 ```bash
 seo-rank normalize --run RUN_ID
 seo-rank build-features --run RUN_ID
 seo-rank analyze --run RUN_ID --keyword "technical seo"
 seo-rank replay --run RUN_ID --response-id RESPONSE_ID
-seo-rank run --stored-run runs/RUN_ID ...   # reload stored inputs
+seo-rank run --seed "technical seo" --stored-run runs/RUN_ID   # re-materialize marts
 ```
+
+Storage commands exit `2` on missing run data or unknown `--keyword` / `--response-id`
+values (message on stderr, no traceback).
 
 All transforms use `pl.scan_parquet()` and return `pl.LazyFrame` until a command
 boundary calls `collect(engine="streaming")` or `sink_parquet(..., compression="zstd")`.

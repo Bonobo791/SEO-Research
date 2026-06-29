@@ -135,3 +135,6 @@ layout, and dev slices. Slice-scoped hardening and polish: `FIXUPS.md`.
   from curated tables via lazy Polars joins.
 - **Phase 4.5 Slice 5 shipped:** `analysis_mart` now materializes as a lazy
   panel joined from feature marts and written back into the run-scoped lake.
+- **Phase 4.5 Slice 6 shipped:** CLI surfaces `normalize`, `build-features`,
+  `analyze`, and `replay`; `run --stored-run` re-materializes marts from a stored
+  run tree without provider calls. Unit coverage in `test_cli_surfaces.py`.

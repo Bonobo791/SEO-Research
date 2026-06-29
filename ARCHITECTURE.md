@@ -83,12 +83,12 @@ The repository contains an **offline-verifiable CLI scaffold** (Phase 1 shipped)
   `marts`, `validate`)
 - **CLI:** `seo-rank run` writes `run.json` and `report.md` from fixtures (no
   network calls) or gated live providers; Phase 4.5 adds `normalize`,
-  `build-features`, `analyze`, and `replay`
-- **Tests:** 53 tests under `tests/`; gate: `python -m pytest`
+  `build-features`, `analyze`, `replay`, and `run --stored-run` (Slice 6 shipped)
+- **Tests:** 66 tests under `tests/`; gate: `python -m pytest`
 - **Product docs:** `ARCHITECTURE.md`, `GOALS.md`, `ROADMAP.md`, `README.md`,
   `TESTING.md`
-- **Not yet:** `statsmodels` analysis; CLI stored-run surfaces (`normalize`,
-  `build-features`, `analyze`, `replay`, `--stored-run`; Phase 4.5 Slice 6)
+- **Not yet:** `statsmodels` analysis (Phase 5); dedicated offline round-trip
+  test module (Phase 4.5 Slice 7)
 
 Module and artifact details are in [Application Surface](#application-surface)
 and [Key Product Components](#key-product-components) below. Planned live
@@ -293,9 +293,9 @@ Built by `marts.py` when Phase 5 analysis needs a single panel. One row per
 - Materialize reusable marts with `sink_parquet`; use
   `collect(engine="streaming")` only at CLI/report boundaries or when a
   DataFrame is actually needed.
-- CLI: `seo-rank run --stored-run runs/{run_id}` selects a prior run tree for
-  orchestration replay. Explicit opt-in; missing slices fall back to fixtures
-  (offline) or gated live API calls.
+- CLI: `seo-rank run --stored-run runs/{run_id}` re-materializes curated tables,
+  feature marts, and `analysis_mart` from the stored lake without provider calls.
+  `--seed` is still required by argparse but ignored on this path.
 
 ### CLI commands (Phase 4.5)
 

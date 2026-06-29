@@ -1,8 +1,9 @@
 # Small fixes backlog
 
 Tracked hardening and polish items surfaced during Phase 4.5 Slice 3 (lazy
-curated normalization) review. Each item names the **phase/slice** where it
-should land. Nothing here blocks Slice 6 (CLI) unless noted.
+curated normalization) and Slice 6 (CLI surfaces) review. Each item names the
+**phase/slice** where it should land. Nothing here blocks Slice 7 sign-off
+unless marked **required**.
 
 **Status key:** `open` | `done`
 
@@ -10,8 +11,8 @@ should land. Nothing here blocks Slice 6 (CLI) unless noted.
 
 ## Phase 4.5 — Slice 3 (post-ship hardening)
 
-Polish on the shipped lazy normalize path. Safe to batch after Slice 6 starts
-if none of these block CLI wiring.
+Polish on the shipped lazy normalize path. Safe to batch after Slice 7 starts
+if none of these block deps/docs/round-trip work.
 
 | ID | Fix | Phase | Priority | Status |
 | --- | --- | --- | --- | --- |
@@ -24,11 +25,18 @@ if none of these block CLI wiring.
 
 ---
 
-## Phase 4.5 — Slice 6 (CLI surfaces)
+## Phase 4.5 — Slice 6 (CLI surfaces — post-ship polish)
 
 | ID | Fix | Phase | Priority | Status |
 | --- | --- | --- | --- | --- |
-| S6-01 | Wire `load_raw_response_rows` (or a successor) into `seo-rank replay` if single-response re-normalize needs sorted eager rows | 4.5 Slice 6 | required for replay | open |
+| S6-02 | Remove redundant `except CliCommandError` in `main()` — `CliCommandError` subclasses `ValueError`, already caught by `STORAGE_COMMAND_EXCEPTIONS` | 4.5 Slice 6 | nice-to-have | open |
+| S6-03 | Simplify `replay_stored_run`: drop unused `config` parameter (or use config fields if replay should respect run settings later) | 4.5 Slice 6 | nice-to-have | open |
+| S6-04 | Make `--seed` optional when `--stored-run` is set (replay ignores seed today but argparse still requires it) | 4.5 Slice 6 | nice-to-have | open |
+| S6-05 | Emit stderr warning when both `--stored-run` and `--live-providers` are passed (`--stored-run` wins silently today) | 4.5 Slice 6 | nice-to-have | open |
+| S6-06 | `replay`: error or warn when multiple rows match `--response-id` (currently uses `rows[0]` only) | 4.5 Slice 6 | nice-to-have | open |
+| S6-07 | Test `run --stored-run` failure path (e.g. missing `run.json`) → exit code `2` without traceback | 4.5 Slice 6 | nice-to-have | open |
+| S6-08 | Replace private `parser._actions` introspection in `test_cli_surfaces.py` with public argv round-trips only | 4.5 Slice 6 | nice-to-have | open |
+| S6-09 | Optional: `replay` re-normalize path — derive curated rows from one `response_id` (beyond printing raw `response_body_bytes`) | 4.5 Slice 6 | planned | open |
 
 ---
 
@@ -36,10 +44,10 @@ if none of these block CLI wiring.
 
 | ID | Fix | Phase | Priority | Status |
 | --- | --- | --- | --- | --- |
-| S7-01 | Update `ARCHITECTURE.md` test count (currently “53 tests”; suite is 58+) | 4.5 Slice 7 | nice-to-have | open |
+| S7-01 | Update `ARCHITECTURE.md` test count when the suite changes (was 53; now 66) | 4.5 Slice 7 | nice-to-have | done |
 | S7-02 | Migrate curated table writes from PyArrow `write_table` to Polars `sink_parquet(..., compression="zstd")` for parity with feature/analysis marts | 4.5 Slice 7 | planned | open |
 | S7-03 | Add dedicated round-trip test module: `run --dry-run` → `normalize_run` → `build_feature_marts` → `build_analysis_mart` in one test file (beyond `test_analysis_mart.py` chain) | 4.5 Slice 7 | planned | open |
-| S7-04 | Declare `polars` in `pyproject.toml` | 4.5 Slice 7 | required | open |
+| S7-04 | Declare `polars` in `pyproject.toml` | 4.5 Slice 7 | required | done |
 | S7-05 | Optional empty-endpoint integration test (e.g. run missing `entities` partition) to exercise empty `map_batches` paths end-to-end | 4.5 Slice 7 | nice-to-have | open |
 
 ---
@@ -51,6 +59,15 @@ if none of these block CLI wiring.
 | S3-DONE-01 | Empty `build_similarity_scores_frame`: use `CURATED_VALIDATION_RULES` Polars schema instead of PyArrow `CURATED_SCHEMAS` | 4.5 Slice 3 | done |
 | S3-DONE-02 | Lazy curated normalize: `scan_raw_responses` + `map_batches` / `map_groups` instead of `load_raw_response_rows` loop | 4.5 Slice 3 | done |
 | S3-DONE-03 | Align `GOALS.md`, `ROADMAP.md`, `ARCHITECTURE.md`, `README.md`, `TESTING.md` with lazy normalize + residual UDF risk | 4.5 Slice 3 | done |
+
+---
+
+## Phase 4.5 — Slice 6 (already done)
+
+| ID | Fix | Phase | Status |
+| --- | --- | --- | --- |
+| S6-DONE-01 | Wire `seo-rank replay` to read one `response_id` from `raw_responses` via `scan_raw_responses` (successor to eager `load_raw_response_rows`) | 4.5 Slice 6 | done |
+| S6-DONE-02 | Align Slice 6 docs: `README.md`, `ARCHITECTURE.md`, `GOALS.md`, `ROADMAP.md`, `TESTING.md` with shipped CLI surfaces | 4.5 Slice 6 | done |
 
 ---
 

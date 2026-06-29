@@ -45,22 +45,21 @@ trees stay out of source control.
 | 3 Polars data package | Shipped | `scans`, `validate`, `features`, `marts`, and lazy `normalize` (`scan_raw_responses` → endpoint filters → `map_batches` / `map_groups`); per-table `collect(engine="streaming")` at curated sink only |
 | 4 Feature marts | Shipped | `build_feature_marts()` with lazy joins; `test_feature_marts.py` |
 | 5 Analysis mart | Shipped | `build_analysis_mart()` + `marts.build_analysis_lazyframe`; `test_analysis_mart.py` |
-| 6 CLI surfaces | Not started | Only `seo-rank run` exists; no `normalize` / `build-features` / `analyze` / `replay` / `--stored-run` |
-| 7 Deps + docs + round-trip | Partial | `pyarrow` declared; `polars` used but undeclared; curated sinks still use PyArrow not Polars `sink_parquet`; chained round-trip in `test_analysis_mart.py` only |
+| 6 CLI surfaces | Shipped | `seo-rank normalize`, `build-features`, `analyze`, `replay`, and `run --stored-run` replay the stored run tree without refetching provider payloads |
+| 7 Deps + docs + round-trip | Partial | `pyarrow` and `polars` declared; curated sinks still use PyArrow not Polars `sink_parquet`; chained round-trip in `test_analysis_mart.py` only |
 
-**Library API (callable, no CLI yet):** `normalize_run`, `build_feature_marts`,
-`build_analysis_mart` under `src/seo_rank/data/`.
+**Library API (callable, with CLI surfaces):** `normalize_run`,
+`build_feature_marts`, `build_analysis_mart` under `src/seo_rank/data/`.
 
-**Remaining to close Phase 4.5:** CLI subcommands, `replay`, declare `polars`,
-canonical `runs/{run_id}/` path (optional), dedicated round-trip test, curated
-`sink_parquet` alignment, doc alignment.
+**Remaining to close Phase 4.5:** dedicated round-trip test, curated
+`sink_parquet` alignment, final doc alignment pass.
 
 **Residual risk:** curated normalization stays lazy through the Polars plan, but
 batch-level Python UDFs still parse JSON (`response_body_bytes`), split passages,
 normalize entities, and compute per-keyword similarity groups. Each curated table
 also collects once at the write boundary (PyArrow sink today).
 
-**Next useful slice:** CLI surfaces (Slice 6), then deps/docs/round-trip (Slice 7).
+**Next useful slice:** deps/docs/round-trip (Slice 7).
 
 #### Polars data layer
 
@@ -178,17 +177,16 @@ first. Downstream commands scan lazily and sink only the marts they own.
    sorted retrieval keys.
 5. **[x] Slice 5 — Analysis mart** — build `analysis_mart` lazily as one row per
    `target_keyword × SERP URL`, excluding `raw_responses` from analytical joins.
-6. **[ ] Slice 6 — CLI and stored-run surfaces** — add `normalize`,
+6. **[x] Slice 6 — CLI and stored-run surfaces** — `normalize`,
    `build-features`, `analyze`, and `replay` subcommands, plus explicit
    `seo-rank run --stored-run runs/{run_id}` reload behavior.
-7. **[ ] Slice 7 — Dependencies, docs, and round-trip verification** — add `polars`
-   and `pyarrow` to `pyproject.toml`, align `ARCHITECTURE.md`, `TESTING.md`,
-   `ROADMAP.md`, `README.md`, and `.env.example` as needed, and prove the offline
-   write → normalize → build-features → analyze round-trip plus single-response
-   replay. *(Partial: `pyarrow` declared; `test_analysis_mart.py` chains run →
-   normalize → feature marts → analysis mart; no dedicated round-trip test file;
-   `replay` not implemented; `polars` not in `pyproject.toml`; `README.md` still
-   lists storage/CLI as planned.)*
+7. **[ ] Slice 7 — Dependencies, docs, and round-trip verification** — align
+   `ARCHITECTURE.md`, `TESTING.md`, `ROADMAP.md`, `README.md`, and `.env.example`
+   as needed, and prove the offline write → normalize → build-features → analyze
+   round-trip plus single-response replay. *(Partial: `pyarrow` and `polars`
+   declared; `test_analysis_mart.py` chains run → normalize → feature marts →
+   analysis mart; `test_cli_surfaces.py` covers CLI dispatch; no dedicated
+   round-trip test file.)*
 
 See `ROADMAP.md` for Phase 5 (OLS) and Phase 5.5 (passage/domain scoring).
 
@@ -215,9 +213,9 @@ See `ROADMAP.md` for Phase 5 (OLS) and Phase 5.5 (passage/domain scoring).
 
 ## Phase 4.5 acceptance criteria
 
-**Status (2026-06-29):** 4 acceptance items complete, 6 partial, 1 not started
-(CLI). Dev slices: 5 shipped, 2 open (Slices 6–7). Phase 4.5 is not signed off
-until Slices 6 and 7 close.
+**Status (2026-06-29):** 6 acceptance items complete, 5 partial, 0 not started
+(CLI). Dev slices: 6 shipped, 1 open (Slice 7). Phase 4.5 is not signed off
+until Slice 7 closes.
 
 - [ ] `runs/{run_id}/` layout written for each completed run with `run.json`
   catalog (schemas, row counts, source response IDs, file checksums; no duplicate
@@ -244,10 +242,10 @@ until Slices 6 and 7 close.
   statistics not explicitly enabled.)*
 - [x] `validate.py` runs schema/key/null/range checks before every mart write.
   *(Shipped for curated, feature, and analysis writes.)*
-- [ ] `raw_responses` excluded from normal analytical joins; `replay` path only.
-  *(Partial: analytical joins use curated/feature scans only; `replay` not
-  implemented.)*
-- [ ] CLI: `normalize`, `build-features`, `analyze`, `replay`; `--stored-run`
+- [x] `raw_responses` excluded from normal analytical joins; `replay` path only.
+  *(Shipped: analytical joins use curated/feature scans only; `replay` reads the
+  stored raw lake.)*
+- [x] CLI: `normalize`, `build-features`, `analyze`, `replay`; `--stored-run`
   reloads stored data when explicitly requested.
 - [ ] Offline unit tests cover write → normalize → build-features → analyze
   round-trip without network calls. *(Partial: `test_analysis_mart.py` chains the
@@ -255,8 +253,8 @@ until Slices 6 and 7 close.
   `test_run_normalize`, and `test_feature_marts`; no dedicated round-trip test
   module.)*
 - [ ] `polars` + `pyarrow` declared in `pyproject.toml`; docs updated. *(Partial:
-  `pyarrow` declared; `polars` used in code but not declared; core slice docs
-  updated; `README.md` still lists storage/CLI as planned.)*
+  both declared; Slice 6 CLI docs updated in `README.md` and `ARCHITECTURE.md`;
+  Slice 7 round-trip test module remains.)*
 
 ## Phase 4 acceptance criteria (complete)
 
