@@ -5,7 +5,12 @@ import polars as pl
 import pyarrow.dataset as ds
 
 from seo_rank.cli import main
-from seo_rank.data.normalize import build_similarity_scores_frame, normalize_run
+from seo_rank.data.normalize import (
+    CURATED_SCHEMAS,
+    build_similarity_scores_frame,
+    normalize_run,
+    write_curated_dataset,
+)
 
 
 def test_normalize_run_materializes_curated_tables_from_raw_responses(
@@ -114,3 +119,51 @@ def test_build_similarity_scores_frame_handles_empty_group() -> None:
     result = build_similarity_scores_frame(frame, run_id="run-1")
 
     assert result.is_empty()
+
+
+def test_write_curated_dataset_uses_lazy_sink_parquet_with_statistics(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    run_dir = tmp_path / "run-1"
+    run_dir.mkdir()
+    captured: dict[str, object] = {}
+
+    def fake_sink_parquet(self, path, **kwargs):  # noqa: ANN001, ANN003
+        captured["path"] = Path(path)
+        captured["kwargs"] = kwargs
+        captured["rows"] = self.collect(engine="streaming").to_dicts()
+        Path(path).write_bytes(b"curated-parquet")
+
+    monkeypatch.setattr(pl.LazyFrame, "sink_parquet", fake_sink_parquet)
+
+    catalog = write_curated_dataset(
+        run_dir,
+        name="keywords",
+        rows=[
+            {
+                "run_id": "run-1",
+                "target_keyword_id": "kw-2",
+                "target_keyword": "zeta",
+                "source_seed": "technical seo",
+                "source_response_id": "resp-2",
+                "keyword_order": 2,
+                "schema_version": "curated.v1",
+            },
+            {
+                "run_id": "run-1",
+                "target_keyword_id": "kw-1",
+                "target_keyword": "alpha",
+                "source_seed": "technical seo",
+                "source_response_id": "resp-1",
+                "keyword_order": 1,
+                "schema_version": "curated.v1",
+            },
+        ],
+        schema=CURATED_SCHEMAS["keywords"],
+    )
+
+    assert captured["path"] == run_dir / "parquet" / "keywords" / "part-0.parquet"
+    assert captured["kwargs"] == {"compression": "zstd", "statistics": True}
+    assert [row["target_keyword_id"] for row in captured["rows"]] == ["kw-1", "kw-2"]
+    assert catalog["row_count"] == 2

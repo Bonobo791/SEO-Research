@@ -36,31 +36,37 @@ trees stay out of source control.
 
 #### Progress (2026-06-29)
 
-**Slices:** 7 of 7 shipped, 0 open. Phase 4.5 is not signed off pending write-contract hardening.
+**Slices:** 8 of 10 shipped, 2 open. Phase 4.5 is not signed off pending mart
+sink and validation-edge hardening (slices 9–10).
 
-| Slice | Status | Notes |
-| ----- | ------ | ----- |
-| 1 Raw lake | Shipped | `seo-rank run` defaults to `runs/{run_id}/` and writes `parquet/raw_responses/` + `run.json` catalog; explicit `--output-dir` still overrides |
-| 2 Curated normalize | Shipped | `normalize_run()` → six curated tables; library + `test_run_normalize.py` |
-| 3 Polars data package | Shipped | `scans`, `validate`, `features`, `marts`, and lazy `normalize` (`scan_raw_responses` → endpoint filters → `map_batches` / `map_groups`); per-table `collect(engine="streaming")` at curated sink only |
-| 4 Feature marts | Shipped | `build_feature_marts()` with lazy joins; `test_feature_marts.py` |
-| 5 Analysis mart | Shipped | `build_analysis_mart()` + `marts.build_analysis_lazyframe`; `test_analysis_mart.py` |
-| 6 CLI surfaces | Shipped | `seo-rank normalize`, `build-features`, `analyze`, `replay`, and `run --stored-run` replay the stored run tree without refetching provider payloads |
-| 7 Deps + docs + round-trip | Shipped | `pyarrow` and `polars` declared; docs aligned; round-trip regression sweep pins the shipped slice state |
-
-**Slice 7 shipped:** docs alignment and the round-trip regression sweep are in place.
+| # | Slice | Layer | Status | Primary deliverable |
+| - | ----- | ----- | ------ | ------------------- |
+| 1 | Raw lake foundation | Write | Shipped | Default `runs/{run_id}/` layout; authoritative `raw_responses` partitioned by `endpoint`; lightweight `run.json` catalog |
+| 2 | Curated normalization | Curated | Shipped | `normalize_run()` → six typed Parquet tables with stable IDs and `schema_version` |
+| 3 | Polars data package | Infra | Shipped | `src/seo_rank/data/` (`scans`, `validate`, `features`, `marts`, lazy `normalize`); LazyFrame in/out at transform boundaries |
+| 4 | Feature marts | Feature | Shipped | `keyword_serp`, `page_features`, `passage_features`, `domain_features` via stable-ID lazy joins |
+| 5 | Analysis mart | Analysis | Shipped | One row per `target_keyword × SERP URL`; `raw_responses` excluded from joins |
+| 6 | CLI and stored-run surfaces | CLI | Shipped | `normalize`, `build-features`, `analyze`, `replay`; `run --stored-run` reload path |
+| 7 | Dependencies, docs, round-trip | Verify | Shipped | `pyarrow` + `polars` declared; docs aligned; `test_round_trip.py` CLI sweep |
+| 8 | Curated sink contract | Write | Shipped | Curated tables sink via Polars `sink_parquet(..., compression="zstd", statistics=True)` with sorted retrieval keys |
+| 9 | Mart sink contract | Write | Open | Feature marts and `analysis_mart` use lazy `sink_parquet` with statistics; drop eager `collect` + `write_parquet` in `write_feature_dataset` |
+| 10 | Validation lazy edge | Infra | Open | Row-level checks in `validate.py` without mid-plan `collect()`; validation stays lazy until sink boundary |
 
 **Library API (callable, with CLI surfaces):** `normalize_run`,
 `build_feature_marts`, `build_analysis_mart` under `src/seo_rank/data/`.
 
-**Remaining to close Phase 4.5:** curated `sink_parquet` alignment and row-group statistics on the write path.
+**Remaining to close Phase 4.5:** slices 9–10 (mart sink contract + validation
+lazy edge).
 
 **Residual risk:** curated normalization stays lazy through the Polars plan, but
 batch-level Python UDFs still parse JSON (`response_body_bytes`), split passages,
-normalize entities, and compute per-keyword similarity groups. Each curated table
-also collects once at the write boundary (PyArrow sink today).
+normalize entities, and compute per-keyword similarity groups. Feature and
+analysis marts still `collect(engine="streaming")` before `write_parquet`
+(slice 9). Validation still collects selected columns before row-level checks
+(slice 10).
 
-**Next useful slice:** curated sink parity/statistics.
+**Post-sign-off polish:** optional hardening tracked in `FIXUPS.md` (empty-endpoint
+paths, CLI replay polish, normalize UDF schema guards). Not sign-off gates.
 
 #### Polars data layer
 
@@ -152,42 +158,87 @@ first. Downstream commands scan lazily and sink only the marts they own.
 
 ### Dev slices
 
-1. **[x] Slice 1 — Raw lake foundation** — persist completed runs under
-   `runs/{run_id}/` by default when `--output-dir` is omitted, write authoritative
-   `raw_responses` Parquet partitioned only by `endpoint`, and extend `run.json`
-   into a lightweight catalog with schema version, row counts, source
-   `response_id`s, and file checksums. Keep this slice limited to the write path
-   for fetched provider HTTP responses plus offline tests that prove deterministic
-   layout and metadata. Explicit `--output-dir` overrides remain supported.
-2. **[x] Slice 2 — Curated normalization from storage** — parse stored
-   `raw_responses` into typed Parquet tables for `keywords`, `serp_items`,
-   `pages`, `passages`, `entities`, and `similarity_scores`, preserving
-   `run_id`, `target_keyword_id`, `response_id`, `schema_version`, and stable row
-   IDs.
-3. **[x] Slice 3 — Polars data package** — add `src/seo_rank/data/` with `scans`,
-   `normalize`, `features`, `marts`, and `validate`; every transform accepts/returns
-   `pl.LazyFrame`, every read boundary uses `pl.scan_parquet()`, and validation runs
-   before each sink. *(Shipped: package layout complete; feature/analysis paths are
-   lazy; curated normalization scans `raw_responses` lazily and builds typed tables
-   via endpoint filters plus batch UDFs; per-table streaming collect at sink only;
-   residual: JSON/similarity UDFs and PyArrow curated writes.)*
-4. **[x] Slice 4 — Feature marts** — build and persist `keyword_serp`,
-   `page_features`, `passage_features`, and `domain_features` from curated tables
-   with stable-ID joins, filter/select before joins, Zstandard compression, and
-   sorted retrieval keys.
-5. **[x] Slice 5 — Analysis mart** — build `analysis_mart` lazily as one row per
-   `target_keyword × SERP URL`, excluding `raw_responses` from analytical joins.
-6. **[x] Slice 6 — CLI and stored-run surfaces** — `normalize`,
-   `build-features`, `analyze`, and `replay` subcommands, plus explicit
-   `seo-rank run --stored-run runs/{run_id}` reload behavior.
-7. **[x] Slice 7 — Dependencies, docs, and round-trip verification** — align
-   `ARCHITECTURE.md`, `TESTING.md`, `ROADMAP.md`, `README.md`, and `.env.example`
-   as needed, and pin the offline write → normalize → build-features → analyze
-   round-trip regression sweep plus single-response replay. *(Shipped: docs are
-   aligned, `test_sdlc_docs.py` guards the slice-state wording, `test_analysis_mart.py`
-   chains run → normalize → feature marts → analysis mart, `test_round_trip.py`
-   covers the CLI write → normalize → build-features → analyze round trip, and
-   `test_cli_surfaces.py` covers CLI dispatch.)*
+Delivery slices (1–7) shipped the end-to-end lake. Hardening slices (8–10) close
+the write contract. Each slice is one reviewable unit with its own tests.
+
+#### Delivery (shipped)
+
+1. **[x] Slice 1 — Raw lake foundation**
+   - Default output: `runs/{run_id}/` when `--output-dir` is omitted; explicit
+     override still supported.
+   - Authoritative `raw_responses`: one row per HTTP response, `endpoint` partition
+     only, `response_body_bytes` + SHA-256 + metadata.
+   - `run.json` catalog: schema version, row counts, source `response_id`s, file
+     checksums (no duplicate raw payloads).
+   - Tests: deterministic layout and catalog metadata on the provider write path.
+
+2. **[x] Slice 2 — Curated normalization from storage**
+   - Parse stored `raw_responses` into six typed tables: `keywords`, `serp_items`,
+     `pages`, `passages`, `entities`, `similarity_scores`.
+   - Every row carries `run_id`, `target_keyword_id`, `response_id`,
+     `schema_version`, and stable row IDs; full page text lives in `pages` only.
+   - Tests: `test_run_normalize.py`.
+
+3. **[x] Slice 3 — Polars data package**
+   - Package layout: `scans`, `normalize`, `features`, `marts`, `validate` under
+     `src/seo_rank/data/`.
+   - Read boundary: `pl.scan_parquet()`; transform boundary: `pl.LazyFrame` in/out.
+   - Curated path: lazy `scan_raw_responses` → endpoint filters → `map_batches` /
+     `map_groups` UDFs (JSON parse, passage split, entity normalize, similarity
+     grouping).
+   - Validation hook before every sink (schema/key/null/range contract).
+   - Residual: batch UDFs are Python-side; not a streaming-native transform.
+
+4. **[x] Slice 4 — Feature marts**
+   - Build and persist `keyword_serp`, `page_features`, `passage_features`,
+     `domain_features` from curated scans.
+   - Filter/select before joins; stable-ID join keys only; sorted retrieval keys.
+   - Tests: `test_feature_marts.py`.
+
+5. **[x] Slice 5 — Analysis mart**
+   - `build_analysis_lazyframe` + `build_analysis_mart`: one row per
+     `target_keyword × SERP URL`.
+   - Analytical joins use curated/feature scans only; `raw_responses` excluded.
+   - Tests: `test_analysis_mart.py`.
+
+6. **[x] Slice 6 — CLI and stored-run surfaces**
+   - Subcommands: `normalize`, `build-features`, `analyze`, `replay`.
+   - `seo-rank run --stored-run runs/{run_id}` reloads stored input without
+     refetching provider payloads.
+   - Tests: `test_cli_surfaces.py`.
+
+7. **[x] Slice 7 — Dependencies, docs, and round-trip verification**
+   - Declare `pyarrow` and `polars` in `pyproject.toml`.
+   - Align `ARCHITECTURE.md`, `TESTING.md`, `ROADMAP.md`, `README.md`, and
+     `.env.example`.
+   - Round-trip regression: `test_round_trip.py` (CLI write → normalize →
+     build-features → analyze); `test_analysis_mart.py` library chain;
+     `test_sdlc_docs.py` guards slice-state wording.
+   - Slice 7 shipped.
+
+#### Hardening (open)
+
+8. **[x] Slice 8 — Curated sink contract**
+   - Curated tables sink via Polars `sink_parquet(..., compression="zstd",
+     statistics=True)` with rows sorted by primary retrieval keys before write.
+   - Replaces direct PyArrow `write_table` on the curated path (`FIXUPS.md`
+     S7-02).
+
+9. **[ ] Slice 9 — Mart sink contract**
+   - `write_feature_dataset` (feature marts + `analysis_mart`) uses lazy
+     `sink_parquet(..., compression="zstd", statistics=True)` instead of
+     `collect(engine="streaming")` + `DataFrame.write_parquet`.
+   - Preserve sorted retrieval keys and post-sink catalog row counts.
+   - Tests: assert Parquet file metadata / statistics where feasible; extend
+     round-trip sweep if needed.
+
+10. **[ ] Slice 10 — Validation lazy edge**
+    - Refactor `validate_frame_contract` so uniqueness, null, and range checks do
+      not call mid-plan `collect()` on selected columns.
+    - Acceptable outcomes: lazy-native checks, minimal streaming collect only at
+      the documented sink edge, or row-count-free schema-only validation before
+      sink with post-sink audit for row rules.
+    - Tests: guard against new non-edge `collect()` calls in `validate.py`.
 
 See `ROADMAP.md` for Phase 5 (OLS) and Phase 5.5 (passage/domain scoring).
 
@@ -215,47 +266,56 @@ See `ROADMAP.md` for Phase 5 (OLS) and Phase 5.5 (passage/domain scoring).
 ## Phase 4.5 acceptance criteria
 
 **Status (2026-06-29):** 7 acceptance items complete, 4 partial, 0 not started.
-Dev slices: 7 shipped, 0 open. Phase 4.5 is not signed off pending write-contract
-hardening.
+Dev slices: 8 shipped, 2 open (slices 9–10). Phase 4.5 is not signed off pending
+mart sink and validation-edge hardening.
+
+| Acceptance item | Slice(s) | Status |
+| --------------- | -------- | ------ |
+| `runs/{run_id}/` default layout + `run.json` catalog | 1 | Complete |
+| `raw_responses` authoritative store | 1 | Complete |
+| Six curated Parquet tables with stable IDs | 2, 8 | Complete |
+| Feature marts + `analysis_mart` | 4, 5 | Complete |
+| `src/seo_rank/data/` LazyFrame transforms | 3 | Complete |
+| Parquet sinks: zstd, statistics, sorted keys; collect only at edges | 8, 9, 10 | Partial |
+| `validate.py` before every mart write | 3, 10 | Partial |
+| `raw_responses` excluded from analytical joins | 5, 6 | Complete |
+| CLI storage commands + `--stored-run` | 6 | Complete |
+| Offline round-trip tests (no network) | 7 | Complete |
+| `polars` + `pyarrow` declared; docs updated | 7 | Complete |
 
 - [x] `runs/{run_id}/` layout written for each completed run by default when
   `--output-dir` is omitted, with `run.json` catalog (schemas, row counts, source
   response IDs, file checksums; no duplicate raw payloads). Explicit
-  `--output-dir` overrides remain supported. *(Partial only for the full
+  `--output-dir` overrides remain supported. *(Slice 1; partial only for the full
   multi-layer catalog, which still requires library calls after `run`.)*
 - [x] `raw_responses` stores one row per DataForSEO HTTP response with
   `response_body_bytes`, metadata, status, and SHA-256; partitioned only by
-  `endpoint`.
+  `endpoint`. *(Slice 1.)*
 - [x] Curated Parquet tables (`keywords`, `serp_items`, `pages`, `passages`,
   `entities`, `similarity_scores`) with `run_id`, `target_keyword_id`,
   `response_id`, `schema_version`, and stable row IDs; page text in `pages` only.
+  *(Slices 2, 8.)*
 - [x] Feature marts (`keyword_serp`, `page_features`, `passage_features`,
   `domain_features`) and `analysis_mart` (one row per `target_keyword × SERP URL`).
+  *(Slices 4, 5.)*
 - [x] `src/seo_rank/data/` implements `scans`, `normalize`, `features`, `marts`,
-  and `validate`; every transform accepts/returns `pl.LazyFrame`. *(Shipped: all
-  five modules exist; transforms build lazy plans from `pl.scan_parquet()`; curated
-  normalization uses batch UDFs for JSON parse and similarity grouping; collect
-  only at per-table sink.)*
+  and `validate`; every transform accepts/returns `pl.LazyFrame`. *(Slice 3;
+  curated normalization uses batch UDFs for JSON parse and similarity grouping.)*
 - [ ] Parquet sinks use Zstandard compression and statistics; tables sorted by
   primary retrieval keys; `collect(engine="streaming")` only at CLI/report edges.
-  *(Partial: Zstd + sorted keys on curated and mart writes; feature marts use
-  streaming collect; curated writes use PyArrow not Polars `sink_parquet`;
-  statistics not explicitly enabled.)*
+  *(Partial: slice 8 shipped for curated tables; slice 9 open for feature/analysis
+  marts; slice 10 open for validation `collect()`.)*
 - [x] `validate.py` runs schema/key/null/range checks before every mart write.
-  *(Shipped for curated, feature, and analysis writes.)*
+  *(Slice 3 shipped the hook; slice 10 open for lazy-edge row checks.)*
 - [x] `raw_responses` excluded from normal analytical joins; `replay` path only.
-  *(Shipped: analytical joins use curated/feature scans only; `replay` reads the
-  stored raw lake.)*
+  *(Slices 5, 6.)*
 - [x] CLI: `normalize`, `build-features`, `analyze`, `replay`; `--stored-run`
-  reloads stored data when explicitly requested.
-- [ ] Offline unit tests cover write → normalize → build-features → analyze
-  round-trip without network calls. *(Partial: `test_analysis_mart.py` chains the
-  full pipeline after `seo-rank run --dry-run`; per-layer tests in `test_cli_run`,
-  `test_run_normalize`, and `test_feature_marts`; docs/regression sweep now ship in
-  `test_sdlc_docs.py`.)*
-- [x] `polars` + `pyarrow` declared in `pyproject.toml`; docs updated. *(Shipped:
-  both declared; Slice 7 docs alignment landed in `README.md`, `TESTING.md`,
-  `ARCHITECTURE.md`, and `ROADMAP.md`.)*
+  reloads stored data when explicitly requested. *(Slice 6.)*
+- [x] Offline unit tests cover write → normalize → build-features → analyze
+  round-trip without network calls. *(Slice 7: `test_round_trip.py`,
+  `test_analysis_mart.py`, per-layer tests in `test_cli_run`, `test_run_normalize`,
+  `test_feature_marts`.)*
+- [x] `polars` + `pyarrow` declared in `pyproject.toml`; docs updated. *(Slice 7.)*
 
 ## Phase 4 acceptance criteria (complete)
 

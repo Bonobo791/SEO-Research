@@ -7,7 +7,6 @@ from pathlib import Path
 
 import polars as pl
 import pyarrow as pa
-import pyarrow.parquet as pq
 
 from seo_rank.data.scans import scan_raw_responses
 from seo_rank.data.validate import validate_frame_contract
@@ -696,10 +695,10 @@ def write_curated_dataset(
             str(row.get("response_id") or row.get("source_response_id") or ""),
         ),
     )
-    pq.write_table(
-        pa.Table.from_pylist(sorted_rows, schema=schema),
+    pl.from_arrow(pa.Table.from_pylist(sorted_rows, schema=schema)).lazy().sink_parquet(
         file_path,
         compression="zstd",
+        statistics=True,
     )
     return {
         "schema_version": CURATED_SCHEMA_VERSION,
