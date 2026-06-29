@@ -7,10 +7,10 @@ from pathlib import Path
 
 import polars as pl
 
+from seo_rank.data.marts import build_analysis_lazyframe
 from seo_rank.data.scans import scan_curated_table
 
 FEATURE_SCHEMA_VERSION = "feature_marts.v1"
-ANALYSIS_SCHEMA_VERSION = "analysis_mart.v1"
 
 
 def build_feature_lazyframes(
@@ -151,44 +151,6 @@ def build_feature_lazyframes(
         "passage_features": passage_features,
         "domain_features": domain_features,
     }
-
-
-def build_analysis_lazyframe(feature_frames: Mapping[str, pl.LazyFrame]) -> pl.LazyFrame:
-    return (
-        feature_frames["keyword_serp"]
-        .join(
-            feature_frames["page_features"],
-            on=["run_id", "target_keyword_id", "canonical_url_hash", "url"],
-            how="left",
-            suffix="_page",
-        )
-        .select(
-            [
-                "run_id",
-                "target_keyword_id",
-                "target_keyword",
-                "keyword_order",
-                "source_response_id",
-                "serp_item_id",
-                "page_id",
-                "response_id",
-                "canonical_url_hash",
-                "url",
-                "serp_rank",
-                "title",
-                "description",
-                "page_text_length",
-                "bge_raw_score",
-                "bge_normalized_score",
-                "gemini_doc_retrieval_raw_score",
-                "gemini_doc_retrieval_normalized_score",
-                "gemini_semantic_similarity_raw_score",
-                "gemini_semantic_similarity_normalized_score",
-            ]
-        )
-        .with_columns(pl.lit(ANALYSIS_SCHEMA_VERSION).alias("schema_version"))
-        .sort(["target_keyword_id", "serp_rank", "canonical_url_hash"])
-    )
 
 
 def build_feature_marts(run_dir: Path) -> dict[str, object]:

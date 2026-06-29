@@ -123,35 +123,40 @@ first. Downstream commands scan lazily and sink only the marts they own.
 
 ### Dev slices
 
-1. **Slice 1 — Raw lake foundation** — persist completed runs under
+1. **[x] Slice 1 — Raw lake foundation** — persist completed runs under
    `runs/{run_id}/`, write authoritative `raw_responses` Parquet partitioned only
    by `endpoint`, and extend `run.json` into a lightweight catalog with schema
    version, row counts, source `response_id`s, and file checksums. Keep this slice
    limited to the write path for fetched provider HTTP responses plus offline tests
-   that prove deterministic layout and metadata.
-2. **Slice 2 — Curated normalization from storage** — parse stored
+   that prove deterministic layout and metadata. *(Shipped: write path + catalog for
+   `raw_responses`; CLI uses `--output-dir` rather than enforcing `runs/{run_id}/`
+   path.)*
+2. **[x] Slice 2 — Curated normalization from storage** — parse stored
    `raw_responses` into typed Parquet tables for `keywords`, `serp_items`,
    `pages`, `passages`, `entities`, and `similarity_scores`, preserving
    `run_id`, `target_keyword_id`, `response_id`, `schema_version`, and stable row
    IDs.
-3. **Slice 3 — Polars data package** — add `src/seo_rank/data/` with `scans`,
+3. **[ ] Slice 3 — Polars data package** — add `src/seo_rank/data/` with `scans`,
    `normalize`, and `validate`; every transform accepts/returns `pl.LazyFrame`,
    every read boundary uses `pl.scan_parquet()`, and validation runs before each
-   sink.
-4. **Slice 4 — Feature marts** — build and persist `keyword_serp`,
+   sink. *(In progress: `scans` + thin `validate` shipped; `marts.py` split out;
+   normalization core still eager between scan and sink; feature/analysis marts
+   lazy.)*
+4. **[x] Slice 4 — Feature marts** — build and persist `keyword_serp`,
    `page_features`, `passage_features`, and `domain_features` from curated tables
    with stable-ID joins, filter/select before joins, Zstandard compression, and
    sorted retrieval keys.
-5. **Slice 5 — Analysis mart** — build `analysis_mart` lazily as one row per
+5. **[x] Slice 5 — Analysis mart** — build `analysis_mart` lazily as one row per
    `target_keyword × SERP URL`, excluding `raw_responses` from analytical joins.
-6. **Slice 6 — CLI and stored-run surfaces** — add `normalize`,
+6. **[ ] Slice 6 — CLI and stored-run surfaces** — add `normalize`,
    `build-features`, `analyze`, and `replay` subcommands, plus explicit
    `seo-rank run --stored-run runs/{run_id}` reload behavior.
-7. **Slice 7 — Dependencies, docs, and round-trip verification** — add `polars`
+7. **[ ] Slice 7 — Dependencies, docs, and round-trip verification** — add `polars`
    and `pyarrow` to `pyproject.toml`, align `ARCHITECTURE.md`, `TESTING.md`,
    `ROADMAP.md`, and `.env.example` as needed, and prove the offline
    write → normalize → build-features → analyze round-trip plus single-response
-   replay.
+   replay. *(Partial: `pyarrow` declared; slice docs updated; no dedicated
+   round-trip test; `replay` not implemented; `polars` not in `pyproject.toml`.)*
 
 See `ROADMAP.md` for Phase 5 (OLS) and Phase 5.5 (passage/domain scoring).
 
@@ -178,28 +183,46 @@ See `ROADMAP.md` for Phase 5 (OLS) and Phase 5.5 (passage/domain scoring).
 
 ## Phase 4.5 acceptance criteria
 
+**Status (2026-06-29):** 4 complete, 5 partial, 2 not started. Phase 4.5 is not
+signed off until Slices 3, 6, and 7 close.
+
 - [ ] `runs/{run_id}/` layout written for each completed run with `run.json`
   catalog (schemas, row counts, source response IDs, file checksums; no duplicate
-  raw payloads).
-- [ ] `raw_responses` stores one row per DataForSEO HTTP response with
+  raw payloads). *(Partial: lake layout + catalog ship under `--output-dir`; canonical
+  `runs/{run_id}/` path not enforced; full multi-layer catalog requires library
+  calls after `run`.)*
+- [x] `raw_responses` stores one row per DataForSEO HTTP response with
   `response_body_bytes`, metadata, status, and SHA-256; partitioned only by
   `endpoint`.
-- [ ] Curated Parquet tables (`keywords`, `serp_items`, `pages`, `passages`,
+- [x] Curated Parquet tables (`keywords`, `serp_items`, `pages`, `passages`,
   `entities`, `similarity_scores`) with `run_id`, `target_keyword_id`,
   `response_id`, `schema_version`, and stable row IDs; page text in `pages` only.
-- [ ] Feature marts (`keyword_serp`, `page_features`, `passage_features`,
+- [x] Feature marts (`keyword_serp`, `page_features`, `passage_features`,
   `domain_features`) and `analysis_mart` (one row per `target_keyword × SERP URL`).
 - [ ] `src/seo_rank/data/` implements `scans`, `normalize`, `features`, `marts`,
-  and `validate`; every transform accepts/returns `pl.LazyFrame`.
+  and `validate`; every transform accepts/returns `pl.LazyFrame`. *(Partial:
+  `scans`, `normalize`, `features`, `validate` exist; `marts.py` split out;
+  normalization still eager between scan and sink.)*
 - [ ] Parquet sinks use Zstandard compression and statistics; tables sorted by
   primary retrieval keys; `collect(engine="streaming")` only at CLI/report edges.
+  *(Partial: Zstd + sorted keys on curated and mart writes; feature marts use
+  streaming collect; curated writes use PyArrow not Polars `sink_parquet`;
+  statistics not explicitly enabled.)*
 - [ ] `validate.py` runs schema/key/null/range checks before every mart write.
+  *(Partial: column-presence check on non-empty curated LazyFrames only; feature
+  and analysis writes skip validation.)*
 - [ ] `raw_responses` excluded from normal analytical joins; `replay` path only.
+  *(Partial: analytical joins use curated/feature scans only; `replay` not
+  implemented.)*
 - [ ] CLI: `normalize`, `build-features`, `analyze`, `replay`; `--stored-run`
   reloads stored data when explicitly requested.
 - [ ] Offline unit tests cover write → normalize → build-features → analyze
-  round-trip without network calls.
-- [ ] `polars` + `pyarrow` declared in `pyproject.toml`; docs updated.
+  round-trip without network calls. *(Partial: staged across `test_cli_run`,
+  `test_run_normalize`, `test_feature_marts`, and `test_analysis_mart`; no single
+  dedicated round-trip test.)*
+- [ ] `polars` + `pyarrow` declared in `pyproject.toml`; docs updated. *(Partial:
+  `pyarrow` declared; `polars` used in code but not declared; core slice docs
+  updated; `README.md` still lists storage/CLI as planned.)*
 
 ## Phase 4 acceptance criteria (complete)
 
