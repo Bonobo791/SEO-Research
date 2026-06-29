@@ -9,8 +9,91 @@ import polars as pl
 
 from seo_rank.data.marts import build_analysis_lazyframe
 from seo_rank.data.scans import scan_curated_table
+from seo_rank.data.validate import validate_required_columns
 
 FEATURE_SCHEMA_VERSION = "feature_marts.v1"
+FEATURE_REQUIRED_COLUMNS = {
+    "keyword_serp": (
+        "run_id",
+        "target_keyword_id",
+        "target_keyword",
+        "keyword_order",
+        "source_response_id",
+        "serp_item_id",
+        "canonical_url_hash",
+        "url",
+        "serp_rank",
+        "title",
+        "description",
+        "schema_version",
+    ),
+    "page_features": (
+        "run_id",
+        "target_keyword_id",
+        "target_keyword",
+        "page_id",
+        "response_id",
+        "canonical_url_hash",
+        "url",
+        "title",
+        "page_text_length",
+        "bge_raw_score",
+        "bge_normalized_score",
+        "gemini_doc_retrieval_raw_score",
+        "gemini_doc_retrieval_normalized_score",
+        "gemini_semantic_similarity_raw_score",
+        "gemini_semantic_similarity_normalized_score",
+        "schema_version",
+    ),
+    "passage_features": (
+        "run_id",
+        "target_keyword_id",
+        "target_keyword",
+        "page_id",
+        "response_id",
+        "passage_id",
+        "canonical_url_hash",
+        "url",
+        "source",
+        "word_count",
+        "passage_text_length",
+        "schema_version",
+    ),
+    "domain_features": (
+        "run_id",
+        "target_keyword_id",
+        "target_keyword",
+        "domain_feature_id",
+        "domain",
+        "serp_item_count",
+        "best_serp_rank",
+        "worst_serp_rank",
+        "schema_version",
+    ),
+}
+ANALYSIS_REQUIRED_COLUMNS = (
+    "run_id",
+    "target_keyword_id",
+    "target_keyword",
+    "keyword_order",
+    "source_response_id",
+    "serp_item_id",
+    "page_id",
+    "response_id",
+    "canonical_url_hash",
+    "url",
+    "serp_rank",
+    "title",
+    "description",
+    "page_text_length",
+    "bge_raw_score",
+    "bge_normalized_score",
+    "gemini_doc_retrieval_raw_score",
+    "gemini_doc_retrieval_normalized_score",
+    "gemini_semantic_similarity_raw_score",
+    "gemini_semantic_similarity_normalized_score",
+    "schema_version",
+)
 
 
 def build_feature_lazyframes(
@@ -172,6 +255,10 @@ def build_feature_marts(run_dir: Path) -> dict[str, object]:
     feature_frames = build_feature_lazyframes(curated_frames)
 
     for name, frame in feature_frames.items():
+        frame = validate_required_columns(
+            frame,
+            required_columns=FEATURE_REQUIRED_COLUMNS[name],
+        )
         dataset_catalog[name] = write_feature_dataset(
             run_dir,
             name=name,
@@ -203,6 +290,10 @@ def build_analysis_mart(run_dir: Path) -> dict[str, object]:
         for name in ("keyword_serp", "page_features", "passage_features", "domain_features")
     }
     analysis_frame = build_analysis_lazyframe(feature_frames)
+    analysis_frame = validate_required_columns(
+        analysis_frame,
+        required_columns=ANALYSIS_REQUIRED_COLUMNS,
+    )
     dataset_catalog["analysis_mart"] = write_feature_dataset(
         run_dir,
         name="analysis_mart",

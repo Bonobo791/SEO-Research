@@ -34,6 +34,27 @@ marts, and analysis marts without re-fetching DataForSEO or TextRazor payloads.
 File-based storage only (no server database). Raw HTTP payloads and generated run
 trees stay out of source control.
 
+#### Progress (2026-06-29)
+
+**Slices:** 4 of 7 shipped, 1 in progress, 2 open. Phase 4.5 is not signed off.
+
+| Slice | Status | Notes |
+| ----- | ------ | ----- |
+| 1 Raw lake | Shipped | `seo-rank run` writes `parquet/raw_responses/` + `run.json` catalog via `--output-dir` |
+| 2 Curated normalize | Shipped | `normalize_run()` → six curated tables; library + `test_run_normalize.py` |
+| 3 Polars data package | In progress | `scans`, `validate`, `marts` shipped; `normalize` still eager between scan and sink |
+| 4 Feature marts | Shipped | `build_feature_marts()` with lazy joins; `test_feature_marts.py` |
+| 5 Analysis mart | Shipped | `build_analysis_mart()` + `marts.build_analysis_lazyframe`; `test_analysis_mart.py` |
+| 6 CLI surfaces | Not started | Only `seo-rank run` exists; no `normalize` / `build-features` / `analyze` / `replay` / `--stored-run` |
+| 7 Deps + docs + round-trip | Partial | `pyarrow` declared; `polars` used but undeclared; chained round-trip in `test_analysis_mart.py` only |
+
+**Library API (callable, no CLI yet):** `normalize_run`, `build_feature_marts`,
+`build_analysis_mart` under `src/seo_rank/data/`.
+
+**Remaining to close Phase 4.5:** lazy normalization write path, validation before
+every mart sink, CLI subcommands, `replay`, declare `polars`, canonical
+`runs/{run_id}/` path (optional), dedicated round-trip test, doc alignment.
+
 #### Polars data layer
 
 ```text
@@ -137,11 +158,13 @@ first. Downstream commands scan lazily and sink only the marts they own.
    `run_id`, `target_keyword_id`, `response_id`, `schema_version`, and stable row
    IDs.
 3. **[ ] Slice 3 — Polars data package** — add `src/seo_rank/data/` with `scans`,
-   `normalize`, and `validate`; every transform accepts/returns `pl.LazyFrame`,
-   every read boundary uses `pl.scan_parquet()`, and validation runs before each
-   sink. *(In progress: `scans` + thin `validate` shipped; `marts.py` split out;
-   normalization core still eager between scan and sink; feature/analysis marts
-   lazy.)*
+   `normalize`, `features`, `marts`, and `validate`; every transform accepts/returns
+   `pl.LazyFrame`, every read boundary uses `pl.scan_parquet()`, and validation runs
+   before each sink. *(In progress: package layout complete (`scans`, `normalize`,
+   `features`, `marts`, `validate`); feature/analysis paths are lazy; curated
+   normalization still collects raw rows and builds Python lists before sink;
+   `validate` is column-presence only; feature/analysis marts now validate before
+   sink.)*
 4. **[x] Slice 4 — Feature marts** — build and persist `keyword_serp`,
    `page_features`, `passage_features`, and `domain_features` from curated tables
    with stable-ID joins, filter/select before joins, Zstandard compression, and
@@ -153,10 +176,12 @@ first. Downstream commands scan lazily and sink only the marts they own.
    `seo-rank run --stored-run runs/{run_id}` reload behavior.
 7. **[ ] Slice 7 — Dependencies, docs, and round-trip verification** — add `polars`
    and `pyarrow` to `pyproject.toml`, align `ARCHITECTURE.md`, `TESTING.md`,
-   `ROADMAP.md`, and `.env.example` as needed, and prove the offline
+   `ROADMAP.md`, `README.md`, and `.env.example` as needed, and prove the offline
    write → normalize → build-features → analyze round-trip plus single-response
-   replay. *(Partial: `pyarrow` declared; slice docs updated; no dedicated
-   round-trip test; `replay` not implemented; `polars` not in `pyproject.toml`.)*
+   replay. *(Partial: `pyarrow` declared; `test_analysis_mart.py` chains run →
+   normalize → feature marts → analysis mart; no dedicated round-trip test file;
+   `replay` not implemented; `polars` not in `pyproject.toml`; `README.md` still
+   lists storage/CLI as planned.)*
 
 See `ROADMAP.md` for Phase 5 (OLS) and Phase 5.5 (passage/domain scoring).
 
@@ -183,8 +208,9 @@ See `ROADMAP.md` for Phase 5 (OLS) and Phase 5.5 (passage/domain scoring).
 
 ## Phase 4.5 acceptance criteria
 
-**Status (2026-06-29):** 4 complete, 5 partial, 2 not started. Phase 4.5 is not
-signed off until Slices 3, 6, and 7 close.
+**Status (2026-06-29):** 3 acceptance items complete, 7 partial, 1 not started
+(CLI). Dev slices: 4 shipped, 1 in progress (Slice 3), 2 open (Slices 6–7).
+Phase 4.5 is not signed off until Slices 3, 6, and 7 close.
 
 - [ ] `runs/{run_id}/` layout written for each completed run with `run.json`
   catalog (schemas, row counts, source response IDs, file checksums; no duplicate
@@ -200,9 +226,9 @@ signed off until Slices 3, 6, and 7 close.
 - [x] Feature marts (`keyword_serp`, `page_features`, `passage_features`,
   `domain_features`) and `analysis_mart` (one row per `target_keyword × SERP URL`).
 - [ ] `src/seo_rank/data/` implements `scans`, `normalize`, `features`, `marts`,
-  and `validate`; every transform accepts/returns `pl.LazyFrame`. *(Partial:
-  `scans`, `normalize`, `features`, `validate` exist; `marts.py` split out;
-  normalization still eager between scan and sink.)*
+  and `validate`; every transform accepts/returns `pl.LazyFrame`. *(Partial: all
+  five modules exist; feature/analysis transforms are lazy; curated normalization
+  still eager between scan and sink.)*
 - [ ] Parquet sinks use Zstandard compression and statistics; tables sorted by
   primary retrieval keys; `collect(engine="streaming")` only at CLI/report edges.
   *(Partial: Zstd + sorted keys on curated and mart writes; feature marts use
@@ -210,16 +236,17 @@ signed off until Slices 3, 6, and 7 close.
   statistics not explicitly enabled.)*
 - [ ] `validate.py` runs schema/key/null/range checks before every mart write.
   *(Partial: column-presence check on non-empty curated LazyFrames only; feature
-  and analysis writes skip validation.)*
+  and analysis marts now validate before sink.)*
 - [ ] `raw_responses` excluded from normal analytical joins; `replay` path only.
   *(Partial: analytical joins use curated/feature scans only; `replay` not
   implemented.)*
 - [ ] CLI: `normalize`, `build-features`, `analyze`, `replay`; `--stored-run`
   reloads stored data when explicitly requested.
 - [ ] Offline unit tests cover write → normalize → build-features → analyze
-  round-trip without network calls. *(Partial: staged across `test_cli_run`,
-  `test_run_normalize`, `test_feature_marts`, and `test_analysis_mart`; no single
-  dedicated round-trip test.)*
+  round-trip without network calls. *(Partial: `test_analysis_mart.py` chains the
+  full pipeline after `seo-rank run --dry-run`; per-layer tests in `test_cli_run`,
+  `test_run_normalize`, and `test_feature_marts`; no dedicated round-trip test
+  module.)*
 - [ ] `polars` + `pyarrow` declared in `pyproject.toml`; docs updated. *(Partial:
   `pyarrow` declared; `polars` used in code but not declared; core slice docs
   updated; `README.md` still lists storage/CLI as planned.)*

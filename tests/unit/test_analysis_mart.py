@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import polars as pl
 import pyarrow.dataset as ds
 
 from seo_rank.cli import main
@@ -48,3 +49,77 @@ def test_build_analysis_mart_materializes_one_row_per_serp_url(
 
     run_json = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
     assert run_json["catalog"]["datasets"]["analysis_mart"]["row_count"] == 25
+
+
+def test_build_analysis_mart_validates_the_analysis_frame_before_sinking(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    run_dir = tmp_path / "run-1"
+    run_dir.mkdir()
+    (run_dir / "run.json").write_text(
+        json.dumps({"run_id": "run-1", "catalog": {}}),
+        encoding="utf-8",
+    )
+
+    calls: list[tuple[str, object]] = []
+
+    def fake_build_analysis_lazyframe(feature_frames):
+        return pl.DataFrame([{"run_id": "run-1"}]).lazy()
+
+    def fake_validate_required_columns(frame, *, required_columns):
+        calls.append(("validate", tuple(required_columns)))
+        return frame
+
+    def fake_write_feature_dataset(run_dir: Path, *, name: str, frame: pl.LazyFrame):
+        calls.append(("write", name))
+        return {
+            "schema_version": "analysis_mart.v1",
+            "row_count": 1,
+            "files": [f"parquet/{name}/part-0.parquet"],
+            "file_checksums": {f"parquet/{name}/part-0.parquet": "abc123"},
+        }
+
+    monkeypatch.setattr("seo_rank.data.features.build_analysis_lazyframe", fake_build_analysis_lazyframe)
+    monkeypatch.setattr(
+        "seo_rank.data.features.validate_required_columns",
+        fake_validate_required_columns,
+        raising=False,
+    )
+    monkeypatch.setattr("seo_rank.data.features.write_feature_dataset", fake_write_feature_dataset)
+    monkeypatch.setattr(
+        "seo_rank.data.features.scan_curated_table",
+        lambda run_dir, table_name: pl.DataFrame([{"run_id": "run-1"}]).lazy(),
+    )
+
+    build_analysis_mart(run_dir)
+
+    assert calls == [
+        (
+            "validate",
+            (
+                "run_id",
+                "target_keyword_id",
+                "target_keyword",
+                "keyword_order",
+                "source_response_id",
+                "serp_item_id",
+                "page_id",
+                "response_id",
+                "canonical_url_hash",
+                "url",
+                "serp_rank",
+                "title",
+                "description",
+                "page_text_length",
+                "bge_raw_score",
+                "bge_normalized_score",
+                "gemini_doc_retrieval_raw_score",
+                "gemini_doc_retrieval_normalized_score",
+                "gemini_semantic_similarity_raw_score",
+                "gemini_semantic_similarity_normalized_score",
+                "schema_version",
+            ),
+        ),
+        ("write", "analysis_mart"),
+    ]

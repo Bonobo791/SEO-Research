@@ -124,7 +124,7 @@ layout, and dev slices.
   foundation.
 - **Phase 4.5 Slice 3 advanced:** stored-run curated normalization now builds
   LazyFrames before the write boundary and reads raw responses through the lazy
-  scan helper.
+  scan helper; feature and analysis mart writes now validate before sink.
 - **Phase 4.5 Slice 4 shipped:** feature marts (`keyword_serp`,
   `page_features`, `passage_features`, `domain_features`) are now materialized
   from curated tables via lazy Polars joins.
