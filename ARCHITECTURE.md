@@ -12,9 +12,10 @@
   for OLS diagnostics, IV/panel extensions, and supporting tests (planned)
 - Similarity backends: deterministic fixture passage aggregation plus
   offline-testable page-level fixtures for **BGE**, **Gemini Doc Retrieval**, and
-  **Gemini Semantic Similarity**. **Live execution is not wired:** Phase 4 still
-  requires Gen AI SDK embeddings (`google-genai`, `gemini-embedding-2`) and `FlagEmbedding`
-  (local BGE cross-encoder) as optional runtime dependencies — see
+  **Gemini Semantic Similarity**. **Live Gemini execution is wired for the CLI
+  live path** via Gen AI SDK embeddings (`google-genai`, `gemini-embedding-2`).
+  **Live BGE execution is still pending** via `FlagEmbedding`
+  (local BGE cross-encoder) as an optional runtime dependency — see
   [Live similarity backends (Phase 4 remaining)](#live-similarity-backends-phase-4-remaining).
 - Deployment: none
 - Databases: none
@@ -40,8 +41,9 @@ now loop over every capped cluster keyword, group provider outputs under
 
 **Phase 4 in progress:** page-level similarity emits fixture scores for **BGE**,
 **Gemini Doc Retrieval**, and **Gemini Semantic Similarity** per SERP row in JSON
-and Markdown artifacts. **Finishing Phase 4** requires replacing live-path fixtures
-with real `gemini-embedding-2` embeddings and local BGE inference — see
+and Markdown artifacts. **Live Gemini embeddings now replace the live-path Gemini
+fixtures** when `--live-gemini` is enabled. **Finishing Phase 4** still requires
+local BGE inference — see
 [Live similarity backends (Phase 4 remaining)](#live-similarity-backends-phase-4-remaining).
 Later phases add `statsmodels` OLS with Benjamini-Hochberg after OLS pre-analysis
 diagnostics.
@@ -110,7 +112,8 @@ in code yet.
 - **Broader provider integration (planned):** live coverage beyond the smoke
   path.
 - **Live similarity (Phase 4 remaining):** real **Gemini Doc Retrieval** +
-  **Gemini Semantic Similarity** via Gen AI SDK (`gemini-embedding-2`), and local **BGE** — see [Live similarity backends
+  **Gemini Semantic Similarity** via Gen AI SDK (`gemini-embedding-2`) are
+  shipped behind `--live-gemini`; local **BGE** remains — see [Live similarity backends
   (Phase 4 remaining)](#live-similarity-backends-phase-4-remaining) and
   [Planned Page Similarity Run](#planned-page-similarity-run).
 - **Analysis engine (planned):** OLS pre-analysis, `statsmodels` OLS,
@@ -129,8 +132,8 @@ fields in `run.json` + `report.md`.
 
 **Planned live run (Phase 4 completion):** seed keyword → keyword expansion →
 per-keyword top-20 SERP → page text → TextRazor entities → **live** page
-similarity (BGE + Gemini Doc Retrieval + Gemini Semantic Similarity; fixtures
-only until wired) → rank-feature join → OLS pre-analysis → `statsmodels` OLS →
+similarity (Gemini Doc Retrieval + Gemini Semantic Similarity live under
+`--live-gemini`; BGE fixture until its live backend lands) → rank-feature join → OLS pre-analysis → `statsmodels` OLS →
 Benjamini-Hochberg → report generation.
 
 Raw provider responses and generated run artifacts should stay out of source
@@ -158,9 +161,9 @@ results stay comparable run to run.
 
 ## Live similarity backends (Phase 4 remaining)
 
-Fixture scorers in `similarity.py` implement the artifact shape today. **Phase
-4 is not complete** until live paths call the backends below. Offline tests and
-`--dry-run` keep fixtures.
+Fixture scorers in `similarity.py` implement the artifact shape for offline
+runs today. **Phase 4 is not complete** until the live BGE path lands. Offline
+tests and `--dry-run` keep fixtures.
 
 ### Gemini Doc Retrieval & Gemini Semantic Similarity (Gen AI SDK)
 

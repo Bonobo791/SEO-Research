@@ -11,7 +11,8 @@ page-level **BGE**, **Gemini Doc Retrieval**, and **Gemini Semantic Similarity**
 scores, and writes JSON and Markdown artifacts with **no network calls**. Provider
 request builders and credential validators are available for offline
 verification. The CLI also has a non-default `--live-providers` gate,
-standard-library HTTP clients, and an env-gated live smoke test.
+standard-library HTTP clients, env-gated live DataForSEO and TextRazor paths,
+and env-gated live Gemini page scoring via `gemini-embedding-2`.
 
 ```bash
 python -m pytest
@@ -46,12 +47,10 @@ Phase 4 adds three page-level measurements on each top-20 organic SERP row:
 | Gemini Doc Retrieval | `gemini_doc_retrieval` |
 | Gemini Semantic Similarity | `gemini_semantic_similarity` |
 
-Fixture wiring and artifact exposure are **done**. **Still required for Phase 4
-completion:**
+Fixture wiring, artifact exposure, and live Gemini scoring are **done**. **Still
+required for Phase 4 completion:**
 
 - **BGE:** local `FlagEmbedding` cross-encoder reranker
-- **Gemini Doc Retrieval:** asymmetric **search result** prompts (query vs document)
-- **Gemini Semantic Similarity:** symmetric **sentence similarity** prompts on keyword and page
 
 Details: `GOALS.md` (developer instructions) and `ARCHITECTURE.md`.
 

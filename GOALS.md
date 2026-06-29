@@ -17,9 +17,10 @@ group outputs under `keyword_results`, and annotate flattened rows with
 Phase 4 is in progress: page-level **fixture** scoring exposes **BGE**, **Gemini
 Doc Retrieval**, and **Gemini Semantic Similarity** per SERP row in offline and
 gated live artifact generation. **Optional live provider controls** (`--live-gemini`,
-`--live-textrazor`, env gates, hard failures) are shipped. **Live Gemini and BGE
-backend execution is not done yet** — live runs still use fixtures for
-`page_similarity` unless the remaining integration slices land.
+`--live-textrazor`, env gates, hard failures) are shipped. **Live Gemini backend
+execution is now wired** — live runs use real Gemini embeddings for
+`gemini_doc_retrieval` and `gemini_semantic_similarity` when `--live-gemini` is
+enabled. **Live BGE backend execution is not done yet**.
 
 ### Phase 4 objective
 
@@ -50,12 +51,11 @@ local compute are available.
    env gates, and hard failures when flags or credentials are missing.
 6. **TextRazor live selection** — **done**: live TextRazor runs only when
    `--live-textrazor` is passed; default live runs skip entities.
-7. **Live similarity backends** — **remaining**: `gemini_embeddings.py` +
-   `gemini-embedding-2` scoring when `--live-gemini` is enabled; FlagEmbedding BGE
-   when its gate ships (see [Remaining live backend work](#remaining-live-backend-work)).
-8. **Docs** — **done** for root contract (`ARCHITECTURE.md`, `README.md`,
-   `TESTING.md`, `ROADMAP.md`, `.env.example`). **Remaining:** `pyproject.toml`
-   `similarity` extra and opt-in Gemini integration tests when backends land.
+7. **Live similarity backends** — **in progress**: `gemini_embeddings.py` +
+   `gemini-embedding-2` scoring when `--live-gemini` is enabled are **done**;
+   FlagEmbedding BGE remains (see [Remaining live backend work](#remaining-live-backend-work)).
+8. **Docs** — root contract and `pyproject.toml` `similarity` extra are **done**.
+   **Remaining:** opt-in Gemini integration tests when backends land.
 
 ### Remaining live backend work
 
@@ -87,7 +87,7 @@ changes it:
 | # | Slice | Status |
 |---|-------|--------|
 | 1 | **Provider controls** — `--live-gemini`, `--live-textrazor`, env gates, hard validation | **Done** |
-| 2 | **Gemini live integration** — `gemini_embeddings.py`, real `gemini-embedding-2` scores when `--live-gemini` | **Remaining** |
+| 2 | **Gemini live integration** — `gemini_embeddings.py`, real `gemini-embedding-2` scores when `--live-gemini` | **Done** |
 | 3 | **TextRazor live selection** — opt-in only via `--live-textrazor` | **Done** |
 | 4 | **BGE live integration** — FlagEmbedding reranker behind its own gate | **Remaining** |
 | 5 | **Docs and integration pass** — root docs done; `pyproject.toml` extra + Gemini integration tests pending | **In progress** |
@@ -118,7 +118,7 @@ reports; use the **JSON key** column in `run.json` only.
 
 ---
 
-#### Slice A — Gemini embeddings (Gen AI SDK) — **remaining**
+#### Slice A — Gemini embeddings (Gen AI SDK) — **done**
 
 **Goal:** When `--live-gemini` is set, live runs call **`gemini-embedding-2`**
 via the **`google-genai`** SDK. Offline tests, default live runs, and `--dry-run`

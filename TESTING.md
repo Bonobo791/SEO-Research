@@ -14,7 +14,7 @@ Pytest configuration and verification contract for SEO-Research.
   interpreter
 - Lint / type-check / build / coverage: not configured
 - Expected test duration: fast (< 1s)
-- **Current verification status:** 34 tests collected; 33 passing, 1 live
+- **Current verification status:** 36 tests collected; 35 passing, 1 live
   integration smoke skipped by default
 
 ## Active Verification Command
@@ -54,6 +54,7 @@ placeholders only.
 | `test_keyword_expansion.py` | 25-keyword cap, deduplication, raw provider payload |
 | `test_serp_normalization.py` | Organic-only SERP rows, depth cap |
 | `test_env.py` | `.env` discovery, parsing, and override of shell exports |
+| `test_gemini_embeddings.py` | Live Gemini prompt formatting, model args, and score shaping with injected embeddings |
 | `test_passage_normalization.py` | Passage split, short-text filter |
 | `test_similarity_features.py` | Fixture passage aggregation plus BGE, Gemini Doc Retrieval, and Gemini Semantic Similarity page scoring |
 | `test_textrazor_normalization.py` | Entity schema normalization |
@@ -84,9 +85,9 @@ exist.
 ## Planned tests (not yet in suite)
 
 - Broader live DataForSEO / TextRazor integration coverage beyond smoke checks
-- **Phase 4 live similarity:** env-gated Gen AI SDK (`gemini-embedding-2`) for
-  **Gemini Doc Retrieval** and **Gemini Semantic Similarity**, plus local **BGE**
-  (FlagEmbedding cross-encoder) beyond fixture page scoring
+- **Phase 4 live similarity:** broader env-gated Gen AI SDK integration coverage
+  for `gemini-embedding-2`, plus local **BGE** (FlagEmbedding cross-encoder)
+  beyond fixture page scoring
 - Passage / domain similarity scopes
 - `statsmodels` OLS and Benjamini-Hochberg on synthetic ranking panels
 - OLS pre-analysis diagnostic loop

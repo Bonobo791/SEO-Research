@@ -262,7 +262,7 @@ def test_run_live_providers_without_optional_flags_does_not_require_optional_cre
                                         "type": "organic",
                                         "rank_group": 1,
                                         "url": "https://example.com/live",
-                                        "title": "Live Result",
+                                        "title": "SERP Result",
                                         "description": "Live provider result.",
                                     }
                                 ],
@@ -278,7 +278,7 @@ def test_run_live_providers_without_optional_flags_does_not_require_optional_cre
                         "result": [
                             {
                                 "url": "https://example.com/live",
-                                "title": "Live Page",
+                                "title": "Parsed Page",
                                 "text": "Technical SEO helps crawlers find pages.",
                             }
                         ],
@@ -380,6 +380,166 @@ def test_run_rejects_live_gemini_without_env_gate_or_key(
     assert exit_code == 2
     assert "SEO_RANK_ENABLE_GEMINI=1" in captured.err
     assert "GEMINI_API_KEY" in captured.err
+
+
+def test_run_live_gemini_uses_live_gemini_page_scores(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.setenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", "1")
+    monkeypatch.setenv("DATAFORSEO_LOGIN", "analyst@example.com")
+    monkeypatch.setenv("DATAFORSEO_PASSWORD", "dataforseo-secret")
+    monkeypatch.setenv("SEO_RANK_ENABLE_GEMINI", "1")
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-secret")
+    gemini_calls: list[dict[str, object]] = []
+
+    def dataforseo_transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        del method, headers, timeout
+        if url.endswith("/keywords_data/google_ads/keywords_for_keywords/live"):
+            return {
+                "tasks": [
+                    {
+                        "result": [
+                            {"keyword": "technical seo", "search_volume": 1000},
+                        ],
+                    }
+                ],
+            }
+        if url.endswith("/serp/google/organic/live/advanced"):
+            return {
+                "tasks": [
+                    {
+                        "result": [
+                            {
+                                "items": [
+                                    {
+                                        "type": "organic",
+                                        "rank_group": 1,
+                                        "url": "https://example.com/live",
+                                        "title": "SERP Result",
+                                        "description": "Live provider result.",
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        if url.endswith("/on_page/content_parsing/live"):
+            assert b"https://example.com/live" in body
+            return {
+                "tasks": [
+                    {
+                        "result": [
+                            {
+                                "url": "https://example.com/live",
+                                "title": "Parsed Page",
+                                "text": "Technical SEO helps crawlers find pages.",
+                            }
+                        ],
+                    }
+                ],
+            }
+        raise AssertionError(f"unexpected DataForSEO URL: {url}")
+
+    def fake_compute_gemini_scores(
+        keyword: str,
+        pages: list[dict[str, str]],
+        *,
+        api_key: str,
+        embed_content=None,
+    ) -> list[dict[str, object]]:
+        gemini_calls.append(
+            {
+                "keyword": keyword,
+                "pages": pages,
+                "api_key": api_key,
+                "embed_content": embed_content,
+            }
+        )
+        return [
+            {
+                "url": "https://example.com/live",
+                "page_similarity": {
+                    "bge": {"raw_score": 0.98, "normalized_score": 0.98},
+                    "gemini_doc_retrieval": {
+                        "raw_score": 0.654321,
+                        "normalized_score": 0.654321,
+                    },
+                    "gemini_semantic_similarity": {
+                        "raw_score": 0.765432,
+                        "normalized_score": 0.765432,
+                    },
+                },
+            }
+        ]
+
+    monkeypatch.setattr("seo_rank.cli.DEFAULT_DATAFORSEO_TRANSPORT", dataforseo_transport)
+    monkeypatch.setattr(
+        "seo_rank.cli.compute_gemini_page_similarity_scores",
+        fake_compute_gemini_scores,
+    )
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--output-dir",
+            str(output_dir),
+            "--live-providers",
+            "--live-gemini",
+        ]
+    )
+
+    assert exit_code == 0
+    assert gemini_calls == [
+        {
+            "keyword": "technical seo",
+            "pages": [
+                {
+                    "url": "https://example.com/live",
+                    "title": "SERP Result",
+                    "text": "Technical SEO helps crawlers find pages.",
+                }
+            ],
+            "api_key": "gemini-secret",
+            "embed_content": None,
+        }
+    ]
+
+    payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
+    assert payload["keyword_results"][0]["page_similarity"] == [
+        {
+            "url": "https://example.com/live",
+            "page_similarity": {
+                "bge": {"raw_score": 0.98, "normalized_score": 0.98},
+                "gemini_doc_retrieval": {
+                    "raw_score": 0.654321,
+                    "normalized_score": 0.654321,
+                },
+                "gemini_semantic_similarity": {
+                    "raw_score": 0.765432,
+                    "normalized_score": 0.765432,
+                },
+            },
+            "target_keyword": "technical seo",
+        }
+    ]
+    assert payload["network_calls"] == [
+        "dataforseo.keyword_expansion",
+        "dataforseo.serp",
+        "dataforseo.page_text",
+        "genai.embed_content",
+    ]
 
 
 def test_run_rejects_live_textrazor_without_env_gate(

@@ -25,6 +25,10 @@ from seo_rank.dataforseo import (
     parsed_page_text,
     validate_dataforseo_credentials,
 )
+from seo_rank.gemini_embeddings import (
+    GeminiEmbeddingError,
+    compute_gemini_page_similarity_scores,
+)
 from seo_rank.similarity import (
     compute_page_similarity_features,
     compute_page_similarity_scores,
@@ -96,6 +100,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 write_live_artifacts(config, os.environ)
             except (
                 DataForSeoClientError,
+                GeminiEmbeddingError,
                 LiveProviderGateError,
                 TextRazorClientError,
             ) as error:
@@ -350,8 +355,7 @@ def build_live_payload(
     textrazor_transport,
 ) -> dict[str, object]:
     credentials = validate_live_provider_gate(env)
-    if config.live_gemini:
-        validate_live_gemini_config(env)
+    gemini_api_key = validate_live_gemini_config(env) if config.live_gemini else None
     textrazor_credentials = (
         validate_live_textrazor_config(env) if config.live_textrazor else None
     )
@@ -375,6 +379,7 @@ def build_live_payload(
             config,
             target_keyword=keyword,
             credentials=credentials,
+            gemini_api_key=gemini_api_key,
             textrazor_credentials=textrazor_credentials,
             location_code=location_code,
             dataforseo_transport=dataforseo_transport,
@@ -424,6 +429,7 @@ def build_live_keyword_result(
     *,
     target_keyword: str,
     credentials: LiveProviderCredentials,
+    gemini_api_key: str | None,
     textrazor_credentials: TextRazorCredentials | None,
     location_code: int,
     dataforseo_transport,
@@ -447,6 +453,9 @@ def build_live_keyword_result(
         keyword=target_keyword,
         depth=config.depth,
     )
+    serp_titles_by_url = {
+        str(result["url"]): str(result["title"]) for result in serp_results
+    }
 
     page_text_responses = [
         execute_dataforseo_request(
@@ -472,9 +481,26 @@ def build_live_keyword_result(
         for page_text in parsed_pages
         for passage in normalize_page_text(page_text)
     ]
+    gemini_pages = [
+        {
+            **page_text,
+            "title": serp_titles_by_url.get(page_text["url"], page_text.get("title", "")),
+        }
+        for page_text in parsed_pages
+    ]
+    similarity_scores = (
+        compute_gemini_page_similarity_scores(
+            target_keyword,
+            gemini_pages,
+            api_key=gemini_api_key,
+        )
+        if gemini_api_key is not None
+        else compute_page_similarity_scores(target_keyword, parsed_pages)
+    )
+    if gemini_api_key is not None and parsed_pages:
+        network_calls.append("genai.embed_content")
     page_similarity = [
-        annotate_target_keyword(score, target_keyword)
-        for score in compute_page_similarity_scores(target_keyword, parsed_pages)
+        annotate_target_keyword(score, target_keyword) for score in similarity_scores
     ]
 
     textrazor_responses: list[dict[str, object]] = []
