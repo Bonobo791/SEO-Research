@@ -77,4 +77,5 @@ def test_live_provider_smoke_writes_artifacts(
     payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
     assert payload["config"]["live_providers"] is True
     assert payload["network_calls"]
-    assert payload["raw_provider_data"]["dataforseo"]["keyword_expansion"]
+    assert "raw_provider_data" not in payload
+    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] >= 3

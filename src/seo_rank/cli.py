@@ -1,12 +1,17 @@
 """CLI entry point for the seo_rank package."""
 
 import argparse
+import hashlib
 import json
 import os
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from pathlib import Path
+
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 from seo_rank.env import ensure_project_env_loaded
 from seo_rank.dataforseo import (
@@ -59,6 +64,25 @@ DEFAULT_TEXTRAZOR_TRANSPORT = None
 DATAFORSEO_LOCATION_CODES = {
     "United States": 2840,
 }
+RAW_RESPONSE_SCHEMA_VERSION = "raw_responses.v1"
+RUN_CATALOG_SCHEMA_VERSION = "run_catalog.v1"
+RAW_RESPONSE_SCHEMA = pa.schema(
+    [
+        ("run_id", pa.string()),
+        ("response_id", pa.string()),
+        ("endpoint", pa.string()),
+        ("provider", pa.string()),
+        ("target_keyword", pa.string()),
+        ("task_id", pa.string()),
+        ("timestamp", pa.string()),
+        ("request_metadata_json", pa.string()),
+        ("content_type", pa.string()),
+        ("status", pa.int64()),
+        ("response_body_bytes", pa.binary()),
+        ("sha256", pa.string()),
+        ("schema_version", pa.string()),
+    ]
+)
 
 
 @dataclass(frozen=True)
@@ -241,8 +265,19 @@ def write_live_artifacts(config: RunConfig, env: Mapping[str, str]) -> None:
 
 
 def write_artifacts(output_dir: Path, payload: dict[str, object]) -> None:
+    run_id = output_dir.name
+    raw_response_records = build_raw_response_records(run_id, payload)
+    catalog = write_raw_response_catalog(
+        output_dir,
+        raw_response_records=raw_response_records,
+    )
     (output_dir / "run.json").write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        json.dumps(
+            build_run_json_payload(payload, run_id=run_id, catalog=catalog),
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
         encoding="utf-8",
     )
     (output_dir / "report.md").write_text(
@@ -741,6 +776,278 @@ def render_markdown_report(payload: dict[str, object]) -> str:
             )
         lines.append("")
     return "\n".join(lines)
+
+
+def build_raw_response_records(
+    run_id: str,
+    payload: Mapping[str, object],
+) -> list[dict[str, object]]:
+    records: list[dict[str, object]] = []
+    recorded_at = datetime.now(UTC).isoformat()
+    top_level_provider_data = payload.get("raw_provider_data", {})
+    if not isinstance(top_level_provider_data, Mapping):
+        top_level_provider_data = {}
+    dataforseo = top_level_provider_data.get("dataforseo", {})
+    if isinstance(dataforseo, Mapping):
+        keyword_expansion = dataforseo.get("keyword_expansion")
+        if isinstance(keyword_expansion, Mapping):
+            records.append(
+                build_raw_response_record(
+                    run_id,
+                    endpoint="keyword_expansion",
+                    provider="dataforseo",
+                    response=keyword_expansion,
+                    target_keyword=None,
+                    request_metadata={
+                        "seed": payload.get("config", {}).get("seed")
+                        if isinstance(payload.get("config"), Mapping)
+                        else None,
+                    },
+                    recorded_at=recorded_at,
+                )
+            )
+
+    keyword_results = payload.get("keyword_results", [])
+    if not isinstance(keyword_results, list):
+        return records
+    for keyword_result in keyword_results:
+        if not isinstance(keyword_result, Mapping):
+            continue
+        target_keyword = keyword_result.get("target_keyword")
+        if not isinstance(target_keyword, str):
+            continue
+        raw_provider_data = keyword_result.get("raw_provider_data", {})
+        if not isinstance(raw_provider_data, Mapping):
+            continue
+        dataforseo_data = raw_provider_data.get("dataforseo", {})
+        if isinstance(dataforseo_data, Mapping):
+            serp_response = dataforseo_data.get("serp")
+            if isinstance(serp_response, Mapping):
+                records.append(
+                    build_raw_response_record(
+                        run_id,
+                        endpoint="serp",
+                        provider="dataforseo",
+                        response=serp_response,
+                        target_keyword=target_keyword,
+                        request_metadata={"target_keyword": target_keyword},
+                        recorded_at=recorded_at,
+                    )
+                )
+            page_text_responses = dataforseo_data.get("page_text", [])
+            if isinstance(page_text_responses, list):
+                for response in page_text_responses:
+                    if not isinstance(response, Mapping):
+                        continue
+                    records.append(
+                        build_raw_response_record(
+                            run_id,
+                            endpoint="page_text",
+                            provider="dataforseo",
+                            response=response,
+                            target_keyword=target_keyword,
+                            request_metadata={
+                                "target_keyword": target_keyword,
+                                "url": extract_response_url(response),
+                            },
+                            recorded_at=recorded_at,
+                        )
+                    )
+        textrazor_data = raw_provider_data.get("textrazor", {})
+        if isinstance(textrazor_data, Mapping):
+            entity_responses = textrazor_data.get("entities", [])
+            if isinstance(entity_responses, list):
+                for response in entity_responses:
+                    if not isinstance(response, Mapping):
+                        continue
+                    records.append(
+                        build_raw_response_record(
+                            run_id,
+                            endpoint="entities",
+                            provider="textrazor",
+                            response=response,
+                            target_keyword=target_keyword,
+                            request_metadata={
+                                "target_keyword": target_keyword,
+                                "url": extract_response_url(response),
+                            },
+                            recorded_at=recorded_at,
+                        )
+                    )
+    return records
+
+
+def build_raw_response_record(
+    run_id: str,
+    *,
+    endpoint: str,
+    provider: str,
+    response: Mapping[str, object],
+    target_keyword: str | None,
+    request_metadata: Mapping[str, object | None],
+    recorded_at: str,
+) -> dict[str, object]:
+    response_body_bytes = serialized_response_bytes(response)
+    return {
+        "run_id": run_id,
+        "response_id": stable_response_id(
+            run_id,
+            endpoint=endpoint,
+            target_keyword=target_keyword,
+            response_body_bytes=response_body_bytes,
+        ),
+        "endpoint": endpoint,
+        "provider": provider,
+        "target_keyword": target_keyword,
+        "task_id": extract_task_id(response),
+        "timestamp": recorded_at,
+        "request_metadata_json": json.dumps(request_metadata, sort_keys=True),
+        "content_type": "application/json",
+        "status": 200,
+        "response_body_bytes": response_body_bytes,
+        "sha256": hashlib.sha256(response_body_bytes).hexdigest(),
+        "schema_version": RAW_RESPONSE_SCHEMA_VERSION,
+    }
+
+
+def serialized_response_bytes(response: Mapping[str, object]) -> bytes:
+    return json.dumps(response, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def stable_response_id(
+    run_id: str,
+    *,
+    endpoint: str,
+    target_keyword: str | None,
+    response_body_bytes: bytes,
+) -> str:
+    payload_hash = hashlib.sha256(response_body_bytes).hexdigest()
+    target_keyword_key = target_keyword or ""
+    return hashlib.sha256(
+        f"{run_id}|{endpoint}|{target_keyword_key}|{payload_hash}".encode("utf-8")
+    ).hexdigest()[:32]
+
+
+def extract_task_id(response: Mapping[str, object]) -> str | None:
+    tasks = response.get("tasks")
+    if not isinstance(tasks, list) or not tasks:
+        return None
+    task = tasks[0]
+    if not isinstance(task, Mapping):
+        return None
+    task_id = task.get("id")
+    if isinstance(task_id, str):
+        return task_id
+    if isinstance(task_id, int):
+        return str(task_id)
+    return None
+
+
+def extract_response_url(response: Mapping[str, object]) -> str | None:
+    url = response.get("url")
+    if isinstance(url, str):
+        return url
+    tasks = response.get("tasks")
+    if not isinstance(tasks, list) or not tasks:
+        return None
+    task = tasks[0]
+    if not isinstance(task, Mapping):
+        return None
+    task_url = task.get("url")
+    return task_url if isinstance(task_url, str) else None
+
+
+def write_raw_response_catalog(
+    output_dir: Path,
+    *,
+    raw_response_records: list[dict[str, object]],
+) -> dict[str, object]:
+    dataset_dir = output_dir / "parquet" / "raw_responses"
+    files: list[str] = []
+    if raw_response_records:
+        files = write_raw_response_dataset(
+            output_dir,
+            dataset_dir=dataset_dir,
+            raw_response_records=raw_response_records,
+        )
+    return {
+        "schema_version": RUN_CATALOG_SCHEMA_VERSION,
+        "datasets": {
+            "raw_responses": {
+                "schema_version": RAW_RESPONSE_SCHEMA_VERSION,
+                "row_count": len(raw_response_records),
+                "source_response_ids": sorted(
+                    str(record["response_id"]) for record in raw_response_records
+                ),
+                "files": files,
+                "file_checksums": {
+                    file_path: file_sha256(output_dir / file_path)
+                    for file_path in files
+                },
+                "columns": sorted(raw_response_records[0].keys())
+                if raw_response_records
+                else [],
+            }
+        },
+    }
+
+
+def write_raw_response_dataset(
+    output_dir: Path,
+    *,
+    dataset_dir: Path,
+    raw_response_records: list[dict[str, object]],
+) -> list[str]:
+    dataset_dir.mkdir(parents=True, exist_ok=True)
+    records_by_endpoint: dict[str, list[dict[str, object]]] = {}
+    for record in raw_response_records:
+        endpoint = record["endpoint"]
+        assert isinstance(endpoint, str)
+        records_by_endpoint.setdefault(endpoint, []).append(record)
+
+    files: list[str] = []
+    for endpoint in sorted(records_by_endpoint):
+        partition_dir = dataset_dir / f"endpoint={endpoint}"
+        partition_dir.mkdir(parents=True, exist_ok=True)
+        file_path = partition_dir / "part-0.parquet"
+        sorted_records = sorted(
+            records_by_endpoint[endpoint],
+            key=lambda row: (
+                str(row["target_keyword"] or ""),
+                str(row["response_id"]),
+            ),
+        )
+        pq.write_table(
+            pa.Table.from_pylist(sorted_records, schema=RAW_RESPONSE_SCHEMA),
+            file_path,
+            compression="zstd",
+        )
+        files.append(file_path.relative_to(output_dir).as_posix())
+    return files
+
+
+def file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def build_run_json_payload(
+    payload: Mapping[str, object],
+    *,
+    run_id: str,
+    catalog: Mapping[str, object],
+) -> dict[str, object]:
+    run_payload = dict(payload)
+    keyword_results = payload.get("keyword_results", [])
+    if isinstance(keyword_results, list):
+        run_payload["keyword_results"] = [
+            {key: value for key, value in keyword_result.items() if key != "raw_provider_data"}
+            for keyword_result in keyword_results
+            if isinstance(keyword_result, Mapping)
+        ]
+    run_payload["run_id"] = run_id
+    run_payload["catalog"] = dict(catalog)
+    run_payload.pop("raw_provider_data", None)
+    return run_payload
 
 
 if __name__ == "__main__":

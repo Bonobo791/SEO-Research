@@ -14,7 +14,7 @@ Pytest configuration and verification contract for SEO-Research.
   interpreter
 - Lint / type-check / build / coverage: not configured
 - Expected test duration: fast (< 1s)
-- **Current verification status:** 46 tests collected; 45 passing, 1 live
+- **Current verification status:** 47 tests collected; 46 passing, 1 live
   integration smoke skipped by default
 
 ## Active Verification Command
@@ -51,7 +51,7 @@ placeholders only.
 
 | Test file | What it verifies |
 |-----------|------------------|
-| `test_cli_run.py` | CLI writes grouped per-keyword artifacts, including BGE, Gemini Doc Retrieval, and Gemini Semantic Similarity rows; offline TextRazor include/skip; explicit live-provider gates; opt-in live Gemini, BGE, and TextRazor orchestration |
+| `test_cli_run.py` | CLI writes grouped per-keyword artifacts, including BGE, Gemini Doc Retrieval, and Gemini Semantic Similarity rows; run-scoped `raw_responses` Parquet + `run.json` catalog metadata; offline TextRazor include/skip; explicit live-provider gates; opt-in live Gemini, BGE, and TextRazor orchestration |
 | `test_keyword_expansion.py` | 25-keyword cap, deduplication, raw provider payload |
 | `test_serp_normalization.py` | Organic-only SERP rows, depth cap |
 | `test_env.py` | `.env` discovery, parsing, and override of shell exports |
@@ -89,8 +89,6 @@ exist.
 
 - Parquet lake write → `normalize` → `build-features` → `analyze` round-trip
   (offline fixtures; no network)
-- `raw_responses` row shape: `response_body_bytes`, SHA-256, endpoint partition;
-  excluded from normal analytical joins
 - Curated table schemas, feature marts, and `analysis_mart` join keys (`run_id`,
   `target_keyword_id`, `canonical_url_hash`, `response_id`, `passage_id`)
 - `validate.py` refuses invalid schema/key/null/range output before sink

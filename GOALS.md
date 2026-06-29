@@ -123,23 +123,35 @@ first. Downstream commands scan lazily and sink only the marts they own.
 
 ### Dev slices
 
-1. **Storage layout** — implement `runs/{run_id}/` tree with `raw_responses`
-   (partitioned by `endpoint`) and curated + mart Parquet datasets listed above.
-2. **Write path** — after offline or live orchestration, write authoritative
-   `raw_responses` rows first; preserve `target_keyword` / `target_keyword_id`
-   on every derived row.
-3. **Polars data package** — `src/seo_rank/data/` with `scans`, `normalize`,
-   `features`, `marts`, and `validate`; every transform accepts/returns
-   `pl.LazyFrame`.
-4. **CLI** — `normalize`, `build-features`, `analyze`, and `replay` subcommands;
-   `seo-rank run --stored-run runs/{run_id}` reloads stored inputs when explicitly
-   requested (missing slices fall back to fixtures or gated live API calls).
-5. **Dependencies** — add `polars` and `pyarrow` to `pyproject.toml`; document in
-   `ARCHITECTURE.md`, `TESTING.md`, and `.env.example` if new env gates are needed.
-6. **Tests** — offline round-trip: write Parquet from fixture run → `normalize` →
-   `build-features` → `analyze` → assert equivalent rows, keys, and similarity
-   scores; `replay` re-derives one `response_id` from `raw_responses`.
-7. **Docs** — align `ROADMAP.md` history when slices ship.
+1. **Slice 1 — Raw lake foundation** — persist completed runs under
+   `runs/{run_id}/`, write authoritative `raw_responses` Parquet partitioned only
+   by `endpoint`, and extend `run.json` into a lightweight catalog with schema
+   version, row counts, source `response_id`s, and file checksums. Keep this slice
+   limited to the write path for fetched provider HTTP responses plus offline tests
+   that prove deterministic layout and metadata.
+2. **Slice 2 — Curated normalization from storage** — parse stored
+   `raw_responses` into typed Parquet tables for `keywords`, `serp_items`,
+   `pages`, `passages`, `entities`, and `similarity_scores`, preserving
+   `run_id`, `target_keyword_id`, `response_id`, `schema_version`, and stable row
+   IDs.
+3. **Slice 3 — Polars data package** — add `src/seo_rank/data/` with `scans`,
+   `normalize`, and `validate`; every transform accepts/returns `pl.LazyFrame`,
+   every read boundary uses `pl.scan_parquet()`, and validation runs before each
+   sink.
+4. **Slice 4 — Feature marts** — build and persist `keyword_serp`,
+   `page_features`, `passage_features`, and `domain_features` from curated tables
+   with stable-ID joins, filter/select before joins, Zstandard compression, and
+   sorted retrieval keys.
+5. **Slice 5 — Analysis mart** — build `analysis_mart` lazily as one row per
+   `target_keyword × SERP URL`, excluding `raw_responses` from analytical joins.
+6. **Slice 6 — CLI and stored-run surfaces** — add `normalize`,
+   `build-features`, `analyze`, and `replay` subcommands, plus explicit
+   `seo-rank run --stored-run runs/{run_id}` reload behavior.
+7. **Slice 7 — Dependencies, docs, and round-trip verification** — add `polars`
+   and `pyarrow` to `pyproject.toml`, align `ARCHITECTURE.md`, `TESTING.md`,
+   `ROADMAP.md`, and `.env.example` as needed, and prove the offline
+   write → normalize → build-features → analyze round-trip plus single-response
+   replay.
 
 See `ROADMAP.md` for Phase 5 (OLS) and Phase 5.5 (passage/domain scoring).
 

@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pyarrow.dataset as ds
+
 from seo_rank.dataforseo import DataForSeoClientError
 from seo_rank.cli import main
 
@@ -65,14 +67,13 @@ def test_run_writes_offline_json_and_markdown_artifacts(
         "technical seo audit",
         "technical seo checklist",
     ]
-    assert payload["raw_provider_data"]["dataforseo"]["keyword_expansion"]["provider"] == "dataforseo"
+    assert payload["run_id"] == "artifacts"
+    assert "raw_provider_data" not in payload
+    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 101
     assert len(payload["keyword_results"]) == 25
     assert payload["keyword_results"][0]["target_keyword"] == "technical seo"
     assert payload["keyword_results"][1]["target_keyword"] == "technical seo audit"
-    assert all(
-        len(keyword_result["raw_provider_data"]["dataforseo"]["page_text"]) == 3
-        for keyword_result in payload["keyword_results"]
-    )
+    assert all("raw_provider_data" not in keyword_result for keyword_result in payload["keyword_results"])
     assert [result["rank"] for result in payload["keyword_results"][0]["serp_results"]] == [
         1,
         2,
@@ -146,7 +147,6 @@ def test_run_writes_offline_json_and_markdown_artifacts(
         payload["keywords"]
     )
     assert payload["textrazor_entities"] == []
-    assert "textrazor" not in payload["raw_provider_data"]
     assert payload["network_calls"] == []
 
     report = report_md.read_text(encoding="utf-8")
@@ -159,6 +159,68 @@ def test_run_writes_offline_json_and_markdown_artifacts(
     assert "BGE: 0.98 (normalized 0.98)" in report
     assert "Gemini Doc Retrieval:" in report
     assert "Gemini Semantic Similarity:" in report
+
+
+def test_run_writes_raw_response_parquet_and_catalog_metadata(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--depth",
+            "1",
+            "--output-dir",
+            str(output_dir),
+            "--dry-run",
+            "--skip-textrazor",
+        ]
+    )
+
+    assert exit_code == 0
+
+    raw_responses_dir = output_dir / "parquet" / "raw_responses"
+    assert raw_responses_dir.exists()
+    assert (raw_responses_dir / "endpoint=keyword_expansion").exists()
+    assert (raw_responses_dir / "endpoint=serp").exists()
+    assert (raw_responses_dir / "endpoint=page_text").exists()
+
+    table = ds.dataset(
+        raw_responses_dir,
+        format="parquet",
+        partitioning="hive",
+    ).to_table()
+    rows = table.to_pylist()
+
+    assert len(rows) == 51
+    assert {row["endpoint"] for row in rows} == {
+        "keyword_expansion",
+        "serp",
+        "page_text",
+    }
+    assert all(row["run_id"] == "artifacts" for row in rows)
+    assert all(isinstance(row["response_id"], str) and row["response_id"] for row in rows)
+    assert all(isinstance(row["sha256"], str) and len(row["sha256"]) == 64 for row in rows)
+    assert all(row["content_type"] == "application/json" for row in rows)
+    assert all(row["status"] == 200 for row in rows)
+
+    payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
+    assert payload["run_id"] == "artifacts"
+    assert "raw_provider_data" not in payload
+    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 51
+    assert payload["catalog"]["datasets"]["raw_responses"]["source_response_ids"] == sorted(
+        row["response_id"] for row in rows
+    )
+    assert set(payload["catalog"]["datasets"]["raw_responses"]["files"]) == {
+        "parquet/raw_responses/endpoint=keyword_expansion/part-0.parquet",
+        "parquet/raw_responses/endpoint=page_text/part-0.parquet",
+        "parquet/raw_responses/endpoint=serp/part-0.parquet",
+    }
 
 
 def test_run_includes_offline_textrazor_entities_when_not_skipped(tmp_path: Path) -> None:
@@ -181,10 +243,14 @@ def test_run_includes_offline_textrazor_entities_when_not_skipped(tmp_path: Path
 
     payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
     assert len(payload["keyword_results"]) == 25
-    assert all(
-        len(keyword_result["raw_provider_data"]["textrazor"]["entities"]) == 1
-        for keyword_result in payload["keyword_results"]
-    )
+    assert all("raw_provider_data" not in keyword_result for keyword_result in payload["keyword_results"])
+    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 76
+    assert payload["catalog"]["datasets"]["raw_responses"]["files"] == [
+        "parquet/raw_responses/endpoint=entities/part-0.parquet",
+        "parquet/raw_responses/endpoint=keyword_expansion/part-0.parquet",
+        "parquet/raw_responses/endpoint=page_text/part-0.parquet",
+        "parquet/raw_responses/endpoint=serp/part-0.parquet",
+    ]
     assert [entity["entity_id"] for entity in payload["keyword_results"][0]["textrazor_entities"]] == [
         "technical-seo",
         "crawler",
@@ -859,7 +925,13 @@ def test_run_live_providers_skips_textrazor_when_not_requested(
     assert len(dataforseo_calls) == 3
     payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
     assert payload["textrazor_entities"] == []
-    assert "textrazor" not in payload["raw_provider_data"]
+    assert "raw_provider_data" not in payload
+    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 3
+    assert payload["catalog"]["datasets"]["raw_responses"]["files"] == [
+        "parquet/raw_responses/endpoint=keyword_expansion/part-0.parquet",
+        "parquet/raw_responses/endpoint=page_text/part-0.parquet",
+        "parquet/raw_responses/endpoint=serp/part-0.parquet",
+    ]
     assert "textrazor.entities" not in payload["network_calls"]
 
 
@@ -1011,8 +1083,15 @@ def test_run_live_providers_writes_artifacts_with_injected_transports(
         "dataforseo.page_text",
         "textrazor.entities",
     ]
-    assert payload["raw_provider_data"]["dataforseo"]["keyword_expansion"]["tasks"]
-    assert payload["keyword_results"][0]["raw_provider_data"]["textrazor"]["entities"][0]["response"]
+    assert "raw_provider_data" not in payload
+    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 7
+    assert payload["catalog"]["datasets"]["raw_responses"]["files"] == [
+        "parquet/raw_responses/endpoint=entities/part-0.parquet",
+        "parquet/raw_responses/endpoint=keyword_expansion/part-0.parquet",
+        "parquet/raw_responses/endpoint=page_text/part-0.parquet",
+        "parquet/raw_responses/endpoint=serp/part-0.parquet",
+    ]
+    assert "raw_provider_data" not in payload["keyword_results"][0]
     assert payload["keyword_results"][0]["textrazor_entities"][0]["entity_id"] == "technical-seo"
     assert payload["keyword_results"][0]["passages"][0]["target_keyword"] == "technical seo"
     assert (
