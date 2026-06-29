@@ -113,3 +113,9 @@ layout, and dev slices.
   LazyFrame data package (`src/seo_rank/data/`), CLI `normalize` / `build-features`
   / `analyze` / `replay`, and validation-before-sink contract. Backlog § Phase 4.5
   aligned to the same contract.
+- **Phase 4.5 Slice 1 shipped:** `seo-rank run` now writes run-scoped
+  `raw_responses` Parquet partitions plus `run.json` catalog metadata without
+  duplicating raw payloads in JSON.
+- **Phase 4.5 Slice 2 shipped:** stored `raw_responses` normalize into curated
+  Parquet tables (`keywords`, `serp_items`, `pages`, `passages`, `entities`,
+  `similarity_scores`) and refresh the run catalog from disk.
