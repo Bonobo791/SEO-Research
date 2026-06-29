@@ -88,3 +88,26 @@ def test_load_bge_reranker_builds_pinned_flagembedding_model() -> None:
             "devices": ["cuda"],
         }
     ]
+
+
+def test_compute_bge_page_similarity_scores_reuses_provided_reranker() -> None:
+    load_calls = 0
+
+    class FakeReranker:
+        def compute_score(self, pairs: list[list[str]]) -> list[float]:
+            return [1.0 for _ in pairs]
+
+    def load_reranker():
+        nonlocal load_calls
+        load_calls += 1
+        return FakeReranker()
+
+    scores = compute_bge_page_similarity_scores(
+        "technical seo",
+        [{"url": "https://example.com/a", "text": "Technical SEO overview."}],
+        reranker=FakeReranker(),
+        load_reranker=load_reranker,
+    )
+
+    assert load_calls == 0
+    assert scores[0]["page_similarity"]["bge"]["raw_score"] == 1.0

@@ -14,7 +14,7 @@ Pytest configuration and verification contract for SEO-Research.
   interpreter
 - Lint / type-check / build / coverage: not configured
 - Expected test duration: fast (< 1s)
-- **Current verification status:** 42 tests collected; 41 passing, 1 live
+- **Current verification status:** 46 tests collected; 45 passing, 1 live
   integration smoke skipped by default
 
 ## Active Verification Command
@@ -51,7 +51,7 @@ placeholders only.
 
 | Test file | What it verifies |
 |-----------|------------------|
-| `test_cli_run.py` | CLI writes grouped per-keyword artifacts, including BGE, Gemini Doc Retrieval, and Gemini Semantic Similarity rows; offline TextRazor include/skip; explicit live-provider gates and opt-in TextRazor live orchestration |
+| `test_cli_run.py` | CLI writes grouped per-keyword artifacts, including BGE, Gemini Doc Retrieval, and Gemini Semantic Similarity rows; offline TextRazor include/skip; explicit live-provider gates; opt-in live Gemini, BGE, and TextRazor orchestration |
 | `test_keyword_expansion.py` | 25-keyword cap, deduplication, raw provider payload |
 | `test_serp_normalization.py` | Organic-only SERP rows, depth cap |
 | `test_env.py` | `.env` discovery, parsing, and override of shell exports |
@@ -62,12 +62,13 @@ placeholders only.
 | `test_textrazor_normalization.py` | Entity schema normalization |
 | `test_textrazor_requests.py` | TextRazor parsed-text request construction, credential validation, HTTP execution |
 | `test_sdlc_docs.py` | GOALS/ROADMAP/README guards and manifest pytest commands |
-| `test_live_provider_smoke.py` | Env-gated DataForSEO smoke path with optional live TextRazor opt-in |
+| `test_live_provider_smoke.py` | Env-gated DataForSEO smoke path with optional live TextRazor, Gemini, and BGE opt-ins |
+| `test_live_provider_smoke_config.py` | Optional live similarity flags are included in smoke runs when their env gates are enabled |
 
 Unit tests use fixtures/mocks only. Live provider smoke tests are opt-in and
 must never run without the explicit environment gates above. DataForSEO is
-always required for a live run; Gemini and TextRazor are optional and require
-their own CLI flags plus env gates when requested.
+always required for a live run; Gemini, BGE, and TextRazor are optional and
+require their own CLI flags plus env gates when requested.
 
 ## Required Workflow
 
@@ -87,15 +88,12 @@ exist.
 ## Planned tests (not yet in suite)
 
 - Broader live DataForSEO / TextRazor integration coverage beyond smoke checks
-- **Phase 4 live similarity:** broader env-gated Gen AI SDK integration coverage
-  for `gemini-embedding-2`, plus opt-in live **BGE** (FlagEmbedding cross-encoder)
-  beyond fixture page scoring
+- Deeper end-to-end live similarity validation beyond env-gated smoke paths
 - Passage / domain similarity scopes
 - `statsmodels` OLS and Benjamini-Hochberg on synthetic ranking panels
 - OLS pre-analysis diagnostic loop
 
-When live Gemini integration tests ship, keep `GEMINI_API_KEY` and
-`SEO_RANK_ENABLE_GEMINI` aligned with `.env.example`.
+Keep optional live flags aligned with `.env.example` when adding integration tests.
 
 See phased backlog in `ROADMAP.md` and planned pipeline in `ARCHITECTURE.md`.
 

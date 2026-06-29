@@ -21,18 +21,20 @@ def test_goals_and_roadmap_define_active_scope_and_backlog() -> None:
 
     assert "active-scope contract" in goals
     assert "Active Objective" in goals
-    assert "Phase 4" in goals
-    assert "live similarity" in goals.lower()
+    assert "Phase 4.5" in goals
+    assert "Phase 4 acceptance criteria (complete)" in goals
     assert "Current Backlog" in roadmap
-    assert "When `GOALS.md` exists, it is the active" in roadmap
+    assert "Phase 4.5" in roadmap
+    assert "Phase 4 shipped" in roadmap
 
 
-def test_readme_reflects_phase_three_direction() -> None:
+def test_readme_reflects_phase_four_capabilities() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
     assert "What works today" in readme
-    assert "Product direction (Phase 4)" in readme
-    assert "Phase 3 shipped" in readme
+    assert "Product direction" in readme
+    assert "Phase 4 shipped" in readme
+    assert "--live-bge" in readme
     assert "--live-gemini" in readme
     assert "--live-textrazor" in readme
 
@@ -59,6 +61,7 @@ def test_env_example_documents_live_provider_gates_without_real_secrets() -> Non
     expected_placeholders = {
         "SEO_RANK_RUN_LIVE_INTEGRATION": "0",
         "SEO_RANK_ENABLE_LIVE_PROVIDERS": "0",
+        "SEO_RANK_ENABLE_BGE": "0",
         "SEO_RANK_ENABLE_GEMINI": "0",
         "SEO_RANK_ENABLE_TEXTRAZOR": "0",
         "DATAFORSEO_LOGIN": "replace-with-dataforseo-api-login",

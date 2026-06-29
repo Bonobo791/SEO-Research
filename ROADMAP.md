@@ -5,26 +5,10 @@ scope contract; keep deferred and historical items here.
 
 ## Current Backlog
 
-Active scope contract: `GOALS.md` (Phase 4).
-
-### Phase 4 — Live similarity backends (remaining)
-
-Fixture page-level wiring and artifacts shipped for **BGE**, **Gemini Doc
-Retrieval**, and **Gemini Semantic Similarity**. Still required to **finish**
-Phase 4:
-
-- **Gemini Doc Retrieval:** asymmetric **search result** prompts; JSON key
-  `gemini_doc_retrieval`
-- **Gemini Semantic Similarity:** symmetric **sentence similarity** prompts; JSON key
-  `gemini_semantic_similarity`
-- **BGE:** local `FlagEmbedding` cross-encoder reranker; JSON key `bge`
-- **Repo integration:** optional `pyproject.toml` extras, live-path swap in
-  `similarity.py`, credential/env gates, `network_calls` for Gen AI embeds, env-gated
-  integration tests, `.env.example` updates
-
-See `GOALS.md` § Remaining live backend work for full checklist.
+Active scope contract: `GOALS.md` (Phase 4.5).
 
 ### Phase 4.5 — Database
+
 - Begin storing analysis data from DataForSEO and TextRazor.
 - All data to be stored in Parquet and processed with Polars.
 - Add in a mechanism to get stored data instead of pulling from the API.
@@ -36,6 +20,7 @@ See `GOALS.md` § Remaining live backend work for full checklist.
 - Benjamini-Hochberg correction every run
 
 ### Phase 5.5 - Analysis Expansion
+
 - Per keyword: top-20 SERP; passage and domain URL scoring vs target
   keyword; domain URL cap 1000; skip domains over 1000 URLs
 
@@ -83,11 +68,20 @@ See `GOALS.md` § Remaining live backend work for full checklist.
 - **GOALS retargeted to Phase 4:** live similarity backends and passage/page/domain
   scoring.
 - **Phase 4 started:** fixture page-level scoring for **BGE**, **Gemini Doc
-  Retrieval**, and **Gemini Semantic Similarity** is wired through offline and
+  Retrieval**, and **Gemini Semantic Similarity** wired through offline and
   gated live artifact generation, including JSON/Markdown exposure and unit
-  coverage. Live Gen AI SDK embeddings and local BGE integration remain pending; see
-  Current Backlog § Phase 4.
+  coverage.
 - **Env loading:** CLI and pytest auto-load project-root `.env` via
   `seo_rank.env` (`.env` overrides shell exports; no `source` required). Integration
   gate now requires `SEO_RANK_RUN_LIVE_INTEGRATION=1` explicitly (fixes `"0"` being
   treated as enabled).
+- **Phase 4 shipped:** live page-level similarity backends behind opt-in CLI flags.
+  - Fixture scorers in `similarity.py` for offline, `--dry-run`, and default live runs.
+  - `gemini_embeddings.py` + `--live-gemini` for **Gemini Doc Retrieval** and
+    **Gemini Semantic Similarity** via `gemini-embedding-2` / `google-genai`.
+  - `bge_reranker.py` + `--live-bge` for local **BGE** via `FlagEmbedding`
+    (`BAAI/bge-reranker-v2-m3`, CUDA, once per live run).
+  - Optional `similarity` extra in `pyproject.toml`; env gates in `.env.example`.
+  - Unit tests for prompt formatting, CLI path selection, and BGE batching; env-gated
+    integration smoke with optional Gemini/BGE flags.
+- **GOALS retargeted to Phase 4.5:** Parquet/Polars database storage.

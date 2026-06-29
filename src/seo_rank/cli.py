@@ -28,6 +28,7 @@ from seo_rank.dataforseo import (
 from seo_rank.bge_reranker import (
     BgeRerankerError,
     compute_bge_page_similarity_scores,
+    load_bge_reranker,
 )
 from seo_rank.gemini_embeddings import (
     GeminiEmbeddingError,
@@ -371,9 +372,11 @@ def build_live_payload(
 ) -> dict[str, object]:
     credentials = validate_live_provider_gate(env)
     live_bge_enabled = False
+    bge_reranker = None
     if config.live_bge:
         validate_live_bge_config(env)
         live_bge_enabled = True
+        bge_reranker = load_bge_reranker()
     gemini_api_key = validate_live_gemini_config(env) if config.live_gemini else None
     textrazor_credentials = (
         validate_live_textrazor_config(env) if config.live_textrazor else None
@@ -399,6 +402,7 @@ def build_live_payload(
             target_keyword=keyword,
             credentials=credentials,
             live_bge_enabled=live_bge_enabled,
+            bge_reranker=bge_reranker,
             gemini_api_key=gemini_api_key,
             textrazor_credentials=textrazor_credentials,
             location_code=location_code,
@@ -450,6 +454,7 @@ def build_live_keyword_result(
     target_keyword: str,
     credentials: LiveProviderCredentials,
     live_bge_enabled: bool,
+    bge_reranker: object | None,
     gemini_api_key: str | None,
     textrazor_credentials: TextRazorCredentials | None,
     location_code: int,
@@ -523,7 +528,11 @@ def build_live_keyword_result(
     if live_bge_enabled:
         similarity_scores = merge_bge_page_similarity_scores(
             similarity_scores,
-            compute_bge_page_similarity_scores(target_keyword, parsed_pages),
+            compute_bge_page_similarity_scores(
+                target_keyword,
+                parsed_pages,
+                reranker=bge_reranker,
+            ),
         )
     page_similarity = [
         annotate_target_keyword(score, target_keyword) for score in similarity_scores

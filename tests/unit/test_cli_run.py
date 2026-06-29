@@ -663,12 +663,14 @@ def test_run_live_bge_replaces_only_bge_page_scores(
         keyword: str,
         pages: list[dict[str, str]],
         *,
+        reranker=None,
         load_reranker=None,
     ) -> list[dict[str, object]]:
         bge_calls.append(
             {
                 "keyword": keyword,
                 "pages": pages,
+                "reranker": reranker,
                 "load_reranker": load_reranker,
             }
         )
@@ -681,7 +683,9 @@ def test_run_live_bge_replaces_only_bge_page_scores(
             }
         ]
 
+    bge_reranker = object()
     monkeypatch.setattr("seo_rank.cli.DEFAULT_DATAFORSEO_TRANSPORT", dataforseo_transport)
+    monkeypatch.setattr("seo_rank.cli.load_bge_reranker", lambda: bge_reranker)
     monkeypatch.setattr(
         "seo_rank.cli.compute_bge_page_similarity_scores",
         fake_compute_bge_scores,
@@ -710,6 +714,7 @@ def test_run_live_bge_replaces_only_bge_page_scores(
                     "text": "Technical SEO helps crawlers find pages.",
                 }
             ],
+            "reranker": bge_reranker,
             "load_reranker": None,
         }
     ]

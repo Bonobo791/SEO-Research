@@ -32,6 +32,7 @@ def compute_bge_page_similarity_scores(
     keyword: str,
     pages: Sequence[dict[str, str]],
     *,
+    reranker=None,
     load_reranker=None,
 ) -> list[dict[str, object]]:
     if load_reranker is None:
@@ -45,7 +46,8 @@ def compute_bge_page_similarity_scores(
     if not valid_pages:
         return []
 
-    reranker = load_reranker()
+    if reranker is None:
+        reranker = load_reranker()
     pairs = [[keyword, str(page["text"])] for page in valid_pages]
     raw_scores = reranker.compute_score(pairs)
     if isinstance(raw_scores, (int, float)):

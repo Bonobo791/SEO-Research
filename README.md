@@ -12,7 +12,8 @@ scores, and writes JSON and Markdown artifacts with **no network calls**. Provid
 request builders and credential validators are available for offline
 verification. The CLI also has a non-default `--live-providers` gate,
 standard-library HTTP clients, env-gated live DataForSEO and TextRazor paths,
-and env-gated live Gemini page scoring via `gemini-embedding-2`.
+and env-gated live Gemini (`gemini-embedding-2`) and BGE (FlagEmbedding on CUDA)
+page scoring.
 
 ```bash
 python -m pytest
@@ -35,27 +36,25 @@ Live-provider contract:
   requires `SEO_RANK_ENABLE_TEXTRAZOR=1` plus `TEXTRAZOR_API_KEY`.
 - If an optional live flag is not passed, that provider is skipped.
 
-## Product direction (Phase 4)
+## Product direction
 
-Phase 3 shipped full cluster orchestration: offline and gated live runs process
-every capped keyword, group per-keyword outputs under `keyword_results`, and
-annotate flattened rows with `target_keyword`.
+**Phase 4 shipped.** Full cluster orchestration plus three page-level measurements
+on each top-20 organic SERP row:
 
-Phase 4 adds three page-level measurements on each top-20 organic SERP row:
+| Name | JSON key | Live flag |
+|------|----------|-----------|
+| BGE | `bge` | `--live-bge` |
+| Gemini Doc Retrieval | `gemini_doc_retrieval` | `--live-gemini` |
+| Gemini Semantic Similarity | `gemini_semantic_similarity` | `--live-gemini` |
 
-| Name | JSON key |
-|------|----------|
-| BGE | `bge` |
-| Gemini Doc Retrieval | `gemini_doc_retrieval` |
-| Gemini Semantic Similarity | `gemini_semantic_similarity` |
+Offline and default live runs use deterministic fixtures. Opt-in flags swap in
+real backends when env gates and credentials are set.
 
-Fixture wiring, artifact exposure, live Gemini scoring, and live BGE scoring are
-**done**.
+**Next:** Phase 4.5 database storage (Parquet/Polars). Later: passage/domain
+scopes (Phase 5.5), `statsmodels` OLS with Benjamini-Hochberg (Phase 5), and
+`runs/RUN_ID/` reporting (Phase 6).
 
-Details: `GOALS.md` (developer instructions) and `ARCHITECTURE.md`.
-
-Passage and domain scopes are Phase 5.5. Later: `statsmodels` OLS with
-Benjamini-Hochberg (Phase 5) and `runs/RUN_ID/` reporting (Phase 6).
+Details: `GOALS.md` and `ARCHITECTURE.md`.
 
 ## Repository layout
 
