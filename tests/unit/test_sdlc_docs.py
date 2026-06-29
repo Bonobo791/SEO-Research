@@ -99,7 +99,6 @@ def test_phase_45_slice_7_regression_sweep_marks_round_trip_docs_as_shipped() ->
 
     assert "[x] Slice 7" in goals
     assert "Slice 7 shipped" in goals
-    assert "7 acceptance items complete" in goals
     assert "`runs/{run_id}/` layout written for each completed run by default when" in goals
     assert "Slice 7 shipped" in readme
     assert "round-trip regression sweep" in readme
@@ -107,3 +106,18 @@ def test_phase_45_slice_7_regression_sweep_marks_round_trip_docs_as_shipped() ->
     assert "Dedicated Parquet lake write → normalize → build-features → analyze round-trip regression sweep" in testing
     assert "round-trip regression sweep" in architecture
     assert "Phase 4.5 Slice 7 shipped" in roadmap
+
+
+def test_phase_45_slice_9_regression_sweep_marks_mart_sink_docs_as_shipped() -> None:
+    goals = (ROOT / "GOALS.md").read_text(encoding="utf-8")
+    testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
+    architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
+
+    assert "[x] Slice 9" in goals
+    assert "Slice 9 shipped" in goals
+    assert "9 of 10 shipped, 1 open" in goals
+    assert "8 acceptance items complete" in goals
+    assert "drop eager `collect` + `write_parquet` in `write_feature_dataset`" in goals
+    assert "72 tests" in architecture
+    assert "72 tests collected" in testing
+    assert "sink feature marts lazily with Parquet statistics" in testing

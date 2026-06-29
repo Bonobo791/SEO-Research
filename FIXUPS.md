@@ -1,9 +1,9 @@
 # Small fixes backlog
 
 Tracked hardening and polish items surfaced during Phase 4.5 Slice 3 (lazy
-curated normalization) and Slice 6 (CLI surfaces) review. Each item names the
-**phase/slice** where it should land. Nothing here blocks Slice 7 sign-off
-unless marked **required**.
+curated normalization), Slice 6 (CLI surfaces), and Slice 9 (mart sink contract)
+review. Each item names the **phase/slice** where it should land. Nothing here
+blocks Slice 10 sign-off unless marked **required**.
 
 **Status key:** `open` | `done`
 
@@ -45,10 +45,20 @@ if none of these block deps/docs/round-trip work.
 | ID | Fix | Phase | Priority | Status |
 | --- | --- | --- | --- | --- |
 | S7-01 | Update `ARCHITECTURE.md` test count when the suite changes (was 53; now 66) | 4.5 Slice 7 | nice-to-have | done |
-| S7-02 | Migrate curated table writes from PyArrow `write_table` to Polars `sink_parquet(..., compression="zstd")` for parity with feature/analysis marts | 4.5 Slice 7 | planned | open |
+| S7-02 | Migrate curated table writes from PyArrow `write_table` to Polars `sink_parquet(..., compression="zstd")` for parity with feature/analysis marts | 4.5 Slice 8 | planned | done |
 | S7-03 | Add dedicated round-trip test module: `run --dry-run` → `normalize_run` → `build_feature_marts` → `build_analysis_mart` in one test file (beyond `test_analysis_mart.py` chain) | 4.5 Slice 7 | planned | open |
 | S7-04 | Declare `polars` in `pyproject.toml` | 4.5 Slice 7 | required | done |
 | S7-05 | Optional empty-endpoint integration test (e.g. run missing `entities` partition) to exercise empty `map_batches` paths end-to-end | 4.5 Slice 7 | nice-to-have | open |
+
+---
+
+## Phase 4.5 — Slice 9 (mart sink — post-ship polish)
+
+| ID | Fix | Phase | Priority | Status |
+| --- | --- | --- | --- | --- |
+| S9-01 | Assert written feature/analysis Parquet files expose column statistics in file metadata (integration path in `test_build_feature_marts_materializes_lazy_joins_from_curated_tables`, not only mocked `sink_parquet` kwargs) | 4.5 Slice 9 | nice-to-have | open |
+| S9-02 | Add empty-dataset test for `write_feature_dataset`: lazy empty frame sinks and catalog `row_count` is `0` via Parquet metadata | 4.5 Slice 9 | nice-to-have | open |
+| S9-03 | Keep slice-specific doc regression sweeps in `test_sdlc_docs.py` (slice 7 round-trip wording, slice 9 mart sink counters) instead of pinning moving acceptance-item totals on older slice tests | 4.5 Slice 9 | nice-to-have | done |
 
 ---
 

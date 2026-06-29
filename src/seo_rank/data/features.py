@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 import polars as pl
+import pyarrow.parquet as pq
 
 from seo_rank.data.marts import build_analysis_lazyframe
 from seo_rank.data.scans import scan_curated_table
@@ -527,11 +528,10 @@ def write_feature_dataset(
     dataset_dir = run_dir / "parquet" / name
     dataset_dir.mkdir(parents=True, exist_ok=True)
     file_path = dataset_dir / "part-0.parquet"
-    collected = frame.collect(engine="streaming")
-    collected.write_parquet(file_path, compression="zstd")
+    frame.sink_parquet(file_path, compression="zstd", statistics=True)
     return {
         "schema_version": FEATURE_SCHEMA_VERSION,
-        "row_count": collected.height,
+        "row_count": pq.ParquetFile(file_path).metadata.num_rows,
         "files": [file_path.relative_to(run_dir).as_posix()],
         "file_checksums": {
             file_path.relative_to(run_dir).as_posix(): file_sha256(file_path)

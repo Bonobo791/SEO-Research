@@ -36,8 +36,8 @@ trees stay out of source control.
 
 #### Progress (2026-06-29)
 
-**Slices:** 8 of 10 shipped, 2 open. Phase 4.5 is not signed off pending mart
-sink and validation-edge hardening (slices 9–10).
+**Slices:** 9 of 10 shipped, 1 open. Phase 4.5 is not signed off pending
+validation-edge hardening (slice 10).
 
 | # | Slice | Layer | Status | Primary deliverable |
 | - | ----- | ----- | ------ | ------------------- |
@@ -49,24 +49,22 @@ sink and validation-edge hardening (slices 9–10).
 | 6 | CLI and stored-run surfaces | CLI | Shipped | `normalize`, `build-features`, `analyze`, `replay`; `run --stored-run` reload path |
 | 7 | Dependencies, docs, round-trip | Verify | Shipped | `pyarrow` + `polars` declared; docs aligned; `test_round_trip.py` CLI sweep |
 | 8 | Curated sink contract | Write | Shipped | Curated tables sink via Polars `sink_parquet(..., compression="zstd", statistics=True)` with sorted retrieval keys |
-| 9 | Mart sink contract | Write | Open | Feature marts and `analysis_mart` use lazy `sink_parquet` with statistics; drop eager `collect` + `write_parquet` in `write_feature_dataset` |
+| 9 | Mart sink contract | Write | Shipped | Feature marts and `analysis_mart` use lazy `sink_parquet` with statistics; drop eager `collect` + `write_parquet` in `write_feature_dataset` |
 | 10 | Validation lazy edge | Infra | Open | Row-level checks in `validate.py` without mid-plan `collect()`; validation stays lazy until sink boundary |
 
 **Library API (callable, with CLI surfaces):** `normalize_run`,
 `build_feature_marts`, `build_analysis_mart` under `src/seo_rank/data/`.
 
-**Remaining to close Phase 4.5:** slices 9–10 (mart sink contract + validation
-lazy edge).
+**Remaining to close Phase 4.5:** slice 10 (validation lazy edge).
 
 **Residual risk:** curated normalization stays lazy through the Polars plan, but
 batch-level Python UDFs still parse JSON (`response_body_bytes`), split passages,
-normalize entities, and compute per-keyword similarity groups. Feature and
-analysis marts still `collect(engine="streaming")` before `write_parquet`
-(slice 9). Validation still collects selected columns before row-level checks
-(slice 10).
+normalize entities, and compute per-keyword similarity groups. Validation still
+collects selected columns before row-level checks (slice 10).
 
 **Post-sign-off polish:** optional hardening tracked in `FIXUPS.md` (empty-endpoint
-paths, CLI replay polish, normalize UDF schema guards). Not sign-off gates.
+paths, CLI replay polish, normalize UDF schema guards, mart sink Parquet metadata
+assertions). Not sign-off gates.
 
 #### Polars data layer
 
@@ -224,13 +222,18 @@ the write contract. Each slice is one reviewable unit with its own tests.
    - Replaces direct PyArrow `write_table` on the curated path (`FIXUPS.md`
      S7-02).
 
-9. **[ ] Slice 9 — Mart sink contract**
+9. **[x] Slice 9 — Mart sink contract**
    - `write_feature_dataset` (feature marts + `analysis_mart`) uses lazy
      `sink_parquet(..., compression="zstd", statistics=True)` instead of
      `collect(engine="streaming")` + `DataFrame.write_parquet`.
-   - Preserve sorted retrieval keys and post-sink catalog row counts.
-   - Tests: assert Parquet file metadata / statistics where feasible; extend
-     round-trip sweep if needed.
+   - Post-sink catalog row counts read from Parquet file metadata
+     (`pyarrow.parquet.ParquetFile`), not from an eager `collect().height`.
+   - Preserve sorted retrieval keys (sorts remain in `build_feature_lazyframes`).
+   - Tests: `test_write_feature_dataset_uses_lazy_sink_parquet_with_statistics`
+     in `test_feature_marts.py`; `test_sdlc_docs.py` slice-9 regression sweep
+     pins progress counters and doc wording (see `FIXUPS.md` S9-02–S9-04 for
+     optional Parquet-metadata hardening).
+   - Slice 9 shipped.
 
 10. **[ ] Slice 10 — Validation lazy edge**
     - Refactor `validate_frame_contract` so uniqueness, null, and range checks do
@@ -265,9 +268,9 @@ See `ROADMAP.md` for Phase 5 (OLS) and Phase 5.5 (passage/domain scoring).
 
 ## Phase 4.5 acceptance criteria
 
-**Status (2026-06-29):** 7 acceptance items complete, 4 partial, 0 not started.
-Dev slices: 8 shipped, 2 open (slices 9–10). Phase 4.5 is not signed off pending
-mart sink and validation-edge hardening.
+**Status (2026-06-29):** 8 acceptance items complete, 3 partial, 0 not started.
+Dev slices: 9 shipped, 1 open (slice 10). Phase 4.5 is not signed off pending
+validation-edge hardening.
 
 | Acceptance item | Slice(s) | Status |
 | --------------- | -------- | ------ |
@@ -303,8 +306,8 @@ mart sink and validation-edge hardening.
   curated normalization uses batch UDFs for JSON parse and similarity grouping.)*
 - [ ] Parquet sinks use Zstandard compression and statistics; tables sorted by
   primary retrieval keys; `collect(engine="streaming")` only at CLI/report edges.
-  *(Partial: slice 8 shipped for curated tables; slice 9 open for feature/analysis
-  marts; slice 10 open for validation `collect()`.)*
+  *(Partial: slices 8 and 9 shipped for curated and mart tables; slice 10 open
+  for validation `collect()`.)*
 - [x] `validate.py` runs schema/key/null/range checks before every mart write.
   *(Slice 3 shipped the hook; slice 10 open for lazy-edge row checks.)*
 - [x] `raw_responses` excluded from normal analytical joins; `replay` path only.

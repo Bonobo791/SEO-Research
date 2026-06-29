@@ -2,10 +2,12 @@ import json
 from pathlib import Path
 
 import polars as pl
+import pyarrow as pa
 import pyarrow.dataset as ds
+import pyarrow.parquet as pq
 
 from seo_rank.cli import main
-from seo_rank.data.features import build_feature_marts
+from seo_rank.data.features import build_feature_marts, write_feature_dataset
 from seo_rank.data.normalize import normalize_run
 
 
@@ -179,3 +181,38 @@ def test_build_feature_marts_validates_each_feature_frame_before_sinking(
         ),
         ("write", "domain_features"),
     ]
+
+
+def test_write_feature_dataset_uses_lazy_sink_parquet_with_statistics(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    run_dir = tmp_path / "run-1"
+    frame = pl.DataFrame([{"run_id": "run-1", "target_keyword_id": "kw-1"}]).lazy()
+    captured: dict[str, object] = {}
+
+    def fake_sink_parquet(self, path, **kwargs):  # noqa: ANN001, ANN003
+        captured["path"] = path
+        captured["kwargs"] = kwargs
+        pq.write_table(
+            pa.Table.from_pylist(
+                [{"run_id": "run-1", "target_keyword_id": "kw-1"}],
+            ),
+            path,
+        )
+
+    def fail_collect(*args, **kwargs):  # noqa: ANN001, ANN003
+        raise AssertionError("write_feature_dataset should not collect before sink")
+
+    monkeypatch.setattr(pl.LazyFrame, "sink_parquet", fake_sink_parquet)
+    monkeypatch.setattr(pl.LazyFrame, "collect", fail_collect)
+
+    catalog = write_feature_dataset(
+        run_dir,
+        name="keyword_serp",
+        frame=frame,
+    )
+
+    assert captured["path"] == run_dir / "parquet" / "keyword_serp" / "part-0.parquet"
+    assert captured["kwargs"] == {"compression": "zstd", "statistics": True}
+    assert catalog["row_count"] == 1
