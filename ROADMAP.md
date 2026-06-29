@@ -7,11 +7,34 @@ scope contract; keep deferred and historical items here.
 
 Active scope contract: `GOALS.md` (Phase 4.5).
 
-### Phase 4.5 — Database
+### Phase 4.5 — Run-scoped Parquet lake (Polars)
 
-- Begin storing analysis data from DataForSEO and TextRazor.
-- All data to be stored in Parquet and processed with Polars.
-- Add in a mechanism to get stored data instead of pulling from the API.
+Active contract: `GOALS.md` § Phase 4.5 objective, Polars data layer, storage
+layout, and dev slices.
+
+- **Run-scoped layout** under `runs/{run_id}/`: authoritative `raw_responses`
+  (one row per DataForSEO HTTP response, partitioned by `endpoint` only), curated
+  tables, feature marts, and `analysis_mart`.
+- **`src/seo_rank/data/`** — `scans.py`, `normalize.py`, `features.py`,
+  `marts.py`, `validate.py`; LazyFrames end-to-end (`pl.scan_parquet()` in,
+  `pl.LazyFrame` between transforms, `sink_parquet` out).
+- **Three processing layers** — curated (`normalize`) → feature marts
+  (`keyword_serp`, `page_features`, `passage_features`, `domain_features`) →
+  analysis mart (one row per `target_keyword × SERP URL`).
+- **Join contract** — filter/select before joins; stable IDs only (`run_id`,
+  `target_keyword_id`, `canonical_url_hash`, `response_id`, `passage_id`);
+  `raw_responses` excluded from normal analytical joins.
+- **Write contract** — `validate.py` before every sink; Zstandard compression,
+  Parquet statistics, sorted retrieval keys; `collect(engine="streaming")` only at
+  CLI/report boundaries.
+- **CLI** — `normalize`, `build-features`, `analyze`, `replay`; `--stored-run`
+  on `run` for stored-input replay.
+- **`run.json` catalog** — schemas, row counts, source response IDs, file
+  checksums; no duplicate raw payloads.
+- **Schema policy** — raw body as `response_body_bytes` + extracted typed
+  columns; `schema_version` on every output; no nested provider objects; no
+  Parquet `Variant` type.
+- File-based storage; no server database.
 
 ### Phase 5 — Statistical analysis
 
@@ -26,9 +49,8 @@ Active scope contract: `GOALS.md` (Phase 4.5).
 
 ### Phase 6 — Reporting
 
-- Artifact layout under `runs/RUN_ID/`
-- Report sections for observational limits and top-20 censoring
-- Generated runs out of source control
+- Expanded `report.md` sections for observational limits and top-20 censoring
+- Generated `runs/{run_id}/` trees out of source control (layout ships in Phase 4.5)
 
 ## Deferred
 
@@ -36,6 +58,7 @@ Active scope contract: `GOALS.md` (Phase 4.5).
 - Direct page crawling outside DataForSEO
 - CI, release packaging, coverage thresholds
 - Production deployment, databases, cache
+- Parquet `Variant` type for provider payloads
 
 ## History
 
@@ -84,4 +107,9 @@ Active scope contract: `GOALS.md` (Phase 4.5).
   - Optional `similarity` extra in `pyproject.toml`; env gates in `.env.example`.
   - Unit tests for prompt formatting, CLI path selection, and BGE batching; env-gated
     integration smoke with optional Gemini/BGE flags.
-- **GOALS retargeted to Phase 4.5:** Parquet/Polars database storage.
+- **GOALS retargeted to Phase 4.5:** run-scoped Parquet lake storage.
+- **Phase 4.5 scoped:** `GOALS.md` expanded with run-scoped Parquet architecture
+  (`raw_responses`, curated tables, feature marts, `analysis_mart`), Polars
+  LazyFrame data package (`src/seo_rank/data/`), CLI `normalize` / `build-features`
+  / `analyze` / `replay`, and validation-before-sink contract. Backlog § Phase 4.5
+  aligned to the same contract.

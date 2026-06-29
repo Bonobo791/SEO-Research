@@ -87,10 +87,22 @@ exist.
 
 ## Planned tests (not yet in suite)
 
+- Parquet lake write → `normalize` → `build-features` → `analyze` round-trip
+  (offline fixtures; no network)
+- `raw_responses` row shape: `response_body_bytes`, SHA-256, endpoint partition;
+  excluded from normal analytical joins
+- Curated table schemas, feature marts, and `analysis_mart` join keys (`run_id`,
+  `target_keyword_id`, `canonical_url_hash`, `response_id`, `passage_id`)
+- `validate.py` refuses invalid schema/key/null/range output before sink
+- `src/seo_rank/data/` LazyFrame contract: scan in, lazy transforms, `sink_parquet`
+  with `compression="zstd"`; `collect(engine="streaming")` only at CLI edges
+- `seo-rank replay` re-derives one `response_id` from `raw_responses`
+- `run.json` catalog: counts, checksums, `schema_version`, no duplicate raw
+  payloads in JSON
 - Broader live DataForSEO / TextRazor integration coverage beyond smoke checks
 - Deeper end-to-end live similarity validation beyond env-gated smoke paths
-- Passage / domain similarity scopes
-- `statsmodels` OLS and Benjamini-Hochberg on synthetic ranking panels
+- Passage / domain similarity scopes (feature marts; Phase 5.5 scoring)
+- `statsmodels` OLS and Benjamini-Hochberg on `analysis_mart` panels
 - OLS pre-analysis diagnostic loop
 
 Keep optional live flags aligned with `.env.example` when adding integration tests.

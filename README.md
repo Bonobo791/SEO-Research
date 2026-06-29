@@ -50,17 +50,58 @@ on each top-20 organic SERP row:
 Offline and default live runs use deterministic fixtures. Opt-in flags swap in
 real backends when env gates and credentials are set.
 
-**Next:** Phase 4.5 database storage (Parquet/Polars). Later: passage/domain
-scopes (Phase 5.5), `statsmodels` OLS with Benjamini-Hochberg (Phase 5), and
-`runs/RUN_ID/` reporting (Phase 6).
+**Next:** Phase 4.5 run-scoped Parquet lake (`runs/{run_id}/` with authoritative
+`raw_responses`, curated tables, feature marts, and `analysis_mart`), Polars
+LazyFrame pipeline in `src/seo_rank/data/`, and CLI commands `normalize`,
+`build-features`, `analyze`, and `replay`. Later: passage/domain scopes
+(Phase 5.5), `statsmodels` OLS with Benjamini-Hochberg (Phase 5), and expanded
+report sections (Phase 6).
 
-Details: `GOALS.md` and `ARCHITECTURE.md`.
+Details: `GOALS.md` and `ARCHITECTURE.md` (see **Run-scoped Parquet lake** and
+**Polars data layer**).
+
+### Planned storage layout (Phase 4.5)
+
+```text
+runs/{run_id}/
+  run.json
+  report.md
+  parquet/
+    raw_responses/endpoint={keyword_expansion|serp|page_text}/part-*.parquet
+    keywords/part-*.parquet
+    serp_items/part-*.parquet
+    pages/part-*.parquet
+    passages/part-*.parquet
+    entities/part-*.parquet
+    similarity_scores/part-*.parquet
+    keyword_serp/part-*.parquet
+    page_features/part-*.parquet
+    passage_features/part-*.parquet
+    domain_features/part-*.parquet
+    analysis_mart/part-*.parquet
+```
+
+### Planned CLI (Phase 4.5)
+
+```bash
+seo-rank normalize --run RUN_ID
+seo-rank build-features --run RUN_ID
+seo-rank analyze --run RUN_ID --keyword "technical seo"
+seo-rank replay --run RUN_ID --response-id RESPONSE_ID
+seo-rank run --stored-run runs/RUN_ID ...   # reload stored inputs
+```
+
+All transforms use `pl.scan_parquet()` and return `pl.LazyFrame` until a command
+boundary calls `collect(engine="streaming")` or `sink_parquet(..., compression="zstd")`.
+`raw_responses` is not joined in normal analysis; use `replay` to re-parse one
+response.
 
 ## Repository layout
 
 | Path | Purpose |
 |------|---------|
 | `src/seo_rank/` | CLI and provider boundaries |
+| `src/seo_rank/data/` | Polars lake transforms (Phase 4.5): `scans`, `normalize`, `features`, `marts`, `validate` |
 | `tests/unit/` | pytest unit tests |
 | `ARCHITECTURE.md` | Product architecture, data flow, planned pipeline |
 | `GOALS.md` | Active-scope contract |

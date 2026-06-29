@@ -7,9 +7,10 @@
 - Source directory: `src/seo_rank/`
 - Test directory: `tests/`
 - Package manifest: `pyproject.toml`
-- Analysis library: `statsmodels` for observational ranking models (planned;
-  not yet a runtime dependency); `numpy`, `scipy`, `patsy`, and `linearmodels`
-  for OLS diagnostics, IV/panel extensions, and supporting tests (planned)
+- Analysis library: `polars` (lazy Parquet lake, Phase 4.5); `statsmodels` for
+  observational ranking models (planned; not yet a runtime dependency); `numpy`,
+  `scipy`, `patsy`, and `linearmodels` for OLS diagnostics, IV/panel extensions,
+  and supporting tests (planned)
 - Similarity backends: deterministic fixture passage aggregation plus
   offline-testable page-level fixtures for **BGE**, **Gemini Doc Retrieval**, and
   **Gemini Semantic Similarity**. **Live Gemini execution is wired** for the CLI
@@ -18,8 +19,8 @@
   (local BGE cross-encoder, pinned `BAAI/bge-reranker-v2-m3`) as an optional
   runtime dependency — see [Live similarity backends (Phase 4)](#live-similarity-backends-phase-4).
 - Deployment: none
-- Databases: none
-- Cache layer: none
+- Databases: none (file-based Parquet lake in Phase 4.5)
+- Cache layer: none (`--stored-run` reloads prior runs; not a live API cache)
 - CI: none configured
 
 ## Overview
@@ -77,14 +78,17 @@ Product architecture, scope, and phased backlog live in root markdown:
 The repository contains an **offline-verifiable CLI scaffold** (Phase 1 shipped):
 
 - **Package:** `src/seo_rank/` — `cli.py`, `dataforseo.py`, `text.py`,
-  `similarity.py`, `gemini_embeddings.py`, `bge_reranker.py`, `textrazor.py`
+  `similarity.py`, `gemini_embeddings.py`, `bge_reranker.py`, `textrazor.py`;
+  Phase 4.5 adds `src/seo_rank/data/` (`scans`, `normalize`, `features`,
+  `marts`, `validate`)
 - **CLI:** `seo-rank run` writes `run.json` and `report.md` from fixtures (no
-  network calls) or gated live providers
+  network calls) or gated live providers; Phase 4.5 adds `normalize`,
+  `build-features`, `analyze`, and `replay`
 - **Tests:** 46 tests under `tests/`; gate: `python -m pytest`
 - **Product docs:** `ARCHITECTURE.md`, `GOALS.md`, `ROADMAP.md`, `README.md`,
   `TESTING.md`
-- **Not yet:** `statsmodels` analysis, `runs/RUN_ID/` layout, Parquet/Polars
-  storage (Phase 4.5)
+- **Not yet:** `statsmodels` analysis; full Parquet lake write path and Polars
+  data package (Phase 4.5 in progress)
 
 Module and artifact details are in [Application Surface](#application-surface)
 and [Key Product Components](#key-product-components) below. Planned live
@@ -118,8 +122,12 @@ in code yet.
   and [Planned Page Similarity Run](#planned-page-similarity-run).
 - **Analysis engine (planned):** OLS pre-analysis, `statsmodels` OLS,
   Benjamini-Hochberg — see [Planned Per-Run Statistical Analysis](#planned-per-run-statistical-analysis).
-- **Reporters (shipped):** JSON + Markdown under `--output-dir`; planned
-  `runs/RUN_ID/` layout in Phase 6.
+- **Reporters (shipped):** JSON + Markdown under `--output-dir`; Phase 4.5 adds
+  `runs/{run_id}/` Parquet lake + `run.json` catalog; Phase 6 expands report
+  narrative sections.
+- **Storage (planned, Phase 4.5):** run-scoped Parquet lake with three processing
+  layers — see [Run-scoped Parquet lake](#run-scoped-parquet-lake-phase-45) and
+  [Polars data layer](#polars-data-layer-phase-45).
 
 ## Data Flow
 
@@ -135,11 +143,199 @@ top-20 SERP → page text → optional TextRazor entities → page similarity (f
 by default; Gemini live under `--live-gemini`; BGE live under `--live-bge`) →
 grouped `keyword_results` in `run.json` + `report.md`.
 
-**Planned full pipeline (Phase 5+):** rank-feature join → OLS pre-analysis →
-`statsmodels` OLS → Benjamini-Hochberg → report generation.
+**Stored run (Phase 4.5):** completed runs persist under `runs/{run_id}/` with
+authoritative `raw_responses`, curated tables, feature marts, and `analysis_mart`.
+Downstream work scans lazily via `pl.scan_parquet()`; `seo-rank normalize`,
+`build-features`, and `analyze` materialize only the marts they own. `raw_responses`
+stays out of normal analytical joins (replay/re-normalization only). Live
+DataForSEO payloads are not retained by the provider long-term.
 
-Raw provider responses and generated run artifacts should stay out of source
+**Planned full pipeline (Phase 5+):** lazy Polars joins on `analysis_mart` →
+OLS pre-analysis → `statsmodels` OLS → Benjamini-Hochberg → report generation.
+
+Raw provider responses and generated run trees should stay out of source
 control.
+
+## Run-scoped Parquet lake (Phase 4.5)
+
+Phase 4.5 introduces a **run-scoped Parquet lake** with three processing layers.
+Each completed run writes a self-contained directory. The run directory scopes all
+data; only `raw_responses` adds a second partition dimension (`endpoint`).
+
+### Directory layout
+
+```text
+runs/{run_id}/
+  run.json                         # manifest, schema versions, counts, checksums
+  report.md                        # human-readable summary
+  parquet/
+    raw_responses/
+      endpoint=keyword_expansion/part-*.parquet
+      endpoint=serp/part-*.parquet
+      endpoint=page_text/part-*.parquet
+    keywords/part-*.parquet
+    serp_items/part-*.parquet
+    pages/part-*.parquet
+    passages/part-*.parquet
+    entities/part-*.parquet
+    similarity_scores/part-*.parquet
+    keyword_serp/part-*.parquet
+    page_features/part-*.parquet
+    passage_features/part-*.parquet
+    domain_features/part-*.parquet
+    analysis_mart/part-*.parquet
+```
+
+### Three processing layers
+
+| Layer | Tables | Producer | Purpose |
+|-------|--------|----------|---------|
+| **Curated** | `keywords`, `serp_items`, `pages`, `passages`, `entities`, `similarity_scores` | `normalize.py` | Parse `raw_responses` once into typed tables |
+| **Feature marts** | `keyword_serp`, `page_features`, `passage_features`, `domain_features` | `features.py` | Reusable similarity and ranking features |
+| **Analysis mart** | `analysis_mart` | `marts.py` | One row per `target_keyword × SERP URL` for Phase 5 |
+
+### Layer 1 — `raw_responses` (authoritative)
+
+One row per DataForSEO HTTP response. This layer is the system of record for
+every downloaded payload.
+
+| Column (conceptual) | Role |
+|---------------------|------|
+| `response_id` | Stable UUID for this HTTP response within the run |
+| `endpoint` | Low-cardinality partition key: `keyword_expansion`, `serp`, `page_text` |
+| `task_id` | DataForSEO task identifier when present |
+| `timestamp` | Response receipt time (UTC) |
+| Request metadata | Method, URL, headers/body hash as needed for audit |
+| `response_body_bytes` | Exact response body (bytes or UTF-8 JSON bytes) |
+| `content_type` | MIME type from the response |
+| `status` | HTTP status code |
+| `sha256` | SHA-256 of `response_body_bytes` |
+
+**Why authoritative:** DataForSEO does not retain Live endpoint results.
+Standard and HTML task results have limited retention. Storing the raw body at
+write time makes runs reproducible without provider replay.
+
+**Partitioning:** partition `raw_responses` **only** by `endpoint`. Do not
+partition by keyword, URL, task ID, or SERP rank.
+
+**Analytical isolation:** keep `raw_responses` out of normal joins. Use it only
+for `seo-rank replay` and explicit re-normalization paths.
+
+### Layer 2 — curated tables (typed, analysis-ready)
+
+Normalized tables derived from `raw_responses` via `normalize.py`. Every row
+includes join keys: `run_id`, `target_keyword_id`, `response_id`, `schema_version`,
+plus stable entity IDs (`canonical_url_hash`, `passage_id`, etc.).
+
+| Table | Contents |
+|-------|----------|
+| `keywords` | Expanded cluster keywords with caps and dedup metadata |
+| `serp_items` | Organic SERP rows (top 20), ranks, URLs, titles |
+| `pages` | Full parsed page text and page-level metadata (text lives here only) |
+| `passages` | Passage splits with offsets; no duplicate full page bodies |
+| `entities` | TextRazor entity rows when present |
+| `similarity_scores` | Page-level `bge`, `gemini_doc_retrieval`, `gemini_semantic_similarity` |
+
+Curated tables are **not** partitioned beyond the run directory. Sort rows at
+write time by primary retrieval keys, e.g. `target_keyword_id`, `canonical_url_hash`,
+`serp_rank`, so scans with filters on those columns benefit from row-group
+statistics.
+
+### Layer 3 — feature marts
+
+Derived from curated tables via `features.py`. Filter and select **before** joins.
+
+| Mart | Contents |
+|------|----------|
+| `keyword_serp` | Keyword × SERP grain with ranks and URL keys |
+| `page_features` | Page-level similarity and text features |
+| `passage_features` | Passage-level features (Phase 5.5 expands scoring scope) |
+| `domain_features` | Domain-level aggregates (Phase 5.5 expands URL inventory) |
+
+### Layer 4 — analysis mart
+
+Built by `marts.py` when Phase 5 analysis needs a single panel. One row per
+`target_keyword × SERP URL`. Join curated and feature marts only on stable IDs:
+`run_id`, `target_keyword_id`, `canonical_url_hash`, `response_id`, `passage_id`.
+
+### Schema policy
+
+- **Do not** model dynamic provider objects as nested Parquet structs. Persist
+  `response_body_bytes` and extract typed scalar/list columns at write time.
+- **Do not** use the Parquet `Variant` type for semi-structured payloads
+  (interoperability risk across readers).
+- **Preserve lineage** — every output row carries source IDs and `schema_version`.
+- **`run.json` is catalog-only** — table schemas, row counts per table, mapping
+  from curated rows to source `response_id`s, and per-file checksums. No
+  duplicate raw payloads in JSON.
+
+### Write contract
+
+- Compression: **Zstandard** (`zstd`) via `sink_parquet(..., compression="zstd")`.
+- Enable **Parquet statistics** on write (column min/max/null counts for predicate
+  pushdown).
+- Sort curated and mart tables by primary retrieval keys before sink.
+- Write `raw_responses` first, then derive curated tables so `response_id`
+  lineage is consistent.
+- Run `validate.py` schema/key/null/range checks **before** every mart write;
+  refuse to sink invalid output.
+
+### Read contract
+
+- **LazyFrames end-to-end:** `pl.scan_parquet()` for every dataset; functions
+  accept and return `pl.LazyFrame`.
+- Apply filters and column projection **before** joins.
+- Join only on stable IDs: `run_id`, `target_keyword_id`, `canonical_url_hash`,
+  `response_id`, `passage_id`.
+- Materialize reusable marts with `sink_parquet`; use
+  `collect(engine="streaming")` only at CLI/report boundaries or when a
+  DataFrame is actually needed.
+- CLI: `seo-rank run --stored-run runs/{run_id}` selects a prior run tree for
+  orchestration replay. Explicit opt-in; missing slices fall back to fixtures
+  (offline) or gated live API calls.
+
+### CLI commands (Phase 4.5)
+
+```text
+seo-rank normalize --run RUN_ID
+seo-rank build-features --run RUN_ID
+seo-rank analyze --run RUN_ID --keyword "..."
+seo-rank replay --run RUN_ID --response-id ...
+```
+
+| Command | Action |
+|---------|--------|
+| `normalize` | `raw_responses` → curated tables |
+| `build-features` | curated → feature marts |
+| `analyze` | feature marts → `analysis_mart` (+ Phase 5 stats when shipped) |
+| `replay` | re-parse one `response_id` from `raw_responses` (audit/re-normalize) |
+
+## Polars data layer (Phase 4.5)
+
+All lake transforms live under `src/seo_rank/data/`. Every public function accepts
+and returns `pl.LazyFrame` so predicate and projection pushdown stay enabled
+through the pipeline.
+
+```text
+src/seo_rank/data/
+  scans.py        # run-scoped scan functions (one pl.scan_parquet per table)
+  normalize.py    # raw_responses → typed curated tables
+  features.py     # page, passage, domain, similarity feature marts
+  marts.py        # analysis-ready joins (Phase 5 prep)
+  validate.py     # schemas, keys, null/range checks before every sink
+```
+
+| Module | Responsibility |
+|--------|----------------|
+| `scans.py` | `scan_raw_responses(run_id)`, `scan_keywords(run_id)`, etc.; stable paths under `runs/{run_id}/parquet/` |
+| `normalize.py` | Parse `response_body_bytes` once; emit curated LazyFrames; no analytical reads of `raw_responses` elsewhere |
+| `features.py` | Build `keyword_serp`, `page_features`, `passage_features`, `domain_features` from curated scans |
+| `marts.py` | Join feature marts into `analysis_mart` at `target_keyword × SERP URL` grain |
+| `validate.py` | Schema contracts, primary/foreign keys, null and range checks; called before every `sink_parquet` |
+
+**Execution model:** scan lazily, filter/select early, join on IDs only, validate,
+then sink. Collect to eager DataFrames only at CLI boundaries, report generation,
+or tests that need in-memory assertions.
 
 ## Planned Page Similarity Run
 
@@ -331,6 +527,13 @@ before proceeding to Benjamini-Hochberg correction and run reporting.
   [Planned Page Similarity Run](#planned-page-similarity-run): per cluster keyword,
   top-20 SERP, then BGE, Gemini Doc Retrieval, and Gemini Semantic Similarity at
   page scope (passage and domain in Phase 5.5).
+- Phase 4.5 storage: run-scoped Parquet lake under `runs/{run_id}/` with
+  authoritative `raw_responses`, curated tables, feature marts, and
+  `analysis_mart`; Polars LazyFrame pipeline in `src/seo_rank/data/`; Zstd sinks
+  with validation before write; `collect(engine="streaming")` only at CLI/report
+  edges; CLI `normalize`, `build-features`, `analyze`, `replay`, and
+  `--stored-run`. No Parquet `Variant`; no nested provider schemas in curated
+  tables; `raw_responses` excluded from normal analytical joins.
 - Capture TextRazor entities for future work but exclude entity-derived features
   from the first ranking-variation model.
 - Continue filling in the real package under `src/seo_rank/` and add
