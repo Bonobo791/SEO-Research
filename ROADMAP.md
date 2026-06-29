@@ -119,3 +119,6 @@ layout, and dev slices.
 - **Phase 4.5 Slice 2 shipped:** stored `raw_responses` normalize into curated
   Parquet tables (`keywords`, `serp_items`, `pages`, `passages`, `entities`,
   `similarity_scores`) and refresh the run catalog from disk.
+- **Phase 4.5 Slice 3 started:** `src/seo_rank/data/` gained lazy raw-response
+  scan helpers and column validation helpers as the Polars data-layer
+  foundation.
