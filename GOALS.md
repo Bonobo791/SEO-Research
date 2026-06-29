@@ -17,10 +17,11 @@ group outputs under `keyword_results`, and annotate flattened rows with
 Phase 4 is in progress: page-level **fixture** scoring exposes **BGE**, **Gemini
 Doc Retrieval**, and **Gemini Semantic Similarity** per SERP row in offline and
 gated live artifact generation. **Optional live provider controls** (`--live-gemini`,
-`--live-textrazor`, env gates, hard failures) are shipped. **Live Gemini backend
+`--live-bge`, `--live-textrazor`, env gates, hard failures) are shipped. **Live Gemini backend
 execution is now wired** — live runs use real Gemini embeddings for
 `gemini_doc_retrieval` and `gemini_semantic_similarity` when `--live-gemini` is
-enabled. **Live BGE backend execution is not done yet**.
+enabled. **Live BGE backend execution is now wired** — live runs use a real
+FlagEmbedding reranker for `bge` when `--live-bge` is enabled.
 
 ### Phase 4 objective
 
@@ -51,11 +52,11 @@ local compute are available.
    env gates, and hard failures when flags or credentials are missing.
 6. **TextRazor live selection** — **done**: live TextRazor runs only when
    `--live-textrazor` is passed; default live runs skip entities.
-7. **Live similarity backends** — **in progress**: `gemini_embeddings.py` +
-   `gemini-embedding-2` scoring when `--live-gemini` is enabled are **done**;
-   FlagEmbedding BGE remains (see [Remaining live backend work](#remaining-live-backend-work)).
+7. **Live similarity backends** — **done**: `gemini_embeddings.py` +
+   `gemini-embedding-2` scoring when `--live-gemini` is enabled, plus
+   FlagEmbedding BGE when `--live-bge` is enabled.
 8. **Docs** — root contract and `pyproject.toml` `similarity` extra are **done**.
-   **Remaining:** opt-in Gemini integration tests when backends land.
+   **Remaining:** opt-in Gemini/BGE integration tests when backends land.
 
 ### Remaining live backend work
 
@@ -71,12 +72,18 @@ changes it:
 - `--live-providers` always enables live DataForSEO. There is no useful live run
   without it because DataForSEO provides keyword expansion, SERP results, and
   parsed page text.
+- `--live-bge` is optional and requires both `--live-providers` and an env
+  safety gate. If requested without its env gate, optional dependency, or CUDA
+  GPU, the CLI fails hard.
 - `--live-gemini` is optional and requires both `--live-providers` and an env
   safety gate. If requested without its env gate or credentials, the CLI fails
   hard.
 - `--live-textrazor` is optional and requires both `--live-providers` and an env
   safety gate. If requested without its env gate or credentials, the CLI fails
   hard.
+- If live BGE is not enabled, `page_similarity` still remains present in
+  artifacts and the `bge` field stays populated from deterministic fixtures for
+  comparability.
 - If live Gemini is not enabled, `page_similarity` still remains present in
   artifacts and Gemini fields stay populated from deterministic fixtures for
   comparability.
@@ -86,18 +93,20 @@ changes it:
 
 | # | Slice | Status |
 |---|-------|--------|
-| 1 | **Provider controls** — `--live-gemini`, `--live-textrazor`, env gates, hard validation | **Done** |
+| 1 | **Provider controls** — `--live-gemini`, `--live-bge`, `--live-textrazor`, env gates, hard validation | **Done** |
 | 2 | **Gemini live integration** — `gemini_embeddings.py`, real `gemini-embedding-2` scores when `--live-gemini` | **Done** |
 | 3 | **TextRazor live selection** — opt-in only via `--live-textrazor` | **Done** |
-| 4 | **BGE live integration** — FlagEmbedding reranker behind its own gate | **Remaining** |
-| 5 | **Docs and integration pass** — root docs done; `pyproject.toml` extra + Gemini integration tests pending | **In progress** |
+| 4 | **BGE live integration** — FlagEmbedding reranker behind its own gate | **Done** |
+| 5 | **Docs and integration pass** — root docs done; `pyproject.toml` extra + Gemini/BGE integration tests pending | **In progress** |
 
 **Touchpoints today**
 
 - Scoring entry point: `compute_page_similarity_scores()` in
-  `src/seo_rank/similarity.py` (**fixtures only** for all paths today).
+  `src/seo_rank/similarity.py` (fixtures for offline and default live paths).
+- Live BGE gate: `validate_live_bge_config()` in `cli.py` runs when
+  `--live-bge` is set and swaps in FlagEmbedding reranker scores.
 - Live Gemini gate: `validate_live_gemini_config()` in `cli.py` runs when
-  `--live-gemini` is set but does **not** swap in live embeddings yet.
+  `--live-gemini` is set and swaps in live embeddings.
 - Call sites: `build_offline_keyword_result()` and `build_live_keyword_result()`
   in `src/seo_rank/cli.py`.
 - Artifact shape under `page_similarity` (extend only with test + doc updates):
@@ -201,7 +210,7 @@ pytest stays network-free.
 
 ---
 
-#### Slice B — BGE (local cross-encoder) — **remaining**
+#### Slice B — BGE (local cross-encoder) — **done**
 
 **Goal:** When BGE live is enabled, replace the `bge` fixture path in live runs
 with a real FlagEmbedding **cross-encoder** reranker (not a bi-encoder embed

@@ -14,7 +14,7 @@ Pytest configuration and verification contract for SEO-Research.
   interpreter
 - Lint / type-check / build / coverage: not configured
 - Expected test duration: fast (< 1s)
-- **Current verification status:** 36 tests collected; 35 passing, 1 live
+- **Current verification status:** 42 tests collected; 41 passing, 1 live
   integration smoke skipped by default
 
 ## Active Verification Command
@@ -30,6 +30,7 @@ sets the gates explicitly:
 # In .env (loaded automatically):
 # SEO_RANK_RUN_LIVE_INTEGRATION=1
 # SEO_RANK_ENABLE_LIVE_PROVIDERS=1
+# SEO_RANK_ENABLE_BGE=1               # only if using --live-bge
 # SEO_RANK_ENABLE_GEMINI=1            # only if using --live-gemini
 # SEO_RANK_ENABLE_TEXTRAZOR=1         # only if using --live-textrazor
 # DATAFORSEO_LOGIN=...
@@ -54,6 +55,7 @@ placeholders only.
 | `test_keyword_expansion.py` | 25-keyword cap, deduplication, raw provider payload |
 | `test_serp_normalization.py` | Organic-only SERP rows, depth cap |
 | `test_env.py` | `.env` discovery, parsing, and override of shell exports |
+| `test_bge_reranker.py` | Live BGE GPU gate, pinned model loading, and batched score shaping |
 | `test_gemini_embeddings.py` | Live Gemini prompt formatting, model args, and score shaping with injected embeddings |
 | `test_passage_normalization.py` | Passage split, short-text filter |
 | `test_similarity_features.py` | Fixture passage aggregation plus BGE, Gemini Doc Retrieval, and Gemini Semantic Similarity page scoring |
@@ -86,7 +88,7 @@ exist.
 
 - Broader live DataForSEO / TextRazor integration coverage beyond smoke checks
 - **Phase 4 live similarity:** broader env-gated Gen AI SDK integration coverage
-  for `gemini-embedding-2`, plus local **BGE** (FlagEmbedding cross-encoder)
+  for `gemini-embedding-2`, plus opt-in live **BGE** (FlagEmbedding cross-encoder)
   beyond fixture page scoring
 - Passage / domain similarity scopes
 - `statsmodels` OLS and Benjamini-Hochberg on synthetic ranking panels

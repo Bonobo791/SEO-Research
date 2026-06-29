@@ -25,6 +25,10 @@ from seo_rank.dataforseo import (
     parsed_page_text,
     validate_dataforseo_credentials,
 )
+from seo_rank.bge_reranker import (
+    BgeRerankerError,
+    compute_bge_page_similarity_scores,
+)
 from seo_rank.gemini_embeddings import (
     GeminiEmbeddingError,
     compute_gemini_page_similarity_scores,
@@ -46,6 +50,7 @@ from seo_rank.textrazor import (
 )
 
 LIVE_PROVIDER_ENV_FLAG = "SEO_RANK_ENABLE_LIVE_PROVIDERS"
+LIVE_BGE_ENV_FLAG = "SEO_RANK_ENABLE_BGE"
 LIVE_GEMINI_ENV_FLAG = "SEO_RANK_ENABLE_GEMINI"
 LIVE_TEXTRAZOR_ENV_FLAG = "SEO_RANK_ENABLE_TEXTRAZOR"
 DEFAULT_DATAFORSEO_TRANSPORT = None
@@ -68,6 +73,7 @@ class RunConfig:
     dry_run: bool
     skip_textrazor: bool
     live_providers: bool = False
+    live_bge: bool = False
     live_gemini: bool = False
     live_textrazor: bool = False
 
@@ -99,6 +105,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             try:
                 write_live_artifacts(config, os.environ)
             except (
+                BgeRerankerError,
                 DataForSeoClientError,
                 GeminiEmbeddingError,
                 LiveProviderGateError,
@@ -134,6 +141,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run the env-gated live provider smoke path",
     )
+    run.add_argument("--live-bge", action="store_true")
     run.add_argument("--live-gemini", action="store_true")
     run.add_argument("--live-textrazor", action="store_true")
 
@@ -148,6 +156,8 @@ def positive_int(value: str) -> int:
 
 
 def config_from_args(args: argparse.Namespace) -> RunConfig:
+    if args.live_bge and not args.live_providers:
+        raise LiveProviderGateError("--live-bge requires --live-providers")
     if args.live_gemini and not args.live_providers:
         raise LiveProviderGateError("--live-gemini requires --live-providers")
     if args.live_textrazor and not args.live_providers:
@@ -164,6 +174,7 @@ def config_from_args(args: argparse.Namespace) -> RunConfig:
         dry_run=args.dry_run,
         skip_textrazor=args.skip_textrazor,
         live_providers=args.live_providers,
+        live_bge=args.live_bge,
         live_gemini=args.live_gemini,
         live_textrazor=args.live_textrazor,
     )
@@ -197,6 +208,10 @@ def validate_live_gemini_config(env: Mapping[str, str]) -> str:
             "Missing Gemini live configuration: " + ", ".join(errors)
         )
     return env["GEMINI_API_KEY"].strip()
+
+
+def validate_live_bge_config(env: Mapping[str, str]) -> None:
+    require_live_optional_env_flag(env, LIVE_BGE_ENV_FLAG)
 
 
 def validate_live_textrazor_config(env: Mapping[str, str]) -> TextRazorCredentials:
@@ -355,6 +370,10 @@ def build_live_payload(
     textrazor_transport,
 ) -> dict[str, object]:
     credentials = validate_live_provider_gate(env)
+    live_bge_enabled = False
+    if config.live_bge:
+        validate_live_bge_config(env)
+        live_bge_enabled = True
     gemini_api_key = validate_live_gemini_config(env) if config.live_gemini else None
     textrazor_credentials = (
         validate_live_textrazor_config(env) if config.live_textrazor else None
@@ -379,6 +398,7 @@ def build_live_payload(
             config,
             target_keyword=keyword,
             credentials=credentials,
+            live_bge_enabled=live_bge_enabled,
             gemini_api_key=gemini_api_key,
             textrazor_credentials=textrazor_credentials,
             location_code=location_code,
@@ -429,6 +449,7 @@ def build_live_keyword_result(
     *,
     target_keyword: str,
     credentials: LiveProviderCredentials,
+    live_bge_enabled: bool,
     gemini_api_key: str | None,
     textrazor_credentials: TextRazorCredentials | None,
     location_code: int,
@@ -499,6 +520,11 @@ def build_live_keyword_result(
     )
     if gemini_api_key is not None and parsed_pages:
         network_calls.append("genai.embed_content")
+    if live_bge_enabled:
+        similarity_scores = merge_bge_page_similarity_scores(
+            similarity_scores,
+            compute_bge_page_similarity_scores(target_keyword, parsed_pages),
+        )
     page_similarity = [
         annotate_target_keyword(score, target_keyword) for score in similarity_scores
     ]
@@ -555,6 +581,40 @@ def annotate_target_keyword(
     target_keyword: str,
 ) -> dict[str, object]:
     return {**row, "target_keyword": target_keyword}
+
+
+def merge_bge_page_similarity_scores(
+    base_scores: list[dict[str, object]],
+    bge_scores: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    bge_by_url = {
+        str(score["url"]): score["page_similarity"]["bge"]
+        for score in bge_scores
+        if isinstance(score.get("url"), str)
+        and isinstance(score.get("page_similarity"), dict)
+        and isinstance(score["page_similarity"].get("bge"), dict)
+    }
+    merged: list[dict[str, object]] = []
+    for score in base_scores:
+        url = score.get("url")
+        page_similarity = score.get("page_similarity")
+        if (
+            not isinstance(url, str)
+            or not isinstance(page_similarity, dict)
+            or url not in bge_by_url
+        ):
+            merged.append(score)
+            continue
+        merged.append(
+            {
+                **score,
+                "page_similarity": {
+                    **page_similarity,
+                    "bge": bge_by_url[url],
+                },
+            }
+        )
+    return merged
 
 
 def build_payload_from_keyword_results(

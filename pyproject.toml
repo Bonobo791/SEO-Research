@@ -12,7 +12,7 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
-similarity = ["google-genai>=1.0"]
+similarity = ["google-genai>=1.0", "FlagEmbedding>=1.2"]
 
 [project.scripts]
 seo-rank = "seo_rank.cli:main"

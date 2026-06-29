@@ -14,7 +14,7 @@
   offline-testable page-level fixtures for **BGE**, **Gemini Doc Retrieval**, and
   **Gemini Semantic Similarity**. **Live Gemini execution is wired for the CLI
   live path** via Gen AI SDK embeddings (`google-genai`, `gemini-embedding-2`).
-  **Live BGE execution is still pending** via `FlagEmbedding`
+  **Live BGE execution is wired for the CLI live path** via `FlagEmbedding`
   (local BGE cross-encoder) as an optional runtime dependency — see
   [Live similarity backends (Phase 4 remaining)](#live-similarity-backends-phase-4-remaining).
 - Deployment: none
@@ -42,8 +42,8 @@ now loop over every capped cluster keyword, group provider outputs under
 **Phase 4 in progress:** page-level similarity emits fixture scores for **BGE**,
 **Gemini Doc Retrieval**, and **Gemini Semantic Similarity** per SERP row in JSON
 and Markdown artifacts. **Live Gemini embeddings now replace the live-path Gemini
-fixtures** when `--live-gemini` is enabled. **Finishing Phase 4** still requires
-local BGE inference — see
+fixtures** when `--live-gemini` is enabled. **Live BGE reranking now replaces the
+live-path BGE fixture** when `--live-bge` is enabled — see
 [Live similarity backends (Phase 4 remaining)](#live-similarity-backends-phase-4-remaining).
 Later phases add `statsmodels` OLS with Benjamini-Hochberg after OLS pre-analysis
 diagnostics.
@@ -113,7 +113,7 @@ in code yet.
   path.
 - **Live similarity (Phase 4 remaining):** real **Gemini Doc Retrieval** +
   **Gemini Semantic Similarity** via Gen AI SDK (`gemini-embedding-2`) are
-  shipped behind `--live-gemini`; local **BGE** remains — see [Live similarity backends
+  shipped behind `--live-gemini`; local **BGE** is shipped behind `--live-bge` — see [Live similarity backends
   (Phase 4 remaining)](#live-similarity-backends-phase-4-remaining) and
   [Planned Page Similarity Run](#planned-page-similarity-run).
 - **Analysis engine (planned):** OLS pre-analysis, `statsmodels` OLS,
@@ -133,7 +133,7 @@ fields in `run.json` + `report.md`.
 **Planned live run (Phase 4 completion):** seed keyword → keyword expansion →
 per-keyword top-20 SERP → page text → TextRazor entities → **live** page
 similarity (Gemini Doc Retrieval + Gemini Semantic Similarity live under
-`--live-gemini`; BGE fixture until its live backend lands) → rank-feature join → OLS pre-analysis → `statsmodels` OLS →
+`--live-gemini`; BGE live under `--live-bge`) → rank-feature join → OLS pre-analysis → `statsmodels` OLS →
 Benjamini-Hochberg → report generation.
 
 Raw provider responses and generated run artifacts should stay out of source
@@ -162,8 +162,8 @@ results stay comparable run to run.
 ## Live similarity backends (Phase 4 remaining)
 
 Fixture scorers in `similarity.py` implement the artifact shape for offline
-runs today. **Phase 4 is not complete** until the live BGE path lands. Offline
-tests and `--dry-run` keep fixtures.
+runs today. Live paths swap in backend-specific scorers only when the matching
+flags and env gates are enabled. Offline tests and `--dry-run` keep fixtures.
 
 ### Gemini Doc Retrieval & Gemini Semantic Similarity (Gen AI SDK)
 
@@ -185,7 +185,7 @@ tests and `--dry-run` keep fixtures.
 | Model | BGE **reranker** (cross-encoder), e.g. pinned `BAAI/bge-reranker-v2-*` |
 | Query | Target keyword; prepend model-card instruction when required |
 | Scores | Relative rank within SERP (~0.6–1.0 typical); not calibrated vs Gemini |
-| Compute | Local GPU recommended; optional fp16; batch per keyword |
+| Compute | Local CUDA GPU required; fp16 enabled; batch per keyword |
 
 ### Analysis use
 

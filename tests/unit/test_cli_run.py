@@ -55,6 +55,7 @@ def test_run_writes_offline_json_and_markdown_artifacts(
         "dry_run": True,
         "skip_textrazor": True,
         "live_providers": False,
+        "live_bge": False,
         "live_gemini": False,
         "live_textrazor": False,
     }
@@ -330,6 +331,28 @@ def test_run_rejects_live_gemini_without_live_providers(
     assert "--live-gemini requires --live-providers" in captured.err
 
 
+def test_run_rejects_live_bge_without_live_providers(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--output-dir",
+            str(output_dir),
+            "--live-bge",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "--live-bge requires --live-providers" in captured.err
+
+
 def test_run_rejects_live_textrazor_without_live_providers(
     tmp_path: Path,
     capsys,
@@ -380,6 +403,34 @@ def test_run_rejects_live_gemini_without_env_gate_or_key(
     assert exit_code == 2
     assert "SEO_RANK_ENABLE_GEMINI=1" in captured.err
     assert "GEMINI_API_KEY" in captured.err
+
+
+def test_run_rejects_live_bge_without_env_gate(
+    tmp_path: Path,
+    capsys,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.setenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", "1")
+    monkeypatch.setenv("DATAFORSEO_LOGIN", "analyst@example.com")
+    monkeypatch.setenv("DATAFORSEO_PASSWORD", "dataforseo-secret")
+    monkeypatch.delenv("SEO_RANK_ENABLE_BGE", raising=False)
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--output-dir",
+            str(output_dir),
+            "--live-providers",
+            "--live-bge",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "SEO_RANK_ENABLE_BGE=1" in captured.err
 
 
 def test_run_live_gemini_uses_live_gemini_page_scores(
@@ -539,6 +590,150 @@ def test_run_live_gemini_uses_live_gemini_page_scores(
         "dataforseo.serp",
         "dataforseo.page_text",
         "genai.embed_content",
+    ]
+
+
+def test_run_live_bge_replaces_only_bge_page_scores(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.setenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", "1")
+    monkeypatch.setenv("SEO_RANK_ENABLE_BGE", "1")
+    monkeypatch.setenv("DATAFORSEO_LOGIN", "analyst@example.com")
+    monkeypatch.setenv("DATAFORSEO_PASSWORD", "dataforseo-secret")
+    bge_calls: list[dict[str, object]] = []
+
+    def dataforseo_transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        del method, headers, timeout
+        if url.endswith("/keywords_data/google_ads/keywords_for_keywords/live"):
+            return {
+                "tasks": [
+                    {
+                        "result": [
+                            {"keyword": "technical seo", "search_volume": 1000},
+                        ],
+                    }
+                ],
+            }
+        if url.endswith("/serp/google/organic/live/advanced"):
+            return {
+                "tasks": [
+                    {
+                        "result": [
+                            {
+                                "items": [
+                                    {
+                                        "type": "organic",
+                                        "rank_group": 1,
+                                        "url": "https://example.com/live",
+                                        "title": "SERP Result",
+                                        "description": "Live provider result.",
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        if url.endswith("/on_page/content_parsing/live"):
+            return {
+                "tasks": [
+                    {
+                        "result": [
+                            {
+                                "url": "https://example.com/live",
+                                "title": "Parsed Page",
+                                "text": "Technical SEO helps crawlers find pages.",
+                            }
+                        ],
+                    }
+                ],
+            }
+        raise AssertionError(f"unexpected DataForSEO URL: {url}")
+
+    def fake_compute_bge_scores(
+        keyword: str,
+        pages: list[dict[str, str]],
+        *,
+        load_reranker=None,
+    ) -> list[dict[str, object]]:
+        bge_calls.append(
+            {
+                "keyword": keyword,
+                "pages": pages,
+                "load_reranker": load_reranker,
+            }
+        )
+        return [
+            {
+                "url": "https://example.com/live",
+                "page_similarity": {
+                    "bge": {"raw_score": 7.0, "normalized_score": 0.999089}
+                },
+            }
+        ]
+
+    monkeypatch.setattr("seo_rank.cli.DEFAULT_DATAFORSEO_TRANSPORT", dataforseo_transport)
+    monkeypatch.setattr(
+        "seo_rank.cli.compute_bge_page_similarity_scores",
+        fake_compute_bge_scores,
+    )
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--output-dir",
+            str(output_dir),
+            "--live-providers",
+            "--live-bge",
+        ]
+    )
+
+    assert exit_code == 0
+    assert bge_calls == [
+        {
+            "keyword": "technical seo",
+            "pages": [
+                {
+                    "url": "https://example.com/live",
+                    "title": "Parsed Page",
+                    "text": "Technical SEO helps crawlers find pages.",
+                }
+            ],
+            "load_reranker": None,
+        }
+    ]
+
+    payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
+    assert payload["config"]["live_bge"] is True
+    assert payload["keyword_results"][0]["page_similarity"] == [
+        {
+            "url": "https://example.com/live",
+            "page_similarity": {
+                "bge": {"raw_score": 7.0, "normalized_score": 0.999089},
+                "gemini_doc_retrieval": {"raw_score": 1.0, "normalized_score": 1.0},
+                "gemini_semantic_similarity": {
+                    "raw_score": 1.0,
+                    "normalized_score": 1.0,
+                },
+            },
+            "target_keyword": "technical seo",
+        }
+    ]
+    assert payload["network_calls"] == [
+        "dataforseo.keyword_expansion",
+        "dataforseo.serp",
+        "dataforseo.page_text",
     ]
 
 

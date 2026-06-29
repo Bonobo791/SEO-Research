@@ -27,6 +27,8 @@ the shell. Values in `.env` override conflicting shell exports.
 Live-provider contract:
 
 - `--live-providers` always uses live DataForSEO.
+- `--live-bge` additionally enables live local BGE reranking and requires
+  `SEO_RANK_ENABLE_BGE=1` plus a CUDA GPU.
 - `--live-gemini` additionally enables Gemini live scoring and requires
   `SEO_RANK_ENABLE_GEMINI=1` plus `GEMINI_API_KEY`.
 - `--live-textrazor` additionally enables live TextRazor entity extraction and
@@ -47,10 +49,8 @@ Phase 4 adds three page-level measurements on each top-20 organic SERP row:
 | Gemini Doc Retrieval | `gemini_doc_retrieval` |
 | Gemini Semantic Similarity | `gemini_semantic_similarity` |
 
-Fixture wiring, artifact exposure, and live Gemini scoring are **done**. **Still
-required for Phase 4 completion:**
-
-- **BGE:** local `FlagEmbedding` cross-encoder reranker
+Fixture wiring, artifact exposure, live Gemini scoring, and live BGE scoring are
+**done**.
 
 Details: `GOALS.md` (developer instructions) and `ARCHITECTURE.md`.
 
