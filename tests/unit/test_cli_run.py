@@ -7,6 +7,52 @@ from seo_rank.dataforseo import DataForSeoClientError
 from seo_rank.cli import main
 
 
+def test_run_without_output_dir_writes_stable_default_run_directory(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
+
+    args = [
+        "run",
+        "--seed",
+        "Technical SEO / Audits!",
+        "--location",
+        "United States",
+        "--language",
+        "en",
+        "--device",
+        "desktop",
+        "--depth",
+        "1",
+        "--dry-run",
+        "--skip-textrazor",
+    ]
+
+    assert main(args) == 0
+
+    run_dirs = sorted((tmp_path / "runs").iterdir())
+    assert len(run_dirs) == 1
+    output_dir = run_dirs[0]
+    assert output_dir.name.startswith("technical-seo-audits-")
+    assert len(output_dir.name.rsplit("-", maxsplit=1)[-1]) == 12
+    assert (output_dir / "run.json").exists()
+    assert (output_dir / "report.md").exists()
+    assert (output_dir / "parquet" / "raw_responses").exists()
+
+    first_payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
+    assert first_payload["run_id"] == output_dir.name
+    assert first_payload["config"]["output_dir"] == str(Path("runs") / output_dir.name)
+
+    assert main(args) == 0
+
+    second_run_dirs = sorted((tmp_path / "runs").iterdir())
+    assert second_run_dirs == [output_dir]
+    second_payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
+    assert second_payload["run_id"] == first_payload["run_id"]
+
+
 def test_run_writes_offline_json_and_markdown_artifacts(
     tmp_path: Path,
     monkeypatch,

@@ -17,6 +17,7 @@ page scoring.
 
 ```bash
 python -m pytest
+seo-rank run --seed "technical seo" --dry-run
 seo-rank run --seed "technical seo" --dry-run --output-dir artifacts
 ```
 
@@ -50,23 +51,25 @@ on each top-20 organic SERP row:
 Offline and default live runs use deterministic fixtures. Opt-in flags swap in
 real backends when env gates and credentials are set.
 
-**Phase 4.5 (in progress):** run-scoped Parquet lake (`runs/{run_id}/` with
-authoritative `raw_responses`, curated tables, feature marts, and `analysis_mart`)
+**Phase 4.5 (shipped):** run-scoped Parquet lake (`runs/{run_id}/` by default
+when `--output-dir` is omitted, or an explicit override path when supplied) with
+authoritative `raw_responses`, curated tables, feature marts, and `analysis_mart`
 plus a Polars LazyFrame library in `src/seo_rank/data/` (`normalize_run`,
 `build_feature_marts`, `build_analysis_mart`). CLI commands `normalize`,
 `build-features`, `analyze`, and `replay` are wired; `run --stored-run` re-materializes
 marts from a stored run tree without provider calls.
-**Next:** round-trip test module and final doc pass (Slice 7). Later: passage/domain
-scopes (Phase 5.5), `statsmodels` OLS with Benjamini-Hochberg (Phase 5), and
-expanded report sections (Phase 6).
+**Slice 7 shipped:** docs alignment and the round-trip regression sweep are in
+place. **Next:** curated sink parity/statistics hardening in the Phase 4.5 write
+path. Later: passage/domain scopes (Phase 5.5), `statsmodels` OLS with
+Benjamini-Hochberg (Phase 5), and expanded report sections (Phase 6).
 
 Details: `GOALS.md` and `ARCHITECTURE.md` (see **Run-scoped Parquet lake** and
 **Polars data layer**).
 
 ### Storage layout (Phase 4.5)
 
-Library writes this layout via `--output-dir`; CLI subcommands materialize layers
-in place on an existing run tree.
+`seo-rank run` writes this layout under `runs/{run_id}/` when `--output-dir` is
+omitted. CLI subcommands materialize layers in place on an existing run tree.
 
 ```text
 runs/{run_id}/

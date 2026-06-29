@@ -84,11 +84,12 @@ The repository contains an **offline-verifiable CLI scaffold** (Phase 1 shipped)
 - **CLI:** `seo-rank run` writes `run.json` and `report.md` from fixtures (no
   network calls) or gated live providers; Phase 4.5 adds `normalize`,
   `build-features`, `analyze`, `replay`, and `run --stored-run` (Slice 6 shipped)
-- **Tests:** 66 tests under `tests/`; gate: `python -m pytest`
+- **Tests:** 67 tests under `tests/`; gate: `python -m pytest`; Phase 4.5 Slice 7
+  shipped the round-trip regression sweep in `test_sdlc_docs.py`
 - **Product docs:** `ARCHITECTURE.md`, `GOALS.md`, `ROADMAP.md`, `README.md`,
   `TESTING.md`
-- **Not yet:** `statsmodels` analysis (Phase 5); dedicated offline round-trip
-  test module (Phase 4.5 Slice 7)
+- **Not yet:** `statsmodels` analysis (Phase 5); curated sink parity/statistics
+  hardening in the Phase 4.5 write path
 
 Module and artifact details are in [Application Surface](#application-surface)
 and [Key Product Components](#key-product-components) below. Planned live
@@ -122,9 +123,10 @@ in code yet.
   and [Planned Page Similarity Run](#planned-page-similarity-run).
 - **Analysis engine (planned):** OLS pre-analysis, `statsmodels` OLS,
   Benjamini-Hochberg — see [Planned Per-Run Statistical Analysis](#planned-per-run-statistical-analysis).
-- **Reporters (shipped):** JSON + Markdown under `--output-dir`; Phase 4.5 adds
-  `runs/{run_id}/` Parquet lake + `run.json` catalog; Phase 6 expands report
-  narrative sections.
+- **Reporters (shipped):** JSON + Markdown under the selected run root;
+  `seo-rank run` defaults to `runs/{run_id}/` when `--output-dir` is omitted
+  and still supports explicit overrides. Phase 6 expands report narrative
+  sections.
 - **Storage (planned, Phase 4.5):** run-scoped Parquet lake with three processing
   layers — see [Run-scoped Parquet lake](#run-scoped-parquet-lake-phase-45) and
   [Polars data layer](#polars-data-layer-phase-45).

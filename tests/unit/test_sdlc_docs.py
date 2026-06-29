@@ -35,6 +35,8 @@ def test_readme_reflects_phase_four_capabilities() -> None:
     assert "What works today" in readme
     assert "Product direction" in readme
     assert "Phase 4 shipped" in readme
+    assert 'seo-rank run --seed "technical seo" --dry-run' in readme
+    assert "when `--output-dir` is omitted" in readme
     assert "--live-bge" in readme
     assert "--live-gemini" in readme
     assert "--live-textrazor" in readme
@@ -86,3 +88,22 @@ def test_pyproject_declares_runtime_parquet_and_polars_dependencies() -> None:
 
     assert "pyarrow>=21.0" in dependencies
     assert "polars>=1.0" in dependencies
+
+
+def test_phase_45_slice_7_regression_sweep_marks_round_trip_docs_as_shipped() -> None:
+    goals = (ROOT / "GOALS.md").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
+    architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
+    roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
+
+    assert "[x] Slice 7" in goals
+    assert "Slice 7 shipped" in goals
+    assert "7 acceptance items complete" in goals
+    assert "`runs/{run_id}/` layout written for each completed run by default when" in goals
+    assert "Slice 7 shipped" in readme
+    assert "round-trip regression sweep" in readme
+    assert "`seo-rank run` defaults to `runs/{run_id}/`" in architecture
+    assert "Dedicated Parquet lake write → normalize → build-features → analyze round-trip regression sweep" in testing
+    assert "round-trip regression sweep" in architecture
+    assert "Phase 4.5 Slice 7 shipped" in roadmap

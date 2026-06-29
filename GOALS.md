@@ -36,30 +36,31 @@ trees stay out of source control.
 
 #### Progress (2026-06-29)
 
-**Slices:** 5 of 7 shipped, 2 open. Phase 4.5 is not signed off.
+**Slices:** 7 of 7 shipped, 0 open. Phase 4.5 is not signed off pending write-contract hardening.
 
 | Slice | Status | Notes |
 | ----- | ------ | ----- |
-| 1 Raw lake | Shipped | `seo-rank run` writes `parquet/raw_responses/` + `run.json` catalog via `--output-dir` |
+| 1 Raw lake | Shipped | `seo-rank run` defaults to `runs/{run_id}/` and writes `parquet/raw_responses/` + `run.json` catalog; explicit `--output-dir` still overrides |
 | 2 Curated normalize | Shipped | `normalize_run()` → six curated tables; library + `test_run_normalize.py` |
 | 3 Polars data package | Shipped | `scans`, `validate`, `features`, `marts`, and lazy `normalize` (`scan_raw_responses` → endpoint filters → `map_batches` / `map_groups`); per-table `collect(engine="streaming")` at curated sink only |
 | 4 Feature marts | Shipped | `build_feature_marts()` with lazy joins; `test_feature_marts.py` |
 | 5 Analysis mart | Shipped | `build_analysis_mart()` + `marts.build_analysis_lazyframe`; `test_analysis_mart.py` |
 | 6 CLI surfaces | Shipped | `seo-rank normalize`, `build-features`, `analyze`, `replay`, and `run --stored-run` replay the stored run tree without refetching provider payloads |
-| 7 Deps + docs + round-trip | Partial | `pyarrow` and `polars` declared; curated sinks still use PyArrow not Polars `sink_parquet`; chained round-trip in `test_analysis_mart.py` only |
+| 7 Deps + docs + round-trip | Shipped | `pyarrow` and `polars` declared; docs aligned; round-trip regression sweep pins the shipped slice state |
+
+**Slice 7 shipped:** docs alignment and the round-trip regression sweep are in place.
 
 **Library API (callable, with CLI surfaces):** `normalize_run`,
 `build_feature_marts`, `build_analysis_mart` under `src/seo_rank/data/`.
 
-**Remaining to close Phase 4.5:** dedicated round-trip test, curated
-`sink_parquet` alignment, final doc alignment pass.
+**Remaining to close Phase 4.5:** curated `sink_parquet` alignment and row-group statistics on the write path.
 
 **Residual risk:** curated normalization stays lazy through the Polars plan, but
 batch-level Python UDFs still parse JSON (`response_body_bytes`), split passages,
 normalize entities, and compute per-keyword similarity groups. Each curated table
 also collects once at the write boundary (PyArrow sink today).
 
-**Next useful slice:** deps/docs/round-trip (Slice 7).
+**Next useful slice:** curated sink parity/statistics.
 
 #### Polars data layer
 
@@ -152,13 +153,12 @@ first. Downstream commands scan lazily and sink only the marts they own.
 ### Dev slices
 
 1. **[x] Slice 1 — Raw lake foundation** — persist completed runs under
-   `runs/{run_id}/`, write authoritative `raw_responses` Parquet partitioned only
-   by `endpoint`, and extend `run.json` into a lightweight catalog with schema
-   version, row counts, source `response_id`s, and file checksums. Keep this slice
-   limited to the write path for fetched provider HTTP responses plus offline tests
-   that prove deterministic layout and metadata. *(Shipped: write path + catalog for
-   `raw_responses`; CLI uses `--output-dir` rather than enforcing `runs/{run_id}/`
-   path.)*
+   `runs/{run_id}/` by default when `--output-dir` is omitted, write authoritative
+   `raw_responses` Parquet partitioned only by `endpoint`, and extend `run.json`
+   into a lightweight catalog with schema version, row counts, source
+   `response_id`s, and file checksums. Keep this slice limited to the write path
+   for fetched provider HTTP responses plus offline tests that prove deterministic
+   layout and metadata. Explicit `--output-dir` overrides remain supported.
 2. **[x] Slice 2 — Curated normalization from storage** — parse stored
    `raw_responses` into typed Parquet tables for `keywords`, `serp_items`,
    `pages`, `passages`, `entities`, and `similarity_scores`, preserving
@@ -180,13 +180,14 @@ first. Downstream commands scan lazily and sink only the marts they own.
 6. **[x] Slice 6 — CLI and stored-run surfaces** — `normalize`,
    `build-features`, `analyze`, and `replay` subcommands, plus explicit
    `seo-rank run --stored-run runs/{run_id}` reload behavior.
-7. **[ ] Slice 7 — Dependencies, docs, and round-trip verification** — align
+7. **[x] Slice 7 — Dependencies, docs, and round-trip verification** — align
    `ARCHITECTURE.md`, `TESTING.md`, `ROADMAP.md`, `README.md`, and `.env.example`
-   as needed, and prove the offline write → normalize → build-features → analyze
-   round-trip plus single-response replay. *(Partial: `pyarrow` and `polars`
-   declared; `test_analysis_mart.py` chains run → normalize → feature marts →
-   analysis mart; `test_cli_surfaces.py` covers CLI dispatch; no dedicated
-   round-trip test file.)*
+   as needed, and pin the offline write → normalize → build-features → analyze
+   round-trip regression sweep plus single-response replay. *(Shipped: docs are
+   aligned, `test_sdlc_docs.py` guards the slice-state wording, `test_analysis_mart.py`
+   chains run → normalize → feature marts → analysis mart, `test_round_trip.py`
+   covers the CLI write → normalize → build-features → analyze round trip, and
+   `test_cli_surfaces.py` covers CLI dispatch.)*
 
 See `ROADMAP.md` for Phase 5 (OLS) and Phase 5.5 (passage/domain scoring).
 
@@ -213,15 +214,15 @@ See `ROADMAP.md` for Phase 5 (OLS) and Phase 5.5 (passage/domain scoring).
 
 ## Phase 4.5 acceptance criteria
 
-**Status (2026-06-29):** 6 acceptance items complete, 5 partial, 0 not started
-(CLI). Dev slices: 6 shipped, 1 open (Slice 7). Phase 4.5 is not signed off
-until Slice 7 closes.
+**Status (2026-06-29):** 7 acceptance items complete, 4 partial, 0 not started.
+Dev slices: 7 shipped, 0 open. Phase 4.5 is not signed off pending write-contract
+hardening.
 
-- [ ] `runs/{run_id}/` layout written for each completed run with `run.json`
-  catalog (schemas, row counts, source response IDs, file checksums; no duplicate
-  raw payloads). *(Partial: lake layout + catalog ship under `--output-dir`; canonical
-  `runs/{run_id}/` path not enforced; full multi-layer catalog requires library
-  calls after `run`.)*
+- [x] `runs/{run_id}/` layout written for each completed run by default when
+  `--output-dir` is omitted, with `run.json` catalog (schemas, row counts, source
+  response IDs, file checksums; no duplicate raw payloads). Explicit
+  `--output-dir` overrides remain supported. *(Partial only for the full
+  multi-layer catalog, which still requires library calls after `run`.)*
 - [x] `raw_responses` stores one row per DataForSEO HTTP response with
   `response_body_bytes`, metadata, status, and SHA-256; partitioned only by
   `endpoint`.
@@ -250,11 +251,11 @@ until Slice 7 closes.
 - [ ] Offline unit tests cover write → normalize → build-features → analyze
   round-trip without network calls. *(Partial: `test_analysis_mart.py` chains the
   full pipeline after `seo-rank run --dry-run`; per-layer tests in `test_cli_run`,
-  `test_run_normalize`, and `test_feature_marts`; no dedicated round-trip test
-  module.)*
-- [ ] `polars` + `pyarrow` declared in `pyproject.toml`; docs updated. *(Partial:
-  both declared; Slice 6 CLI docs updated in `README.md` and `ARCHITECTURE.md`;
-  Slice 7 round-trip test module remains.)*
+  `test_run_normalize`, and `test_feature_marts`; docs/regression sweep now ship in
+  `test_sdlc_docs.py`.)*
+- [x] `polars` + `pyarrow` declared in `pyproject.toml`; docs updated. *(Shipped:
+  both declared; Slice 7 docs alignment landed in `README.md`, `TESTING.md`,
+  `ARCHITECTURE.md`, and `ROADMAP.md`.)*
 
 ## Phase 4 acceptance criteria (complete)
 

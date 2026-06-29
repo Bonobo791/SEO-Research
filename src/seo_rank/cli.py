@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
@@ -200,7 +201,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--language", default="en")
     run.add_argument("--device", choices=["desktop", "mobile"], default="desktop")
     run.add_argument("--depth", type=positive_int, default=20)
-    run.add_argument("--output-dir", type=Path, default=Path("artifacts"))
+    run.add_argument("--output-dir", type=Path)
     run.add_argument("--model-name", default="fixture-similarity-v1")
     run.add_argument("--javascript-parsing", action="store_true")
     run.add_argument("--dry-run", action="store_true")
@@ -262,13 +263,16 @@ def config_from_args(args: argparse.Namespace) -> RunConfig:
         raise LiveProviderGateError("--live-gemini requires --live-providers")
     if args.live_textrazor and not args.live_providers:
         raise LiveProviderGateError("--live-textrazor requires --live-providers")
+    output_dir = (
+        args.stored_run if args.stored_run is not None else select_run_output_dir(args)
+    )
     return RunConfig(
         seed=args.seed,
         location=args.location,
         language=args.language,
         device=args.device,
         depth=args.depth,
-        output_dir=args.stored_run if args.stored_run is not None else args.output_dir,
+        output_dir=output_dir,
         model_name=args.model_name,
         javascript_parsing=args.javascript_parsing,
         dry_run=args.dry_run,
@@ -278,6 +282,43 @@ def config_from_args(args: argparse.Namespace) -> RunConfig:
         live_gemini=args.live_gemini,
         live_textrazor=args.live_textrazor,
     )
+
+
+def select_run_output_dir(args: argparse.Namespace) -> Path:
+    if args.output_dir is not None:
+        return args.output_dir
+    return Path("runs") / default_run_id(args)
+
+
+def default_run_id(args: argparse.Namespace) -> str:
+    serialized = serialized_run_config_from_args(args)
+    digest = hashlib.sha256(
+        json.dumps(serialized, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()[:12]
+    return f"{seed_slug(str(serialized['seed']))}-{digest}"
+
+
+def serialized_run_config_from_args(args: argparse.Namespace) -> dict[str, object]:
+    return {
+        "seed": args.seed,
+        "location": args.location,
+        "language": args.language,
+        "device": args.device,
+        "depth": args.depth,
+        "model_name": args.model_name,
+        "javascript_parsing": args.javascript_parsing,
+        "dry_run": args.dry_run,
+        "skip_textrazor": args.skip_textrazor,
+        "live_providers": args.live_providers,
+        "live_bge": args.live_bge,
+        "live_gemini": args.live_gemini,
+        "live_textrazor": args.live_textrazor,
+    }
+
+
+def seed_slug(seed: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", seed.lower()).strip("-")
+    return slug or "run"
 
 
 def validate_live_provider_gate(env: Mapping[str, str]) -> LiveProviderCredentials:

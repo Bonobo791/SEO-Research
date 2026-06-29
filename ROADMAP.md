@@ -138,3 +138,6 @@ layout, and dev slices. Slice-scoped hardening and polish: `FIXUPS.md`.
 - **Phase 4.5 Slice 6 shipped:** CLI surfaces `normalize`, `build-features`,
   `analyze`, and `replay`; `run --stored-run` re-materializes marts from a stored
   run tree without provider calls. Unit coverage in `test_cli_surfaces.py`.
+- **Phase 4.5 Slice 7 shipped:** docs alignment and the round-trip regression
+  sweep landed in `test_sdlc_docs.py`; Phase 4.5 slice status now reflects the
+  shipped doc/verification state.

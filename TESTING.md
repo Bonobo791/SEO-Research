@@ -14,7 +14,7 @@ Pytest configuration and verification contract for SEO-Research.
   interpreter
 - Lint / type-check / build / coverage: not configured
 - Expected test duration: fast (< 1s)
-- **Current verification status:** 66 tests collected; 65 passing, 1 live
+- **Current verification status:** 68 tests collected; 67 passing, 1 live
   integration smoke skipped by default
 
 ## Active Verification Command
@@ -58,6 +58,7 @@ placeholders only.
 | `test_data_marts.py` | Analysis mart lazy join lives in `seo_rank.data.marts` and preserves the feature-mart contract |
 | `test_feature_marts.py` | Curated tables materialize lazy feature marts, validate before sink, and refresh the run catalog |
 | `test_analysis_mart.py` | Feature marts materialize the lazy analysis mart, validate before sink, and refresh the run catalog |
+| `test_round_trip.py` | Dedicated Parquet lake write → normalize → build-features → analyze round-trip regression sweep on real Parquet artifacts; validates `run.json` updates and keyword-filtered `analyze` output |
 | `test_keyword_expansion.py` | 25-keyword cap, deduplication, raw provider payload |
 | `test_serp_normalization.py` | Organic-only SERP rows, depth cap |
 | `test_env.py` | `.env` discovery, parsing, and override of shell exports |
@@ -67,7 +68,7 @@ placeholders only.
 | `test_similarity_features.py` | Fixture passage aggregation plus BGE, Gemini Doc Retrieval, and Gemini Semantic Similarity page scoring |
 | `test_textrazor_normalization.py` | Entity schema normalization |
 | `test_textrazor_requests.py` | TextRazor parsed-text request construction, credential validation, HTTP execution |
-| `test_sdlc_docs.py` | GOALS/ROADMAP/README guards and manifest pytest commands |
+| `test_sdlc_docs.py` | GOALS/ROADMAP/README/TESTING/ARCHITECTURE guards, manifest pytest commands, and the Slice 7 round-trip regression sweep |
 | `test_live_provider_smoke.py` | Env-gated DataForSEO smoke path with optional live TextRazor, Gemini, and BGE opt-ins |
 | `test_live_provider_smoke_config.py` | Optional live similarity flags are included in smoke runs when their env gates are enabled |
 
@@ -93,9 +94,6 @@ exist.
 
 ## Planned tests (not yet in suite)
 
-- Dedicated Parquet lake write → `normalize` → `build-features` → `analyze`
-  round-trip module (offline fixtures; no network) — partial coverage exists in
-  `test_analysis_mart.py` and `test_cli_surfaces.py` (mocked dispatch)
 - Feature marts and `analysis_mart` join keys (`run_id`, `target_keyword_id`,
   `canonical_url_hash`, `response_id`, `passage_id`)
 - `validate.py` refuses invalid schema/key/null/range output before sink
@@ -104,8 +102,6 @@ exist.
   before every write; feature/analysis marts use Polars `sink_parquet` with
   `compression="zstd"`; curated tables use PyArrow today;
   `collect(engine="streaming")` only at sink/CLI edges
-- Broader live DataForSEO / TextRazor integration coverage beyond smoke checks
-- Deeper end-to-end live similarity validation beyond env-gated smoke paths
 - Passage / domain similarity scopes (feature marts; Phase 5.5 scoring)
 - `statsmodels` OLS and Benjamini-Hochberg on `analysis_mart` panels
 - OLS pre-analysis diagnostic loop
