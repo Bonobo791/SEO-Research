@@ -9,6 +9,14 @@ blocks Slice 10 sign-off unless marked **required**.
 
 ---
 
+## Phase 4.75 — page_text normalization polish
+
+| ID | Fix | Phase | Priority | Status |
+| --- | --- | --- | --- | --- |
+| S475-01 | Skip empty `page_text` rows in `build_pages_and_passages_frame`: `continue` when `parsed_page_text()` yields no URL and no text (mirrors CLI `if page_text` filter); avoids empty `pages` rows and duplicate `page_id` warnings from crawl failures (e.g. `crawl_status: "Page content is empty"`) | 4.75 | nice-to-have | open |
+
+---
+
 ## Phase 4.5 — Slice 3 (post-ship hardening)
 
 Polish on the shipped lazy normalize path. Safe to batch after Slice 7 starts

@@ -22,10 +22,13 @@ def test_goals_and_roadmap_define_active_scope_and_backlog() -> None:
 
     assert "active-scope contract" in goals
     assert "Active Objective" in goals
-    assert "Phase 4.5" in goals
-    assert "Phase 4 acceptance criteria (complete)" in goals
+    assert "Phase 4.75" in goals
+    assert "Phase 4.75 objective" in goals
+    assert "Phase 4.5" not in goals
+    assert "Phase 4 acceptance criteria" not in goals
     assert "Current Backlog" in roadmap
-    assert "Phase 4.5" in roadmap
+    assert "Phase 4.75" in roadmap
+    assert "Phase 4.5 signed off" in roadmap
     assert "Phase 4 shipped" in roadmap
 
 
@@ -91,35 +94,28 @@ def test_pyproject_declares_runtime_parquet_and_polars_dependencies() -> None:
 
 
 def test_phase_45_slice_7_regression_sweep_marks_round_trip_docs_as_shipped() -> None:
-    goals = (ROOT / "GOALS.md").read_text(encoding="utf-8")
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
     architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
     roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
 
-    assert "[x] Slice 7" in goals
-    assert "Slice 7 shipped" in goals
-    assert "`runs/{run_id}/` layout written for each completed run by default when" in goals
+    assert "Phase 4.5 Slice 7 shipped" in roadmap
+    assert "Phase 4.5 signed off" in roadmap
     assert "Slice 7 shipped" in readme
     assert "round-trip regression sweep" in readme
     assert "`seo-rank run` defaults to `runs/{run_id}/`" in architecture
     assert "Dedicated Parquet lake write → normalize → build-features → analyze round-trip regression sweep" in testing
     assert "round-trip regression sweep" in architecture
-    assert "Phase 4.5 Slice 7 shipped" in roadmap
 
 
 def test_phase_45_slice_9_regression_sweep_marks_mart_sink_docs_as_shipped() -> None:
-    goals = (ROOT / "GOALS.md").read_text(encoding="utf-8")
+    roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
     testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
     architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
 
-    assert "[x] Slice 9" in goals
-    assert "Slice 9 shipped" in goals
-    assert "[x] Slice 10" in goals
-    assert "Slice 10 shipped" in goals
-    assert "10 of 10 shipped, 0 open" in goals
-    assert "11 acceptance items complete" in goals
-    assert "drop eager `collect` + `write_parquet` in `write_feature_dataset`" in goals
+    assert "Phase 4.5 Slice 9 shipped" in roadmap
+    assert "Phase 4.5 Slice 10 shipped" in roadmap
+    assert "Phase 4.5 signed off" in roadmap
     assert "74 tests" in architecture
     assert "74 tests collected" in testing
     assert "sink feature marts lazily with Parquet statistics" in testing

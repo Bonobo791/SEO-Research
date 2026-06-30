@@ -7,7 +7,10 @@ import pyarrow.dataset as ds
 from seo_rank.cli import main
 from seo_rank.data.normalize import (
     CURATED_SCHEMAS,
+    CURATED_VALIDATION_RULES,
+    build_entities_frame,
     build_similarity_scores_frame,
+    build_pages_and_passages_frame,
     normalize_run,
     write_curated_dataset,
 )
@@ -62,7 +65,7 @@ def test_normalize_run_materializes_curated_tables_from_raw_responses(
     assert any(row["target_keyword_id"] for row in keywords)
     assert any(row["url"] == "https://example.com/technical-seo/1" for row in pages)
     assert any(row["response_id"] for row in pages)
-    assert any(row["passage_id"].endswith("#p1") for row in passages)
+    assert len({row["passage_id"] for row in passages}) == len(passages)
     assert any(row["bge_raw_score"] == 0.98 for row in scores)
 
     run_json = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
@@ -118,6 +121,82 @@ def test_build_similarity_scores_frame_handles_empty_group() -> None:
 
     result = build_similarity_scores_frame(frame, run_id="run-1")
 
+    assert result.is_empty()
+
+
+def test_build_pages_and_passages_frame_parses_nested_page_content() -> None:
+    frame = pl.DataFrame(
+        [
+            {
+                "response_id": "resp-1",
+                "target_keyword": "technical seo",
+                "response_body_bytes": (
+                    b'{"tasks":[{"data":{"url":"https://example.com/page"},"result":['
+                    b'{"items":[{"page_content":{"main_topic":[{"primary_content":['
+                    b'{"text":"Technical SEO intro paragraph with enough words."},'
+                    b'{"text":"Site structure matters for crawlability and indexation."}'
+                    b']}]},"header":{"primary_content":[{"text":"Header text."}]}}]}]}]}'
+                ),
+            }
+        ]
+    )
+
+    result = build_pages_and_passages_frame(frame, run_id="run-1")
+    rows = result.to_dicts()
+
+    assert any(row["url"] == "https://example.com/page" for row in rows if row.get("passage_id") is None)
+    assert any(
+        "Technical SEO intro paragraph" in row["text"]
+        for row in rows
+        if row.get("passage_id") is not None
+    )
+
+
+def test_build_pages_and_passages_frame_keeps_passage_ids_unique_across_keywords() -> None:
+    response_bytes = (
+        b'{"tasks":[{"data":{"url":"https://example.com/page"},"result":['
+        b'{"items":[{"page_content":{"main_topic":[{"primary_content":['
+        b'{"text":"Technical SEO intro paragraph with enough words."},'
+        b'{"text":"Site structure matters for crawlability and indexation."}'
+        b']}]} }]}]}]}'
+    )
+    frame = pl.DataFrame(
+        [
+            {
+                "response_id": "resp-1",
+                "target_keyword": "technical seo",
+                "response_body_bytes": response_bytes,
+            },
+            {
+                "response_id": "resp-2",
+                "target_keyword": "technical seo agencies",
+                "response_body_bytes": response_bytes,
+            },
+        ]
+    )
+
+    rows = build_pages_and_passages_frame(frame, run_id="run-1").to_dicts()
+    passage_ids = [row["passage_id"] for row in rows if row.get("passage_id") is not None]
+
+    assert len(passage_ids) == len(set(passage_ids))
+
+
+def test_build_entities_frame_returns_typed_empty_frame_when_no_entities() -> None:
+    frame = pl.DataFrame(
+        [
+            {
+                "response_id": "resp-1",
+                "target_keyword": "technical seo",
+                "response_body_bytes": (
+                    b'{"response":{"entities":[]}}'
+                ),
+            }
+        ]
+    )
+
+    result = build_entities_frame(frame, run_id="run-1")
+
+    assert result.schema == CURATED_VALIDATION_RULES["entities"]["expected_schema"]
     assert result.is_empty()
 
 

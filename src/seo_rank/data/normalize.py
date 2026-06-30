@@ -13,7 +13,11 @@ from seo_rank.data.validate import (
     validate_frame_contract,
     validate_materialized_frame_contract,
 )
-from seo_rank.dataforseo import normalize_keyword_expansion, normalize_serp_results
+from seo_rank.dataforseo import (
+    normalize_keyword_expansion,
+    normalize_serp_results,
+    parsed_page_text,
+)
 from seo_rank.similarity import compute_page_similarity_scores
 from seo_rank.text import normalize_page_text
 from seo_rank.textrazor import normalize_entities
@@ -525,10 +529,10 @@ def build_pages_and_passages_frame(
         target_keyword = str(record["target_keyword"])
         target_keyword_id = stable_id(target_keyword)
         body = json.loads(bytes(record["response_body_bytes"]).decode("utf-8"))
-        page = body["tasks"][0]["result"][0]
-        url = str(page["url"])
-        title = str(page["title"])
-        text = str(page["text"]).strip()
+        page = parsed_page_text(body)
+        url = str(page.get("url", ""))
+        title = str(page.get("title", ""))
+        text = str(page.get("text", "")).strip()
         canonical_url_hash = stable_id(url)
         page_id = stable_id(run_id, target_keyword, url)
         rows.append(
@@ -555,7 +559,7 @@ def build_pages_and_passages_frame(
                     "page_id": page_id,
                     "canonical_url_hash": canonical_url_hash,
                     "url": url,
-                    "passage_id": passage["passage_id"],
+                    "passage_id": stable_id(page_id, passage["passage_id"]),
                     "source": passage["source"],
                     "text": passage["text"],
                     "word_count": int(passage["word_count"]),
@@ -598,6 +602,10 @@ def build_entities_frame(frame: pl.DataFrame, *, run_id: str) -> pl.DataFrame:
                     "schema_version": CURATED_SCHEMA_VERSION,
                 }
             )
+    if not rows:
+        return pl.DataFrame(
+            schema=CURATED_VALIDATION_RULES["entities"]["expected_schema"]
+        )
     return pl.DataFrame(rows)
 
 

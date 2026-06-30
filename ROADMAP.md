@@ -5,36 +5,21 @@ scope contract; keep deferred and historical items here.
 
 ## Current Backlog
 
-Active scope contract: `GOALS.md` (Phase 4.5).
+Active scope contract: `GOALS.md` (Phase 4.75).
 
-### Phase 4.5 — Run-scoped Parquet lake (Polars)
+### Phase 4.75 — page_text curation hardening
 
-Active contract: `GOALS.md` § Phase 4.5 objective, Polars data layer, storage
-layout, and dev slices. Slice-scoped hardening and polish: `FIXUPS.md`.
+Active contract: `GOALS.md` § Phase 4.75 objective and dev slices. Related
+polish: `FIXUPS.md` § Phase 4.75.
 
-- **Run-scoped layout** under `runs/{run_id}/`: authoritative `raw_responses`
-  (one row per DataForSEO HTTP response, partitioned by `endpoint` only), curated
-  tables, feature marts, and `analysis_mart`.
-- **`src/seo_rank/data/`** — `scans.py`, `normalize.py`, `features.py`,
-  `marts.py`, `validate.py`; LazyFrames end-to-end (`pl.scan_parquet()` in,
-  `pl.LazyFrame` between transforms, `sink_parquet` out).
-- **Three processing layers** — curated (`normalize`) → feature marts
-  (`keyword_serp`, `page_features`, `passage_features`, `domain_features`) →
-  analysis mart (one row per `target_keyword × SERP URL`).
-- **Join contract** — filter/select before joins; stable IDs only (`run_id`,
-  `target_keyword_id`, `canonical_url_hash`, `response_id`, `passage_id`);
-  `raw_responses` excluded from normal analytical joins.
-- **Write contract** — `validate.py` before every sink; Zstandard compression,
-  Parquet statistics, sorted retrieval keys; `collect(engine="streaming")` only at
-  CLI/report boundaries.
-- **CLI** — `normalize`, `build-features`, `analyze`, `replay`; `--stored-run`
-  on `run` for stored-input replay.
-- **`run.json` catalog** — schemas, row counts, source response IDs, file
-  checksums; no duplicate raw payloads.
-- **Schema policy** — raw body as `response_body_bytes` + extracted typed
-  columns; `schema_version` on every output; no nested provider objects; no
-  Parquet `Variant` type.
-- File-based storage; no server database.
+- **Shared decoder** — `parsed_page_text()` is the single extractor for live and
+  stored `page_text` payloads; normalization must not re-index raw JSON ad hoc.
+- **Multi-region text** — merge `header` and other `page_content` keys into page
+  `text`, not only `main_topic` sections.
+- **Empty crawl filter** — skip responses with no URL and no text before writing
+  `pages` / `passages` (align with CLI `if page_text`).
+- **Tests** — `test_dataforseo_requests.py`, `test_run_normalize.py`; re-normalize
+  smoke on stored live runs.
 
 ### Phase 5 — Statistical analysis
 
@@ -108,36 +93,46 @@ layout, and dev slices. Slice-scoped hardening and polish: `FIXUPS.md`.
   - Unit tests for prompt formatting, CLI path selection, and BGE batching; env-gated
     integration smoke with optional Gemini/BGE flags.
 - **GOALS retargeted to Phase 4.5:** run-scoped Parquet lake storage.
-- **Phase 4.5 scoped:** `GOALS.md` expanded with run-scoped Parquet architecture
-  (`raw_responses`, curated tables, feature marts, `analysis_mart`), Polars
-  LazyFrame data package (`src/seo_rank/data/`), CLI `normalize` / `build-features`
-  / `analyze` / `replay`, and validation-before-sink contract. Backlog § Phase 4.5
-  aligned to the same contract.
-- **Phase 4.5 Slice 1 shipped:** `seo-rank run` now writes run-scoped
-  `raw_responses` Parquet partitions plus `run.json` catalog metadata without
-  duplicating raw payloads in JSON.
+- **Phase 4.5 scoped:** run-scoped Parquet architecture (`raw_responses`, curated
+  tables, feature marts, `analysis_mart`), Polars LazyFrame data package
+  (`src/seo_rank/data/`), CLI `normalize` / `build-features` / `analyze` /
+  `replay`, and validation-before-sink contract.
+- **Phase 4.5 Slice 1 shipped:** `seo-rank run` writes run-scoped `raw_responses`
+  Parquet partitions plus `run.json` catalog metadata without duplicating raw
+  payloads in JSON.
 - **Phase 4.5 Slice 2 shipped:** stored `raw_responses` normalize into curated
   Parquet tables (`keywords`, `serp_items`, `pages`, `passages`, `entities`,
   `similarity_scores`) and refresh the run catalog from disk.
-- **Phase 4.5 Slice 3 started:** `src/seo_rank/data/` gained lazy raw-response
-  scan helpers and column validation helpers as the Polars data-layer
-  foundation.
-- **Phase 4.5 Slice 3 advanced:** stored-run curated normalization now builds
-  LazyFrames before the write boundary and reads raw responses through the lazy
-  scan helper; feature and analysis mart writes now validate before sink.
-- **Phase 4.5 Slice 3 shipped:** `normalize_run()` no longer eagerly loads all
-  raw rows; it scans `raw_responses`, filters by `endpoint`, and normalizes via
-  lazy `map_batches` / `map_groups` UDFs with per-table streaming collect at
-  sink. Residual: batch-level Python UDFs for JSON parsing and similarity
-  grouping; curated writes still use PyArrow (not Polars `sink_parquet`).
-- **Phase 4.5 Slice 4 shipped:** feature marts (`keyword_serp`,
-  `page_features`, `passage_features`, `domain_features`) are now materialized
-  from curated tables via lazy Polars joins.
-- **Phase 4.5 Slice 5 shipped:** `analysis_mart` now materializes as a lazy
-  panel joined from feature marts and written back into the run-scoped lake.
+- **Phase 4.5 Slice 3 shipped:** `normalize_run()` scans `raw_responses`, filters
+  by `endpoint`, and normalizes via lazy `map_batches` / `map_groups` UDFs with
+  per-table streaming collect at sink. Package: `scans`, `normalize`, `features`,
+  `marts`, `validate` under `src/seo_rank/data/`.
+- **Phase 4.5 Slice 4 shipped:** feature marts (`keyword_serp`, `page_features`,
+  `passage_features`, `domain_features`) materialized from curated tables via lazy
+  Polars joins.
+- **Phase 4.5 Slice 5 shipped:** `analysis_mart` materializes as a lazy panel
+  joined from feature marts (one row per `target_keyword × SERP URL`);
+  `raw_responses` excluded from analytical joins.
 - **Phase 4.5 Slice 6 shipped:** CLI surfaces `normalize`, `build-features`,
   `analyze`, and `replay`; `run --stored-run` re-materializes marts from a stored
-  run tree without provider calls. Unit coverage in `test_cli_surfaces.py`.
-- **Phase 4.5 Slice 7 shipped:** docs alignment and the round-trip regression
-  sweep landed in `test_sdlc_docs.py`; Phase 4.5 slice status now reflects the
-  shipped doc/verification state.
+  run tree without provider calls.
+- **Phase 4.5 Slice 7 shipped:** `pyarrow` + `polars` declared; docs aligned;
+  round-trip regression in `test_round_trip.py` and `test_sdlc_docs.py`.
+- **Phase 4.5 Slice 8 shipped:** curated tables sink via Polars
+  `sink_parquet(..., compression="zstd", statistics=True)` with sorted retrieval
+  keys (replaces PyArrow `write_table` on curated path).
+- **Phase 4.5 Slice 9 shipped:** feature marts and `analysis_mart` use lazy
+  `sink_parquet` with statistics; catalog row counts from Parquet file metadata.
+- **Phase 4.5 Slice 10 shipped:** `validate_frame_contract` stays schema-only and
+  lazy; row-level uniqueness, null, and range checks at the sink edge only.
+- **Phase 4.5 signed off (2026-06-29):** 10 dev slices shipped; 11 acceptance
+  items complete. Run-scoped lake under `runs/{run_id}/` with authoritative
+  `raw_responses`, six curated tables, four feature marts, `analysis_mart`, lazy
+  Polars transforms, validation-before-sink, and storage CLI commands. Residual:
+  batch Python UDFs for JSON parse and similarity grouping; post-sign-off polish
+  tracked in `FIXUPS.md` § Phase 4.5.
+- **GOALS retargeted to Phase 4.75 (2026-06-29):** page_text curation hardening
+  after stored-run normalize failed on live nested `page_content` payloads.
+- **Phase 4.75 Slice 1 shipped:** `parsed_page_text()` decodes nested DataForSEO
+  `content_parsing` items; `build_pages_and_passages_frame()` uses the shared
+  parser instead of flat `tasks[0].result[0]` indexing.

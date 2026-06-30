@@ -381,9 +381,21 @@ def parsed_page_text(response: Mapping[str, Any]) -> dict[str, str]:
     if not isinstance(tasks, list):
         return {}
 
+    fallback_url = ""
     for task in tasks:
         if not isinstance(task, Mapping):
             continue
+        task_url = task.get("url")
+        if not isinstance(task_url, str):
+            task_data = task.get("data")
+            if isinstance(task_data, Mapping):
+                task_url = (
+                    task_data.get("url")
+                    if isinstance(task_data.get("url"), str)
+                    else None
+                )
+        if isinstance(task_url, str) and task_url:
+            fallback_url = task_url
         results = task.get("result", [])
         if not isinstance(results, list):
             continue
@@ -399,4 +411,70 @@ def parsed_page_text(response: Mapping[str, Any]) -> dict[str, str]:
                 and isinstance(text, str)
             ):
                 return {"url": url, "title": title, "text": text}
+
+            items = result.get("items", [])
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                if not isinstance(item, Mapping):
+                    continue
+                item_url = item.get("url")
+                if not isinstance(item_url, str):
+                    item_url = task_url if isinstance(task_url, str) else ""
+
+                page_as_markdown = item.get("page_as_markdown")
+                page_content = item.get("page_content")
+                title = ""
+                text = ""
+                if isinstance(page_content, Mapping):
+                    title = _extract_page_content_title(page_content)
+                    text = _extract_page_content_text(page_content)
+                if not text and isinstance(page_as_markdown, str):
+                    text = page_as_markdown.strip()
+                if item_url or title or text:
+                    return {
+                        "url": item_url,
+                        "title": title,
+                        "text": text,
+                    }
+    if fallback_url:
+        return {"url": fallback_url, "title": "", "text": ""}
     return {}
+
+
+def _extract_page_content_title(page_content: Mapping[str, Any]) -> str:
+    main_topics = page_content.get("main_topic", [])
+    if not isinstance(main_topics, list):
+        return ""
+
+    for topic in main_topics:
+        if not isinstance(topic, Mapping):
+            continue
+        title = topic.get("main_title") or topic.get("h_title")
+        if isinstance(title, str) and title.strip():
+            return title.strip()
+    return ""
+
+
+def _extract_page_content_text(page_content: Mapping[str, Any]) -> str:
+    texts: list[str] = []
+    main_topics = page_content.get("main_topic", [])
+    if not isinstance(main_topics, list):
+        return ""
+
+    for topic in main_topics:
+        if not isinstance(topic, Mapping):
+            continue
+        for section_name in ("primary_content", "secondary_content", "table_content"):
+            section = topic.get(section_name)
+            if not isinstance(section, list):
+                continue
+            for item in section:
+                if not isinstance(item, Mapping):
+                    continue
+                text = item.get("text")
+                if isinstance(text, str):
+                    stripped = text.strip()
+                    if stripped:
+                        texts.append(stripped)
+    return "\n\n".join(texts)

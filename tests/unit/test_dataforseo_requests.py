@@ -7,6 +7,7 @@ from seo_rank.dataforseo import (
     build_page_text_request,
     build_serp_request,
     execute_dataforseo_request,
+    parsed_page_text,
     validate_dataforseo_credentials,
 )
 
@@ -134,3 +135,62 @@ def test_execute_dataforseo_request_posts_json_with_basic_auth() -> None:
         b'"language_code":"en"}]'
     )
     assert sent["timeout"] == 7.0
+
+
+def test_parsed_page_text_extracts_nested_page_content() -> None:
+    response = {
+        "tasks": [
+            {
+                "data": {"url": "https://example.com/page"},
+                "result": [
+                    {
+                        "items": [
+                            {
+                                "page_content": {
+                                    "main_topic": [
+                                        {
+                                            "main_title": "Example Page",
+                                            "primary_content": [
+                                                {"text": "First paragraph."},
+                                                {"text": "Second paragraph."},
+                                            ],
+                                        }
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+
+    assert parsed_page_text(response) == {
+        "url": "https://example.com/page",
+        "title": "Example Page",
+        "text": "First paragraph.\n\nSecond paragraph.",
+    }
+
+
+def test_parsed_page_text_preserves_url_for_empty_page_content() -> None:
+    response = {
+        "tasks": [
+            {
+                "data": {"url": "https://example.com/empty"},
+                "result": [
+                    {
+                        "items": None,
+                        "items_count": 0,
+                        "crawl_progress": "finished",
+                        "crawl_status": "Page content is empty",
+                    }
+                ],
+            }
+        ]
+    }
+
+    assert parsed_page_text(response) == {
+        "url": "https://example.com/empty",
+        "title": "",
+        "text": "",
+    }
