@@ -46,8 +46,8 @@ Live Gemini embeddings replace the live-path Gemini fixtures when
 `--live-gemini` is enabled. Live BGE reranking replaces the live-path BGE
 fixture when `--live-bge` is enabled — see
 [Live similarity backends (Phase 4)](#live-similarity-backends-phase-4).
-Later phases add `statsmodels` OLS with Benjamini-Hochberg after OLS pre-analysis
-diagnostics.
+Later phases add keyword-level Spearman inference with BH per backend, pooled
+OLS with clustered SEs, and OLS pre-analysis diagnostics on pooled models.
 
 TextRazor entities are captured in offline runs for schema validation; entity-derived
 model features remain out of scope.
@@ -84,7 +84,7 @@ The repository contains an **offline-verifiable CLI scaffold** (Phase 1 shipped)
 - **CLI:** `seo-rank run` writes `run.json` and `report.md` from fixtures (no
   network calls) or gated live providers; Phase 4.5 adds `normalize`,
   `build-features`, `analyze`, `replay`, and `run --stored-run` (Slice 6 shipped)
-- **Tests:** 116 tests under `tests/`; gate: `python -m pytest`; Phase 4.5 Slice 7
+- **Tests:** 125 tests under `tests/`; gate: `python -m pytest`; Phase 4.5 Slice 7
   shipped the round-trip regression sweep in `test_sdlc_docs.py`
 - **Product docs:** `ARCHITECTURE.md`, `GOALS.md`, `ROADMAP.md`, `README.md`,
   `TESTING.md`
@@ -120,8 +120,9 @@ in code yet.
   `--live-gemini`; local **BGE** (`BAAI/bge-reranker-v2-m3`) behind
   `--live-bge` — see [Live similarity backends (Phase 4)](#live-similarity-backends-phase-4)
   and [Planned Page Similarity Run](#planned-page-similarity-run).
-- **Analysis engine (planned):** OLS pre-analysis, `statsmodels` OLS,
-  Benjamini-Hochberg — see [Planned Per-Run Statistical Analysis](#planned-per-run-statistical-analysis).
+- **Analysis engine (planned):** Phase 5 estimand (Spearman + pooled OLS),
+  guardrails, keyword-clustered inference, BH per backend family, pooled OLS
+  diagnostics — see [Planned Per-Run Statistical Analysis](#planned-per-run-statistical-analysis).
 - **Reporters (shipped):** JSON + Markdown under the selected run root;
   `seo-rank run` defaults to `runs/{run_id}/` when `--output-dir` is omitted
   and still supports explicit overrides. Phase 6 expands report narrative
@@ -152,7 +153,8 @@ stays out of normal analytical joins (replay/re-normalization only). Live
 DataForSEO payloads are not retained by the provider long-term.
 
 **Planned full pipeline (Phase 5+):** lazy Polars joins on `analysis_mart` →
-OLS pre-analysis → `statsmodels` OLS → Benjamini-Hochberg → report generation.
+guardrails → keyword-level Spearman ρ with BH per backend → pooled OLS with
+clustered SEs and diagnostics → `runs/{run_id}/stats/` artifacts.
 
 Raw provider responses and generated run trees should stay out of source
 control.
@@ -332,6 +334,15 @@ src/seo_rank/data/
   features.py     # page, passage, domain, similarity feature marts
   marts.py        # analysis-ready joins (Phase 5 prep)
   validate.py     # schemas, keys, null/range checks before every sink
+
+src/seo_rank/stats/   # Phase 5 observational analysis (see ROADMAP.md)
+  spec.py         # load analysis_spec.v1.yaml
+  panel.py        # mart load, filter, guardrails
+  spearman.py     # per-keyword ρ + BH
+  regression.py   # pooled OLS, clustered SEs, effect size
+  diagnostics.py  # RESET, BP, influence, multivariate VIF
+  bh.py           # Benjamini–Hochberg within backend family
+  artifacts.py    # stats_summary.json, stats_diagnostics.json, stats_report.md
 ```
 
 | Module | Responsibility |
@@ -341,6 +352,11 @@ src/seo_rank/data/
 | `features.py` | Build `keyword_serp`, `page_features`, `passage_features`, `domain_features` from curated scans |
 | `marts.py` | Join feature marts into `analysis_mart` at `target_keyword × SERP URL` grain |
 | `validate.py` | Schema contracts plus row-level uniqueness, null, and range audits; used before every mart write or at the sink edge |
+
+**Phase 5 stats package** (`src/seo_rank/stats/`): guardrails, Spearman + BH,
+pooled OLS with keyword-clustered SEs, diagnostics, multivariate sensitivity,
+influence robustness, and `runs/{run_id}/stats/` artifacts. Spec:
+`analysis_spec.v1.yaml`.
 
 **Execution model:** scan lazily, filter/select early, join on IDs only, validate
 schema contracts, then sink; materialized row audits run at the sink edge.
@@ -408,17 +424,108 @@ OLS work (Phase 5).
 ## Planned Per-Run Statistical Analysis
 
 Every completed run must include observational ranking analysis, not only
-similarity feature generation. **Before interpreting results or applying
-Benjamini-Hochberg correction**, complete [OLS Pre-Analysis
-Preparation](#ols-pre-analysis-preparation) on the run dataset.
+similarity feature generation. Product review and open questions:
+`PHASE5-STATS-PLAN-REVIEW.md`. Implementation slices: `ROADMAP.md` Phase 5.
 
-1. Fit baseline and similarity-feature models with **`statsmodels` OLS**
-   residual/variance modeling over the observed top-20 rankings, following the
-   diagnostic workflow below.
-2. Apply **Benjamini-Hochberg** multiple-testing correction across keyword- and
-   feature-level comparisons produced by that run.
-3. Emit similarity-backend outputs, diagnostic artifacts, and statistical
-   analysis into the run outputs (JSON plus Markdown report sections).
+### Phase 5 estimand (v1)
+
+**Grain:** one row per `target_keyword_id × canonical_url_hash` from
+`analysis_mart`; filter `serp_rank` 1–20; drop rows with null
+`bge_normalized_score` for the primary path (per-backend null rules for
+secondary backends).
+
+**Mart columns:** `bge_normalized_score`, `gemini_doc_retrieval_normalized_score`,
+`gemini_semantic_similarity_normalized_score`, `serp_rank`, `page_text_length`,
+`target_keyword_id`, `canonical_url_hash`.
+
+**Dependence:** cluster inference at `target_keyword_id`. The same URL may appear
+under multiple keywords; do not dedupe the panel in v1. Optional robustness:
+two-way cluster (keyword × `canonical_url_hash`).
+
+**Primary decision:** (A) association exists and (B) backend comparison — pooled
+within-keyword association per similarity backend. **BGE** is the pre-registered
+primary backend; Gemini Doc Retrieval and Gemini Semantic Similarity are
+secondary (fixed order, not data-driven).
+
+**Headline metric:** keyword-level Spearman ρ (primary). Pooled regression with
+clustered CIs (secondary). Prefer CIs over p-values; coefficients are likely
+conservative under similarity measurement error (attenuation).
+
+**Primary estimand:** keyword-level Spearman ρ between each backend's
+`*_normalized_score` and `serp_rank`. Summarize median ρ, IQR, and fraction of
+keywords with same-sign ρ. **BH:** one two-sided correlation test per keyword per
+backend; family = all keywords for that backend (size K). Apply BH at q = 0.05
+**within each backend family** when **K ≥ 10**; otherwise report raw p-values
+with `bh_skipped_reason`. Do not BH-adjust diagnostic p-values.
+
+**Secondary estimand:** pooled regression on `-log(serp_rank)`:
+
+```text
+-log(serp_rank) ~ normalized_similarity + log(page_text_length + 1) + C(target_keyword_id)
+```
+
+One univariate feature model per backend (not joint three-predictor as primary).
+Keyword-clustered robust SEs only in primary output; never naive IID SEs.
+
+**Effect size:** report approximate Δ rank per 1 SD increase in normalized
+similarity (derived from pooled coefficient and within-panel SD).
+
+**Actionable association (BGE only, v1):** `actionable_association: true` when
+median |ρ| ≥ 0.25, ≥ 60% same-sign ρ, and BGE pooled 95% CI excludes 0 (thresholds
+in `analysis_spec.v1.yaml`, tune after golden fixtures).
+
+**Baseline (descriptive):** keyword FE + `log(page_text_length + 1)` only.
+Compare adjusted R² or AIC to feature model; not BH-adjusted.
+
+**Multivariate sensitivity (not confirmatory):** joint three-backend model; if
+VIF > 5, drop backends in order semantic similarity → doc retrieval → keep BGE.
+
+**Robustness appendix:** refit pooled models excluding Cook's D > 4/n rows;
+optional two-way-cluster CIs; diagnostic-driven spec changes never replace the
+confirmatory estimand.
+
+**Guardrails** — hard-fail skips BH and coefficient interpretation; warn still
+runs full stats:
+
+| Guardrail | Default | Severity |
+| --------- | ------- | -------- |
+| Keywords with complete BGE scores | ≥ 10 | hard-fail |
+| Non-null score fraction per backend | ≥ 90% | warn |
+| Within-keyword `serp_rank` variance | > 0 | hard-fail |
+| Within-keyword similarity variance | > 0 | warn |
+| Influential rows (Cook's D > 4/n) | report %; warn if > 5% | warn |
+
+**Limitations** (required in `stats_summary.json` `limitations` object **and**
+`stats_report.md`): observational only; associations within observed top 20 only
+(incidental truncation; rank-20 ≠ unranked); no causal ranking-factor claims;
+measurement error on similarity scores.
+
+**Diagnostics (pooled feature model per backend):** RESET, Breusch–Pagan (→ HC3
+when flagged), Cook's D plus leverage / studentized residuals / DFFITS /
+DFBETAs in diagnostics JSON. Skip per-keyword normality as primary gates; skip
+LOWESS/CCPR file artifacts in v1 unless debug.
+
+**Module layout:** `src/seo_rank/stats/`; spec in `analysis_spec.v1.yaml`.
+Phase 5.75 features → `analysis_spec.v2.yaml`.
+
+**Outputs:** `runs/{run_id}/stats/stats_summary.json`, `stats_diagnostics.json`,
+`stats_report.md`; link from `report.md`. CLI: `seo-rank analyze`; exit 1 on
+guardrail hard-fail (overridable); skip stats on `--dry-run` and documented
+fixture modes only.
+
+**Deferred (Phase 5.1):** rank-decile segments, keyword heterogeneity deep-dives,
+confirmatory keyword holdout, IV / `PanelOLS`, URL fixed effects.
+
+### Pipeline steps
+
+1. Load `analysis_spec.v1.yaml`; materialize panel; evaluate guardrails.
+2. On hard-fail: write guardrails + limitations; skip confirmatory inference.
+3. Compute keyword-level Spearman ρ; BH within each backend family when K ≥ 10.
+4. Fit baseline and univariate pooled models with keyword-clustered SEs; effect
+   size translation; optional two-way-cluster sensitivity.
+5. Run pooled diagnostics; multivariate VIF sensitivity; influence refit appendix.
+6. Emit `stats_*` artifacts; link from `report.md`; set `actionable_association`
+   per BGE rule.
 
 Do not skip any page-level scorer or the statistical analysis step on individual
 runs unless the run is an explicit offline fixture or dry-run test mode
@@ -531,10 +638,12 @@ before proceeding to Benjamini-Hochberg correction and run reporting.
   entity extraction.
 - Keep direct page fetching out of v1.
 - Treat analysis as observational and censored to observed top-20 rankings.
-- Use `statsmodels` for OLS residual/variance models and Benjamini-Hochberg FDR
-  correction on every run; complete [OLS Pre-Analysis
-  Preparation](#ols-pre-analysis-preparation) before interpreting results; do not
-  introduce a parallel stats stack for the same work.
+- Phase 5 estimand: Spearman ρ per keyword as primary inference; pooled OLS with
+  keyword-clustered SEs as secondary; BH within each backend family only;
+  complete [OLS Pre-Analysis Preparation](#ols-pre-analysis-preparation) on
+  pooled models before interpreting regression coefficients; see
+  [Phase 5 estimand (v1)](#phase-5-estimand-v1) and `PHASE5-STATS-PLAN-REVIEW.md`;
+  do not introduce a parallel stats stack for the same work.
 - Keep deterministic fixture embeddings for offline tests. Live runs follow
   [Planned Page Similarity Run](#planned-page-similarity-run): per cluster keyword,
   top-20 SERP, then BGE, Gemini Doc Retrieval, and Gemini Semantic Similarity at

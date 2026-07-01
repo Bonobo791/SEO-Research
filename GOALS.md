@@ -26,15 +26,15 @@ normalization or re-normalization code.
 
 #### Progress
 
-**Slices:** 1 of 3 shipped, 2 open.
+**Slices:** 3 of 3 shipped, 0 open.
 
 | # | Slice | Layer | Status | Primary deliverable |
 | - | ----- | ----- | ------ | ------------------- |
 | 1 | Schema contracts | Provider | Shipped | Explicit schemas for `keyword_expansion`, `serp`, and `content_parsing/live` payloads |
-| 2 | Boundary enforcement | Provider | Open | Live and stored-run responses validated at the adapter seam with endpoint-scoped parse errors |
-| 3 | Drift coverage | Provider | Open | Fixtures for missing fields, type mismatches, and valid pass-through cases |
+| 2 | Boundary enforcement | Provider | Shipped | Live and stored-run responses validated at the adapter seam with endpoint-scoped parse errors |
+| 3 | Drift coverage | Provider | Shipped | Fixtures for missing fields, type mismatches, and valid pass-through cases |
 
-**Remaining to close Phase 4.77:** slices 2–3.
+**Remaining to close Phase 4.77:** none.
 
 #### Dev slices
 
@@ -43,11 +43,11 @@ normalization or re-normalization code.
    - Choose the smallest library that gives typed parse errors in Python
      (`Pydantic` or JSON Schema validation).
 
-2. **[ ] Slice 2 — Boundary enforcement**
+2. **[x] Slice 2 — Boundary enforcement**
    - Validate live and stored-run DataForSEO responses at the adapter seam.
    - Surface endpoint-specific parse errors before curated normalization.
 
-3. **[ ] Slice 3 — Drift coverage**
+3. **[x] Slice 3 — Drift coverage**
    - Add fixtures for missing fields, type mismatches, and extra/renamed
      `content_parsing/live` fields.
    - Verify valid responses still pass through unchanged.
@@ -64,7 +64,9 @@ normalization or re-normalization code.
 - **Tests** — fixture drift cases for `content_parsing/live`, a valid payload
   pass-through case, and stored-run failure coverage.
 
-See `ROADMAP.md` for Phase 5 (OLS) and Phase 5.5 (passage/domain scoring).
+See `ROADMAP.md` for Phase 5 (10 dev slices + acceptance criteria) and Phase 5.5
+(passage/domain scoring). Phase 5 backlog is fully specified there; retarget
+`GOALS.md` active scope when Phase 5 implementation starts.
 
 ## In Scope (current and near-term)
 
@@ -90,18 +92,18 @@ See `ROADMAP.md` for Phase 5 (OLS) and Phase 5.5 (passage/domain scoring).
 
 ## Phase 4.77 acceptance criteria
 
-**Status:** 1 of 3 slices shipped, 2 open.
+**Status:** 3 of 3 slices shipped, 0 open.
 
 | Acceptance item | Slice(s) | Status |
 | --------------- | -------- | ------ |
 | Explicit schemas cover `keyword_expansion`, `serp`, and `content_parsing/live` | 1 | Complete |
-| Adapter validates live and stored-run responses before normalization | 2 | Not started |
-| Drift fixtures fail loud; valid payloads pass through unchanged | 3 | Not started |
+| Adapter validates live and stored-run responses before normalization | 2 | Complete |
+| Drift fixtures fail loud; valid payloads pass through unchanged | 3 | Complete |
 
 - [x] Endpoint schemas defined with typed parse errors. *(Slice 1.)*
-- [ ] Adapter boundary rejects unvalidated payloads before curated writes.
+- [x] Adapter boundary rejects unvalidated payloads before curated writes.
   *(Slice 2.)*
-- [ ] Drift and pass-through tests cover `content_parsing/live` and stored-run
+- [x] Drift and pass-through tests cover `content_parsing/live` and stored-run
   paths. *(Slice 3.)*
 
 ---

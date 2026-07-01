@@ -127,6 +127,6 @@ def test_phase_45_slice_9_regression_sweep_marks_mart_sink_docs_as_shipped() -> 
     assert "Phase 4.5 Slice 9 shipped" in roadmap
     assert "Phase 4.5 Slice 10 shipped" in roadmap
     assert "Phase 4.5 signed off" in roadmap
-    assert "116 tests" in architecture
-    assert "116 tests collected" in testing
+    assert "125 tests" in architecture
+    assert "125 tests collected" in testing
     assert "sink feature marts lazily with Parquet statistics" in testing

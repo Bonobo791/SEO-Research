@@ -14,7 +14,7 @@ Pytest configuration and verification contract for SEO-Research.
   interpreter
 - Lint / type-check / build / coverage: not configured
 - Expected test duration: fast (< 1s)
-- **Current verification status:** 116 tests collected; 116 passing
+- **Current verification status:** 125 tests collected; 125 passing
 
 ## Active Verification Command
 
@@ -97,8 +97,28 @@ exist.
 - Feature marts and `analysis_mart` join keys (`run_id`, `target_keyword_id`,
   `canonical_url_hash`, `response_id`, `passage_id`)
 - Passage / domain similarity scopes (feature marts; Phase 5.5 scoring)
-- `statsmodels` OLS and Benjamini-Hochberg on `analysis_mart` panels
-- OLS pre-analysis diagnostic loop
+
+### Phase 5 — statistical analysis (see `ROADMAP.md` slices 1–10)
+
+- **Golden `analysis_mart` fixture** — synthetic panel with known Spearman ρ and
+  pooled slope per backend; tolerance bands for regression coefficients,
+  correlation summaries, and effect-size translation.
+- **`stats_summary.json` schema** — estimand version, `guardrails[]`,
+  `limitations` object, per-backend ρ median/IQR, BH q-values (or
+  `bh_skipped_reason`), pooled coefficients + clustered CIs,
+  `actionable_association`, effect-size fields; assert naive IID SEs absent.
+- **`stats_diagnostics.json` schema** — RESET/BP flags, influence counts and %,
+  leverage/DFFITS/DFBETAs, multivariate VIF + drop log, `influence_sensitivity`
+  block, optional two-way-cluster CIs.
+- **Guardrail gates** — hard-fail skips BH and actionable flag; warn still emits
+  full stats; CLI exit 1 on hard-fail unless `--no-fail-on-guardrails`.
+- **BH policy** — within-backend family only; skipped when K < 10; diagnostics
+  excluded from BH.
+- **Multivariate sensitivity** — VIF > 5 triggers backend drop order from spec.
+- **Influence robustness** — refit without Cook's D > 4/n rows; coefficient
+  delta vs confirmatory model.
+- **Dry-run / fixture skip** — `seo-rank analyze` on documented fixture modes
+  does not require full stats output.
 
 Keep optional live flags aligned with `.env.example` when adding integration tests.
 

@@ -335,6 +335,157 @@ def test_validate_dataforseo_response_rejects_content_item_without_body() -> Non
     )
 
 
+@pytest.mark.parametrize(
+    ("endpoint", "response", "path", "expected"),
+    [
+        (
+            "keyword_expansion",
+            {
+                "provider": "dataforseo",
+                "endpoint": "keywords_data/google_ads/keywords_for_keywords/live",
+                "tasks": [
+                    {
+                        "seed": "technical seo",
+                        "result": [
+                            {
+                                "search_volume": 1000,
+                            }
+                        ],
+                    }
+                ],
+            },
+            "tasks[0].result[0].keyword",
+            "present",
+        ),
+        (
+            "serp",
+            {
+                "provider": "dataforseo",
+                "endpoint": "serp/google/organic/live/advanced",
+                "tasks": [
+                    {
+                        "keyword": "technical seo",
+                        "result": [
+                            {
+                                "items": [
+                                    {
+                                        "type": "organic",
+                                        "url": "https://example.com/page",
+                                        "title": "Technical SEO Page",
+                                        "description": "Fixture organic result.",
+                                    }
+                                ]
+                            }
+                        ],
+                    }
+                ],
+            },
+            "tasks[0].result[0].items[0].rank_group",
+            "present",
+        ),
+        (
+            "serp",
+            {
+                "provider": "dataforseo",
+                "endpoint": "serp/google/organic/live/advanced",
+                "tasks": [
+                    {
+                        "keyword": "technical seo",
+                        "result": [
+                            {
+                                "items": [
+                                    {
+                                        "type": "organic",
+                                        "rank_group": 1,
+                                        "title": "Technical SEO Page",
+                                        "description": "Fixture organic result.",
+                                    }
+                                ]
+                            }
+                        ],
+                    }
+                ],
+            },
+            "tasks[0].result[0].items[0].url",
+            "present",
+        ),
+        (
+            "serp",
+            {
+                "provider": "dataforseo",
+                "endpoint": "serp/google/organic/live/advanced",
+                "tasks": [
+                    {
+                        "keyword": "technical seo",
+                        "result": [
+                            {
+                                "items": [
+                                    {
+                                        "type": "organic",
+                                        "rank_group": 1,
+                                        "url": "https://example.com/page",
+                                        "description": "Fixture organic result.",
+                                    }
+                                ]
+                            }
+                        ],
+                    }
+                ],
+            },
+            "tasks[0].result[0].items[0].title",
+            "present",
+        ),
+    ],
+)
+def test_validate_dataforseo_response_rejects_missing_required_leaf_fields(
+    endpoint: str,
+    response: dict[str, object],
+    path: str,
+    expected: str,
+) -> None:
+    with pytest.raises(DataForSeoParseError) as exc_info:
+        validate_dataforseo_response(endpoint, response)
+
+    error = exc_info.value
+    assert error.endpoint == endpoint
+    assert error.path == path
+    assert error.expected == expected
+
+
+def test_validate_dataforseo_response_rejects_non_dict_root_input() -> None:
+    with pytest.raises(DataForSeoParseError) as exc_info:
+        validate_dataforseo_response("serp", ["not-a-dict"])  # type: ignore[arg-type]
+
+    error = exc_info.value
+    assert error.endpoint == "serp"
+    assert error.path == "<root>"
+    assert error.expected == "dict"
+
+
+def test_validate_dataforseo_response_accepts_page_text_with_extra_fields_unchanged() -> None:
+    response = {
+        "provider": "dataforseo",
+        "endpoint": "on_page/content_parsing/live",
+        "tasks": [
+            {
+                "data": {"url": "https://example.com/page"},
+                "crawl_status": "finished",
+                "result": [
+                    {
+                        "url": "https://example.com/page",
+                        "title": "Example Page",
+                        "text": "Example page body.",
+                        "content_format": "structured",
+                        "items": [],
+                    }
+                ],
+            }
+        ],
+    }
+
+    assert validate_dataforseo_response("page_text", response) is response
+
+
 def test_parsed_page_text_extracts_nested_page_content() -> None:
     response = {
         "tasks": [
