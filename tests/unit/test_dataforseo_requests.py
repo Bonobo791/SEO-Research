@@ -3,12 +3,17 @@ import pytest
 from seo_rank.dataforseo import (
     DataForSeoCredentialError,
     DataForSeoCredentials,
+    DataForSeoParseError,
     decode_content_parsing_items,
     build_keyword_expansion_request,
     build_page_text_request,
     build_serp_request,
     execute_dataforseo_request,
+    fixture_keyword_expansion_response,
+    fixture_page_text_response,
+    fixture_serp_response,
     parsed_page_text,
+    validate_dataforseo_response,
     validate_dataforseo_credentials,
 )
 
@@ -139,6 +144,195 @@ def test_execute_dataforseo_request_posts_json_with_basic_auth() -> None:
         b'"language_code":"en"}]'
     )
     assert sent["timeout"] == 7.0
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "response"),
+    [
+        ("keyword_expansion", fixture_keyword_expansion_response("technical seo")),
+        ("serp", fixture_serp_response("technical seo")),
+        (
+            "page_text",
+            fixture_page_text_response(
+                "https://example.com/technical-seo/1",
+                "technical seo",
+            ),
+        ),
+    ],
+)
+def test_validate_dataforseo_response_accepts_known_endpoint_schemas(
+    endpoint: str,
+    response: dict[str, object],
+) -> None:
+    assert validate_dataforseo_response(endpoint, response) is response
+
+
+def test_validate_dataforseo_response_rejects_schema_drift_with_typed_error() -> None:
+    response = fixture_serp_response("technical seo")
+    response["tasks"] = "not-a-list"
+
+    with pytest.raises(DataForSeoParseError) as exc_info:
+        validate_dataforseo_response("serp", response)
+
+    error = exc_info.value
+    assert error.endpoint == "serp"
+    assert error.path == "tasks"
+    assert "expected list" in str(error)
+
+
+def test_validate_dataforseo_response_rejects_bool_rank_group_as_int() -> None:
+    response = fixture_serp_response("technical seo")
+    response["tasks"][0]["result"][0]["items"][0]["rank_group"] = True
+
+    with pytest.raises(DataForSeoParseError) as exc_info:
+        validate_dataforseo_response("serp", response)
+
+    error = exc_info.value
+    assert error.endpoint == "serp"
+    assert error.path == "tasks[0].result[0].items[0].rank_group"
+    assert error.expected == "int"
+    assert "got bool" in str(error)
+
+
+def test_validate_dataforseo_response_reports_missing_field_as_absent() -> None:
+    response = fixture_serp_response("technical seo")
+    del response["tasks"][0]["result"][0]["items"][0]["rank_group"]
+
+    with pytest.raises(DataForSeoParseError) as exc_info:
+        validate_dataforseo_response("serp", response)
+
+    error = exc_info.value
+    assert error.endpoint == "serp"
+    assert error.path == "tasks[0].result[0].items[0].rank_group"
+    assert error.expected == "present"
+    assert "got field absent" in str(error)
+
+
+def test_validate_dataforseo_response_rejects_unknown_endpoint() -> None:
+    with pytest.raises(DataForSeoParseError) as exc_info:
+        validate_dataforseo_response("unknown", {})
+
+    error = exc_info.value
+    assert error.endpoint == "unknown"
+    assert error.path == "<endpoint>"
+    assert error.expected == "known DataForSEO endpoint schema"
+
+
+def test_validate_dataforseo_response_checks_content_parsing_item_shape() -> None:
+    response = {
+        "tasks": [
+            {
+                "data": {"url": "https://example.com/page"},
+                "result": [
+                    {
+                        "items": [
+                            {
+                                "url": "https://example.com/page",
+                                "page_content": ["renamed-content"],
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+
+    with pytest.raises(DataForSeoParseError) as exc_info:
+        validate_dataforseo_response("page_text", response)
+
+    error = exc_info.value
+    assert error.endpoint == "page_text"
+    assert error.path == "tasks[0].result[0].items[0].page_content"
+    assert "expected object" in str(error)
+
+
+def test_validate_dataforseo_response_accepts_nested_page_content_fixture() -> None:
+    response = {
+        "tasks": [
+            {
+                "data": {"url": "https://example.com/technical-seo/1"},
+                "result": [
+                    {
+                        "items": [
+                            {
+                                "url": "https://example.com/technical-seo/1",
+                                "page_content": {
+                                    "header": {
+                                        "primary_content": [
+                                            {
+                                                "text": "Header intro with enough words.",
+                                            }
+                                        ]
+                                    },
+                                    "main_topic": [
+                                        {
+                                            "main_title": "Example Page",
+                                            "primary_content": [
+                                                {"text": "First paragraph."},
+                                                {"text": "Second paragraph."},
+                                            ],
+                                        }
+                                    ],
+                                },
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+
+    assert validate_dataforseo_response("page_text", response) is response
+
+
+def test_validate_dataforseo_response_accepts_empty_page_response() -> None:
+    response = {
+        "tasks": [
+            {
+                "data": {"url": "https://example.com/empty"},
+                "result": [
+                    {
+                        "items": None,
+                        "items_count": 0,
+                        "crawl_progress": "finished",
+                        "crawl_status": "Page content is empty",
+                    }
+                ],
+            }
+        ]
+    }
+
+    assert validate_dataforseo_response("page_text", response) is response
+
+
+def test_validate_dataforseo_response_rejects_content_item_without_body() -> None:
+    response = {
+        "tasks": [
+            {
+                "data": {"url": "https://example.com/page"},
+                "result": [
+                    {
+                        "items": [
+                            {
+                                "url": "https://example.com/page",
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+
+    with pytest.raises(DataForSeoParseError) as exc_info:
+        validate_dataforseo_response("page_text", response)
+
+    error = exc_info.value
+    assert error.endpoint == "page_text"
+    assert error.path == "tasks[0].result[0].items[0]"
+    assert (
+        error.expected
+        == "content parsing item with page_content, page_as_markdown, or html"
+    )
 
 
 def test_parsed_page_text_extracts_nested_page_content() -> None:

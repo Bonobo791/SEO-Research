@@ -17,3 +17,14 @@ def test_normalize_serp_results_keeps_organic_rows_capped_at_depth() -> None:
     assert results[-1]["rank"] == 20
     assert all(result["keyword"] == "technical seo" for result in results)
     assert all("sponsored" not in result["url"] for result in results)
+
+
+def test_normalize_serp_results_rejects_bool_rank_group() -> None:
+    response = fixture_serp_response("technical seo")
+    response["tasks"][0]["result"][0]["items"][1]["rank_group"] = True
+
+    results = normalize_serp_results(response, keyword="technical seo", depth=20)
+
+    assert len(results) == 20
+    assert results[0]["rank"] == 2
+    assert all(type(result["rank"]) is int for result in results)

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# Run one SDLC slice via Codex, then Cursor Agent code review + senior QA,
-# appending code-only follow-ups to FIXUPS.md.
+# Automated slice loop:
+#   1. Codex ($sdlc) — implement the next slice only
+#   2. Cursor Agent (/code-reviewer) — code review on the diff
+#   3. Cursor Agent (/senior-qa) — release test-gap review on the diff
+# Appends code-only follow-ups to FIXUPS.md from steps 2–3.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -9,8 +12,8 @@ cd "$REPO_ROOT"
 REVIEW_DIR="${REVIEW_DIR:-$REPO_ROOT/.reviews}"
 mkdir -p "$REVIEW_DIR"
 
-CODEX_PROMPT="${CODEX_PROMPT:-Work on the next slice}"
-CODE_REVIEW_PROMPT="${CODE_REVIEW_PROMPT:-/code-review Review the current uncommitted diff. Include only code and test fixups — skip documentation-only suggestions (README, ARCHITECTURE, GOALS, ROADMAP, TESTING, FIXUPS, SDLC docs). Do not edit any files. End your response with a section exactly titled:
+CODEX_PROMPT="${CODEX_PROMPT:-\$sdlc Work on the next slice. Implementation only — do not run code review or senior QA; Cursor Agent handles those after this step.}"
+CODE_REVIEW_PROMPT="${CODE_REVIEW_PROMPT:-/code-reviewer Review the current uncommitted diff. Include only code and test fixups — skip documentation-only suggestions (README, ARCHITECTURE, GOALS, ROADMAP, TESTING, FIXUPS, SDLC docs). Do not edit any files. End your response with a section exactly titled:
 
 ## FIXUPS_ROWS
 
@@ -45,7 +48,8 @@ require_cmd "$PYTHON_BIN"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 
 if [[ "${SKIP_CODEX:-0}" != "1" ]]; then
-  echo "==> Step 1/3: Codex — ${CODEX_PROMPT}"
+  echo "==> Step 1/3: Codex (\$sdlc) — next slice implementation"
+  echo "    Prompt: ${CODEX_PROMPT}"
   # shellcheck disable=SC2086
   "$CODEX_BIN" exec "$CODEX_PROMPT" \
     -C "$REPO_ROOT" \
@@ -57,7 +61,7 @@ else
   echo "==> Step 1/3: Codex skipped (SKIP_CODEX=1)"
 fi
 
-echo "==> Step 2/3: Cursor Agent — code review"
+echo "==> Step 2/3: Cursor Agent — /code-reviewer"
 "$AGENT_BIN" --print --trust --workspace "$REPO_ROOT" "$CODE_REVIEW_PROMPT" \
   2>&1 | tee "$REVIEW_DIR/code-review-${timestamp}.log"
 
@@ -67,7 +71,7 @@ echo "==> Step 2/3: Cursor Agent — code review"
   --fixups "$REPO_ROOT/FIXUPS.md" \
   --goals "$REPO_ROOT/GOALS.md"
 
-echo "==> Step 3/3: Cursor Agent — senior QA"
+echo "==> Step 3/3: Cursor Agent — /senior-qa"
 "$AGENT_BIN" --print --trust --workspace "$REPO_ROOT" "$SENIOR_QA_PROMPT" \
   2>&1 | tee "$REVIEW_DIR/senior-qa-${timestamp}.log"
 

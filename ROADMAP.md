@@ -29,7 +29,7 @@ https://docs.dataforseo.com/v3/on_page/content_parsing/live/
 
 #### Dev slices
 
-1. **[ ] Slice 1 — Schema contracts**
+1. **[x] Slice 1 — Schema contracts**
    - Define explicit schemas for DataForSEO adapter payloads.
    - Choose the smallest library that gives typed parse errors in Python
      (`Pydantic` or JSON Schema validation).

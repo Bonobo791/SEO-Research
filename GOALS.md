@@ -26,19 +26,19 @@ normalization or re-normalization code.
 
 #### Progress
 
-**Slices:** 0 of 3 shipped, 3 open.
+**Slices:** 1 of 3 shipped, 2 open.
 
 | # | Slice | Layer | Status | Primary deliverable |
 | - | ----- | ----- | ------ | ------------------- |
-| 1 | Schema contracts | Provider | Open | Explicit schemas for `keyword_expansion`, `serp`, and `content_parsing/live` payloads |
+| 1 | Schema contracts | Provider | Shipped | Explicit schemas for `keyword_expansion`, `serp`, and `content_parsing/live` payloads |
 | 2 | Boundary enforcement | Provider | Open | Live and stored-run responses validated at the adapter seam with endpoint-scoped parse errors |
 | 3 | Drift coverage | Provider | Open | Fixtures for missing fields, type mismatches, and valid pass-through cases |
 
-**Remaining to close Phase 4.77:** slices 1–3.
+**Remaining to close Phase 4.77:** slices 2–3.
 
 #### Dev slices
 
-1. **[ ] Slice 1 — Schema contracts**
+1. **[x] Slice 1 — Schema contracts**
    - Define explicit schemas for DataForSEO adapter payloads.
    - Choose the smallest library that gives typed parse errors in Python
      (`Pydantic` or JSON Schema validation).
@@ -90,15 +90,15 @@ See `ROADMAP.md` for Phase 5 (OLS) and Phase 5.5 (passage/domain scoring).
 
 ## Phase 4.77 acceptance criteria
 
-**Status:** 0 of 3 slices shipped, 3 open.
+**Status:** 1 of 3 slices shipped, 2 open.
 
 | Acceptance item | Slice(s) | Status |
 | --------------- | -------- | ------ |
-| Explicit schemas cover `keyword_expansion`, `serp`, and `content_parsing/live` | 1 | Not started |
+| Explicit schemas cover `keyword_expansion`, `serp`, and `content_parsing/live` | 1 | Complete |
 | Adapter validates live and stored-run responses before normalization | 2 | Not started |
 | Drift fixtures fail loud; valid payloads pass through unchanged | 3 | Not started |
 
-- [ ] Endpoint schemas defined with typed parse errors. *(Slice 1.)*
+- [x] Endpoint schemas defined with typed parse errors. *(Slice 1.)*
 - [ ] Adapter boundary rejects unvalidated payloads before curated writes.
   *(Slice 2.)*
 - [ ] Drift and pass-through tests cover `content_parsing/live` and stored-run

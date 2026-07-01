@@ -11,8 +11,9 @@ release-readiness verdict, the Jul 2026 senior QA follow-up (Slice 5
 in-progress diff, fields-vs-pages policy, default gate), and the Jul 2026
 senior QA diff review (orphan invariant, policy matrix docs, baseline sync),
 and the Jul 2026 code review of the Slice 5 test diff (code / tests only —
-doc follow-ups stay in S476-38, S476-47, S476-14, etc.), and the Jul 2026
-second senior QA diff review (code / tests only). Each item names
+doc follow-ups stay in S476-38, S476-47, S476-14, etc.), the Jul 2026
+second senior QA diff review (code / tests only), and Phase 4.77 Slice 1
+(DataForSEO schema contracts in `dataforseo.py`). Each item names
 the **phase/slice** where it should land. Nothing here blocks Slice 10 sign-off
 unless marked **required**.
 
@@ -58,7 +59,7 @@ None block Slice 4 HTML wiring unless marked **required**.
 | S476-19 | Consider a single `page_text` `map_batches` UDF that emits both page/passage rows and field rows to avoid double `json.loads` + `parsed_page_text` / `decode_content_parsing_items` per response | 4.76 Slice 3 | nice-to-have | open |
 | S476-20 | Assert `field_row_id` uniqueness and stability (`stable_id(page_id, response_id, field_path, ordinal)`) in `test_build_page_content_fields_frame_decodes_structured_fields` and `test_normalize_run_materializes_page_content_fields` | 4.76 Slice 5 | nice-to-have | open |
 | S476-21 | Assert scalar sink contract in normalize tests: e.g. `status_code` row has `structured_value == "200"` and empty `text` (decoder covered in `test_dataforseo_requests.py`; sink path in `test_normalize_run_stores_raw_html_when_present`) | 4.76 Slice 5 | nice-to-have | done |
-| S476-22 | Keep `FIXUPS.md` unit baseline count in sync when the suite changes (was 88 at senior QA review; 91 after Slice 3 ship; 92 after Slice 4 HTML frame tests; 95 after Jul 2026 Slice 5 test additions; **96** after `test_build_pages_and_passages_frame_keeps_page_rows_for_raw_html_without_text`) | 4.76 docs | nice-to-have | open |
+| S476-22 | Keep `FIXUPS.md` unit baseline count in sync when the suite changes (was 88 at senior QA review; 91 after Slice 3 ship; 92 after Slice 4 HTML frame tests; 95 after Jul 2026 Slice 5 test additions; 96 after raw-HTML page shell test; **116** after Phase 4.77 Slice 1 validator tests — sync `TESTING.md` / `ARCHITECTURE.md` when the count moves again) | 4.76 docs | nice-to-have | done |
 
 ---
 
@@ -84,9 +85,8 @@ sign-off unless marked **required**.
 
 Follow-ups from senior QA release-readiness review (Phase 4.76 slices 3–5).
 **Required** rows are TDD gates or sign-off blockers; write failing tests before
-implementing sinks. Unit baseline: `pytest tests/unit` (**96** tests, all pass as of
-Jul 2026 senior QA diff review; bare `pytest` → 96 pass + 1 integration fail when
-live gates are on).
+implementing sinks. Unit baseline: `pytest tests/unit` (**116** tests, all pass as of
+Phase 4.77 Slice 1 diff; bare `pytest` may run integration when live gates are on).
 
 | ID | Fix | Phase | Priority | Status |
 | --- | --- | --- | --- | --- |
@@ -95,7 +95,7 @@ live gates are on).
 | S476-10 | Write failing `test_build_pages_and_passages_frame_preserves_aggregate_text_with_field_decode`: merged `pages.text` matches Phase 4.75 aggregate path when decoder is wired | 4.76 Slice 5 | required | done |
 | S476-11 | ~~Write failing `test_normalize_run_skips_empty_crawl_with_field_decode`~~ — **superseded by S476-17:** structured-only crawls intentionally emit `page_content_fields` (and `page_html` when present) while omitting `pages` / `passages` when aggregate text is empty. True no-URL crawls are already skipped by all three sinks | 4.76 Slice 5 | required | done |
 | S476-12 | Add stored-run re-normalize smoke fixture (multi-field `items[]` + HTML) and assert curated lake row counts; extend `test_round_trip.py` or `test_run_normalize.py`. **Partial:** `test_normalize_run_materializes_structured_fields_and_html_from_stored_run` + `test_cli_round_trip_materializes_structured_only_page_text_payload` cover normalize and CLI `normalize` paths; close when S476-46 + S476-51 + S476-56 land | 4.76 Slice 5 | required | open |
-| S476-13 | Gate or fix live integration smoke: `test_live_provider_smoke_writes_artifacts` fails with Gemini `404 Not Found` when `SEO_RANK_ENABLE_GEMINI=1` (reproduced Jul 2026: bare `pytest` → **96 pass, 1 fail**) — validate API key/model/endpoint or skip when embed health check fails | QA / integration | required | open |
+| S476-13 | Gate or fix live integration smoke: `test_live_provider_smoke_writes_artifacts` fails with Gemini `404 Not Found` when `SEO_RANK_ENABLE_GEMINI=1` (reproduced Jul 2026: bare `pytest` → unit pass + 1 integration fail) — validate API key/model/endpoint or skip when embed health check fails | QA / integration | required | open |
 | S476-14 | Document default Phase 4.76 sign-off gate as `pytest tests/unit`; full suite (`pytest`) runs integration when `SEO_RANK_RUN_LIVE_INTEGRATION=1` in `.env` and needs healthy provider credentials | QA / docs | required | open |
 | S476-15 | Add Phase 4.76 manual sign-off checklist to `TESTING.md` only (no separate QA doc): live crawl contract, `normalize --run` per-field + HTML, re-normalize on pre-4.76 run, locale note (`--language` does not change page crawl pool), rollback criterion (S476-16) | 4.76 docs | nice-to-have | open |
 | S476-16 | Rollback criterion for slices 3–4: if per-field or HTML wiring changes `pages` / `passages` row counts or breaks existing normalize fixtures, revert and re-run `test_run_normalize.py` + `test_round_trip.py` before merge | 4.76 Slice 5 | nice-to-have | open |
@@ -113,7 +113,7 @@ Follow-ups from the Jul 2026 senior QA pass. Priority order: S476-14 + S476-23
 | S476-23 | Pin `.codex-sdlc/manifest.json` `test_command` (and git-hook proof) to `pytest tests/unit` or `pytest -m "not integration"` so SDLC hooks do not invoke live smoke when `.env` sets `SEO_RANK_RUN_LIVE_INTEGRATION=1` | QA / SDLC | required | open |
 | S476-24 | Add `addopts = "-m 'not integration'"` to `[tool.pytest.ini_options]` in `pyproject.toml` so bare `pytest` matches unit-only sign-off; live smoke runs only with `pytest -m integration` | QA / pytest | nice-to-have | open |
 | S476-25 | ~~Scaffold `docs/qa/release-phase-4.76.md`~~ — **superseded:** sign-off checklist and must-pass commands live in `TESTING.md` (S476-15) and this file's Slice 5 / release-infrastructure sections; do not add a separate QA doc | 4.76 docs | nice-to-have | cancelled |
-| S476-26 | Fix `TESTING.md` verification status: state unit baseline (`pytest tests/unit` → **96 pass**) separately from full `pytest` when live gates are on (integration runs and may fail; currently stale "91 passing, 1 skipped") | QA / docs | nice-to-have | open |
+| S476-26 | Fix `TESTING.md` verification status: state unit baseline (`pytest tests/unit` → **116 pass**) separately from full `pytest` when live gates are on (integration runs and may fail) | QA / docs | nice-to-have | done |
 | S476-27 | TDD gate for Slice 4–5: S476-46 → S476-54 → close S476-12 (S476-09, S476-10, S476-44 **done** in Jul 2026 diff). S476-11 and S476-17 closed as superseded. **Partial:** Slice 4 `page_html` sink shipped; S476-42 / S476-43 done; orphan `normalize_run` test (S476-46), raw-HTML `normalize_run` test (S476-54), and test hardening (S476-49–S476-57) still open | 4.76 Slices 4–5 | required | open |
 | S476-28 | Slice 4–5 merge sign-off must-pass: `pytest tests/unit -q` plus targeted `test_run_normalize.py` + `test_round_trip.py`; do not treat bare `pytest` as green until S476-13 and S476-23/24 are closed | 4.76 Slice 5 | required | open |
 
@@ -123,7 +123,7 @@ Follow-ups from the Jul 2026 senior QA pass. Priority order: S476-14 + S476-23
 
 Follow-ups from the Jul 2026 release-readiness review and Jul 2026 senior QA
 follow-up. **Verdict:** Phase 4.76 Slice 5 is **not** release-ready; Slices 1–4
-code is largely shipped, unit baseline is green (`pytest tests/unit` → 96 pass),
+code is largely shipped, unit baseline is green (`pytest tests/unit` → 116 pass),
 but required TDD gates (S476-12 remainder, **S476-46** orphan invariant) and
 integration gate policy (S476-13, S476-23) remain open. S476-09, S476-10, and
 S476-44 closed in Jul 2026 diff. Fields-vs-pages policy resolved in code (S476-17, S476-11 superseded; docs
@@ -149,7 +149,7 @@ S476-34 (GOALS progress line) → S476-32 (GOALS sign-off).
 Second senior QA pass on uncommitted Slice 5 work, plus a third pass (diff review)
 with recommendations folded into S476-46–S476-57 below. **Verdict unchanged:**
 Slice 5 is **conditionally merge-ready at the unit layer** (`pytest tests/unit`
-→ 96 pass) but **not** release-ready until required TDD gates and S476-38 docs
+→ 116 pass) but **not** release-ready until required TDD gates and S476-38 docs
 close. Default merge gate (S476-28):
 
 ```bash
@@ -230,7 +230,7 @@ S476-35 / S476-04 (`normalize.py` hardening) → S476-23 / S476-24 / S476-13
 pytest tests/unit -q
 ```
 
-Expected: **99 passed** (`pytest tests/unit`; verified Jul 2026 code review).
+Expected: **116 passed** (`pytest tests/unit`; verified Phase 4.77 Slice 1 diff).
 
 **Targeted before Slice 5 sign-off:**
 
@@ -242,7 +242,7 @@ pytest tests/unit/test_run_normalize.py tests/unit/test_dataforseo_requests.py t
 S476-51 / S476-53 / S476-49 (test clarity) → S476-57 → S476-50 / S476-52 →
 S476-56. **Docs (not code):** S476-47 / S476-38 (policy matrix) → close S476-12.
 
-**Integration (when live gates on):** bare `pytest` → 99 pass + 1 fail until
+**Integration (when live gates on):** bare `pytest` → unit pass + 1 integration fail until
 S476-13 closes; do not use as hook gate until S476-23 / S476-24.
 
 **Approve implementation direction** for Slice 5 fields-vs-pages policy; **do
@@ -351,6 +351,58 @@ if none of these block deps/docs/round-trip work.
 | --- | --- | --- | --- |
 | S6-DONE-01 | Wire `seo-rank replay` to read one `response_id` from `raw_responses` via `scan_raw_responses` (successor to eager `load_raw_response_rows`) | 4.5 Slice 6 | done |
 | S6-DONE-02 | Align Slice 6 docs: `README.md`, `ARCHITECTURE.md`, `GOALS.md`, `ROADMAP.md`, `TESTING.md` with shipped CLI surfaces | 4.5 Slice 6 | done |
+
+---
+``
+## Phase 4.77 — Slice 1 (schema contracts — already done)
+
+Shipped in Jul 2026 diff: `DATAFORSEO_RESPONSE_SCHEMAS`, `DataForSeoParseError`,
+`validate_dataforseo_response()`, strict leaf type checks (`_matches_expected_type`),
+missing-field `expected: "present"` errors, content-parsing item validation, and unit
+tests in `test_dataforseo_requests.py` / `test_serp_normalization.py`. Validator is
+standalone — boundary wiring is Slice 2 (S477-04–S477-09).
+
+| ID | Fix | Phase | Status |
+| --- | --- | --- | --- |
+| S477-DONE-01 | Explicit schemas + `validate_dataforseo_response()` for `keyword_expansion`, `serp`, and `page_text`; parametrized pass-through tests on fixture responses | 4.77 Slice 1 | done |
+| S477-DONE-02 | Reject `bool` where schema expects `int` (`rank_group`) via `type(value) is expected_type` in `_matches_expected_type`; tests `test_validate_dataforseo_response_rejects_bool_rank_group_as_int`, `test_normalize_serp_results_rejects_bool_rank_group` | 4.77 Slice 1 | done |
+| S477-DONE-03 | Missing-field `DataForSeoParseError` with `expected: "present"` and `got field absent`; test `test_validate_dataforseo_response_reports_missing_field_as_absent` | 4.77 Slice 1 | done |
+| S477-DONE-04 | Unknown endpoint raises at `<endpoint>`; test `test_validate_dataforseo_response_rejects_unknown_endpoint` | 4.77 Slice 1 | done |
+| S477-DONE-05 | Nested `items[].page_content` passes validation; test `test_validate_dataforseo_response_accepts_nested_page_content_fixture` | 4.77 Slice 1 | done |
+| S477-DONE-06 | Empty-page response (`items: None`, `items_count: 0`) passes validation; test `test_validate_dataforseo_response_accepts_empty_page_response` | 4.77 Slice 1 | done |
+| S477-DONE-07 | `page_text` item missing all content keys raises with content-key expectation message; test `test_validate_dataforseo_response_rejects_content_item_without_body` | 4.77 Slice 1 | done |
+| S477-DONE-08 | SERP top-level type drift raises typed error; test `test_validate_dataforseo_response_rejects_schema_drift_with_typed_error` | 4.77 Slice 1 | done |
+| S477-DONE-09 | `page_content` wrong-type drift raises typed error; test `test_validate_dataforseo_response_checks_content_parsing_item_shape` | 4.77 Slice 1 | done |
+
+---``
+
+## Phase 4.77 — Slice 1 (post-ship polish)
+
+| ID | Fix | Phase | Priority | Status |
+| --- | --- | --- | --- | --- |
+| S477-03 | Remove unreachable `isinstance` branch after `_raise_unless_type(items, list, ...)` in `_validate_content_parsing_result` and redundant `results` list `continue` in `_validate_content_parsing_response` | 4.77 Slice 1 | nice-to-have | open |
+
+---
+
+## Phase 4.77 — Slice 2 (boundary enforcement — open)
+
+| ID | Fix | Phase | Priority | Status |
+| --- | --- | --- | --- | --- |
+| S477-04 | Add `request.path` → endpoint schema key mapping helper and unit tests for all three DataForSEO paths plus unknown path | 4.77 Slice 2 | required | open |
+| S477-05 | Call `validate_dataforseo_response` from `execute_dataforseo_request` (or shared adapter wrapper) using path mapping | 4.77 Slice 2 | required | open |
+| S477-06 | Unit test: mock transport returns schema-invalid SERP; live CLI keyword path raises `DataForSeoParseError` before `normalize_serp_results` | 4.77 Slice 2 | required | open |
+| S477-07 | Validate stored-run `raw_responses` bodies at normalize entry before curated Parquet writes | 4.77 Slice 2 | required | open |
+| S477-08 | Unit test in `test_run_normalize.py`: drift `page_text` Parquet row fails normalize with `DataForSeoParseError` and does not materialize curated tables | 4.77 Slice 2 | required | open |
+| S477-09 | Extend round-trip or normalize regression to assert schema-valid fixtures still pass after boundary wiring (guard against accidental break of `test_round_trip` / stored-run paths) | 4.77 Slice 2 | required | open |
+
+---
+
+## Phase 4.77 — Slice 3 (drift coverage — open)
+
+| ID | Fix | Phase | Priority | Status |
+| --- | --- | --- | --- | --- |
+| S477-11 | Add parametrized drift tests for missing required leaf fields (`keyword`, `rank_group`, `url`, `title`) per endpoint in `test_dataforseo_requests.py` (only `rank_group` absent covered today) | 4.77 Slice 3 | required | open |
+| S477-15 | Add test that non-dict root input to `validate_dataforseo_response` raises at `<root>` (handler exists; untested) | 4.77 Slice 3 | nice-to-have | open |
 
 ---
 

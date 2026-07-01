@@ -32,12 +32,76 @@ class DataForSeoCredentials:
     password: str
 
 
+@dataclass(frozen=True)
+class DataForSeoFieldSchema:
+    path: tuple[str, ...]
+    expected_type: type | tuple[type, ...]
+
+
 class DataForSeoCredentialError(ValueError):
     """Raised when required DataForSEO credentials are missing."""
 
 
 class DataForSeoClientError(RuntimeError):
     """Raised when a DataForSEO HTTP request fails."""
+
+
+class DataForSeoParseError(ValueError):
+    """Raised when a DataForSEO response does not match an endpoint schema."""
+
+    def __init__(
+        self,
+        *,
+        endpoint: str,
+        path: str,
+        expected: str,
+        actual: object,
+        actual_type: str | None = None,
+    ) -> None:
+        self.endpoint = endpoint
+        self.path = path
+        self.expected = expected
+        self.actual_type = (
+            actual_type if actual_type is not None else type(actual).__name__
+        )
+        super().__init__(
+            f"DataForSEO {endpoint} response schema drift at {path}: "
+            f"expected {expected}, got {self.actual_type}"
+        )
+
+
+DATAFORSEO_RESPONSE_SCHEMAS: dict[str, tuple[DataForSeoFieldSchema, ...]] = {
+    "keyword_expansion": (
+        DataForSeoFieldSchema(("tasks",), list),
+        DataForSeoFieldSchema(("tasks", "[]", "result"), list),
+        DataForSeoFieldSchema(("tasks", "[]", "result", "[]", "keyword"), str),
+    ),
+    "serp": (
+        DataForSeoFieldSchema(("tasks",), list),
+        DataForSeoFieldSchema(("tasks", "[]", "result"), list),
+        DataForSeoFieldSchema(("tasks", "[]", "result", "[]", "items"), list),
+        DataForSeoFieldSchema(
+            ("tasks", "[]", "result", "[]", "items", "[]", "type"),
+            str,
+        ),
+        DataForSeoFieldSchema(
+            ("tasks", "[]", "result", "[]", "items", "[]", "rank_group"),
+            int,
+        ),
+        DataForSeoFieldSchema(
+            ("tasks", "[]", "result", "[]", "items", "[]", "url"),
+            str,
+        ),
+        DataForSeoFieldSchema(
+            ("tasks", "[]", "result", "[]", "items", "[]", "title"),
+            str,
+        ),
+    ),
+    "page_text": (
+        DataForSeoFieldSchema(("tasks",), list),
+        DataForSeoFieldSchema(("tasks", "[]", "result"), list),
+    ),
+}
 
 
 def build_keyword_expansion_request(
@@ -156,6 +220,210 @@ def execute_dataforseo_request(
     if not isinstance(response, dict):
         raise DataForSeoClientError("DataForSEO response was not a JSON object")
     return response
+
+
+def validate_dataforseo_response(
+    endpoint: str,
+    response: dict[str, object],
+) -> dict[str, object]:
+    """Validate a DataForSEO response against the explicit endpoint schema."""
+
+    schema = DATAFORSEO_RESPONSE_SCHEMAS.get(endpoint)
+    if schema is None:
+        raise DataForSeoParseError(
+            endpoint=endpoint,
+            path="<endpoint>",
+            expected="known DataForSEO endpoint schema",
+            actual=endpoint,
+        )
+    if not isinstance(response, dict):
+        raise DataForSeoParseError(
+            endpoint=endpoint,
+            path="<root>",
+            expected="dict",
+            actual=response,
+        )
+    for field_schema in schema:
+        _validate_dataforseo_field(response, endpoint=endpoint, schema=field_schema)
+    if endpoint == "page_text":
+        _validate_content_parsing_response(response)
+    return response
+
+
+def _validate_dataforseo_field(
+    value: object,
+    *,
+    endpoint: str,
+    schema: DataForSeoFieldSchema,
+) -> None:
+    path = schema.path
+
+    def walk(current: object, parts: tuple[str, ...], rendered_path: str) -> None:
+        if not parts:
+            if not _matches_expected_type(current, schema.expected_type):
+                raise DataForSeoParseError(
+                    endpoint=endpoint,
+                    path=rendered_path,
+                    expected=_expected_type_name(schema.expected_type),
+                    actual=current,
+                )
+            return
+
+        part = parts[0]
+        if part == "[]":
+            if not isinstance(current, list):
+                raise DataForSeoParseError(
+                    endpoint=endpoint,
+                    path=rendered_path,
+                    expected="list",
+                    actual=current,
+                )
+            for index, item in enumerate(current):
+                walk(item, parts[1:], f"{rendered_path}[{index}]")
+            return
+
+        if not isinstance(current, Mapping):
+            raise DataForSeoParseError(
+                endpoint=endpoint,
+                path=rendered_path,
+                expected="object",
+                actual=current,
+            )
+        if part not in current:
+            raise DataForSeoParseError(
+                endpoint=endpoint,
+                path=_join_schema_path(rendered_path, part),
+                expected="present",
+                actual=None,
+                actual_type="field absent",
+            )
+        walk(current[part], parts[1:], _join_schema_path(rendered_path, part))
+
+    walk(value, path, "")
+
+
+def _join_schema_path(prefix: str, part: str) -> str:
+    if not prefix:
+        return part
+    return f"{prefix}.{part}"
+
+
+def _expected_type_name(expected_type: type | tuple[type, ...]) -> str:
+    if isinstance(expected_type, tuple):
+        return " or ".join(type_.__name__ for type_ in expected_type)
+    if expected_type is Mapping:
+        return "object"
+    return expected_type.__name__
+
+
+def _matches_expected_type(
+    value: object,
+    expected_type: type | tuple[type, ...],
+) -> bool:
+    if isinstance(expected_type, tuple):
+        return any(_matches_expected_type(value, type_) for type_ in expected_type)
+    if expected_type is Mapping:
+        return isinstance(value, Mapping)
+    return type(value) is expected_type
+
+
+def _validate_content_parsing_response(response: Mapping[str, object]) -> None:
+    tasks = response["tasks"]
+    if not isinstance(tasks, list):
+        return
+    for task_index, task in enumerate(tasks):
+        if not isinstance(task, Mapping):
+            raise DataForSeoParseError(
+                endpoint="page_text",
+                path=f"tasks[{task_index}]",
+                expected="object",
+                actual=task,
+            )
+        results = task["result"]
+        if not isinstance(results, list):
+            continue
+        for result_index, result in enumerate(results):
+            result_path = f"tasks[{task_index}].result[{result_index}]"
+            if not isinstance(result, Mapping):
+                raise DataForSeoParseError(
+                    endpoint="page_text",
+                    path=result_path,
+                    expected="object",
+                    actual=result,
+                )
+            _validate_content_parsing_result(result, result_path)
+
+
+def _validate_content_parsing_result(
+    result: Mapping[str, object],
+    result_path: str,
+) -> None:
+    text = result.get("text")
+    if text is not None:
+        _raise_unless_type(result.get("url"), str, f"{result_path}.url")
+        _raise_unless_type(result.get("title", ""), str, f"{result_path}.title")
+        _raise_unless_type(text, str, f"{result_path}.text")
+        return
+
+    items = result.get("items")
+    if items is None and result.get("items_count") == 0:
+        return
+    _raise_unless_type(items, list, f"{result_path}.items")
+    if not isinstance(items, list):
+        return
+    for item_index, item in enumerate(items):
+        item_path = f"{result_path}.items[{item_index}]"
+        if not isinstance(item, Mapping):
+            raise DataForSeoParseError(
+                endpoint="page_text",
+                path=item_path,
+                expected="object",
+                actual=item,
+            )
+        _validate_content_parsing_item(item, item_path)
+
+
+def _validate_content_parsing_item(
+    item: Mapping[str, object],
+    item_path: str,
+) -> None:
+    if "url" in item:
+        _raise_unless_type(item["url"], str, f"{item_path}.url")
+    if "page_content" in item:
+        _raise_unless_type(item["page_content"], Mapping, f"{item_path}.page_content")
+    if "page_as_markdown" in item:
+        _raise_unless_type(
+            item["page_as_markdown"],
+            str,
+            f"{item_path}.page_as_markdown",
+        )
+    for html_key in ("raw_html", "html", "page_html"):
+        if html_key in item:
+            _raise_unless_type(item[html_key], str, f"{item_path}.{html_key}")
+    if not any(
+        key in item
+        for key in ("page_content", "page_as_markdown", "raw_html", "html", "page_html")
+    ):
+        raise DataForSeoParseError(
+            endpoint="page_text",
+            path=item_path,
+            expected="content parsing item with page_content, page_as_markdown, or html",
+            actual=item,
+        )
+
+
+def _raise_unless_type(
+    value: object,
+    expected_type: type | tuple[type, ...],
+    path: str,
+) -> None:
+    if not isinstance(value, expected_type):
+        raise DataForSeoParseError(
+            endpoint="page_text",
+            path=path,
+            expected=_expected_type_name(expected_type),
+            actual=value,
+        )
 
 
 def dataforseo_basic_auth_header(credentials: DataForSeoCredentials) -> str:
@@ -308,7 +576,7 @@ def normalize_serp_results(
         title = item.get("title")
         description = item.get("description", "")
         if (
-            not isinstance(rank, int)
+            not _matches_expected_type(rank, int)
             or not isinstance(url, str)
             or not isinstance(title, str)
         ):
