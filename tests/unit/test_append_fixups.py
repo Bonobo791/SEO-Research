@@ -16,6 +16,11 @@ def test_infer_fixup_prefix_from_goals_phase() -> None:
     assert infer_fixup_prefix(goals) == "S477"
 
 
+def test_infer_fixup_prefix_from_phase_five_goals() -> None:
+    goals = "# Goals\n\nBuild Phase 5 statistical analysis.\n"
+    assert infer_fixup_prefix(goals) == "S5"
+
+
 def test_parse_fixup_rows_reads_auto_table_lines() -> None:
     text = """
 Some review prose.

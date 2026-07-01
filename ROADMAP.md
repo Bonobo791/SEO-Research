@@ -5,43 +5,7 @@ scope contract; keep deferred and historical items here.
 
 ## Current Backlog
 
-Active scope contract: `GOALS.md` (Phase 4.77).
-
-### Phase 4.77 — adapter schema validation
-
-Future contract: validate every DataForSEO response at the adapter boundary
-against explicit endpoint schemas before normalization or curated writes.
-Schema drift must fail loud with a typed parse error, not leak silently into
-downstream tables.
-
-API reference:
-https://docs.dataforseo.com/v3/on_page/content_parsing/live/
-
-- **Boundary validation** — parse `keyword_expansion`, `serp`, `content_parsing/live`,
-  and stored-run raw responses with explicit schemas in the provider adapter
-  layer.
-- **Typed errors** — raise endpoint-scoped parse errors when required fields are
-  missing, types drift, or unknown semantics would otherwise flow downstream.
-- **No silent fallback** — keep raw JSON for audit, but do not hand unvalidated
-  payloads to normalization or re-normalization code.
-- **Tests** — fixture drift cases for `content_parsing/live`, a valid payload
-  pass-through case, and stored-run failure coverage.
-
-#### Dev slices
-
-1. **[x] Slice 1 — Schema contracts**
-   - Define explicit schemas for DataForSEO adapter payloads.
-   - Choose the smallest library that gives typed parse errors in Python
-     (`Pydantic` or JSON Schema validation).
-
-2. **[x] Slice 2 — Boundary enforcement**
-   - Validate live and stored-run DataForSEO responses at the adapter seam.
-   - Surface endpoint-specific parse errors before curated normalization.
-
-3. **[x] Slice 3 — Drift coverage**
-   - Add fixtures for missing fields, type mismatches, and extra/renamed
-     `content_parsing/live` fields.
-   - Verify valid responses still pass through unchanged.
+Active scope contract: `GOALS.md` (Phase 5).
 
 ### Phase 5 — Statistical analysis
 
@@ -367,6 +331,10 @@ text so similarity features better mirror hybrid search-engine retrieval
 - **Phase 4.77 shipped:** adapter schema validation at the DataForSEO boundary
   with endpoint-scoped parse errors and drift coverage for missing fields,
   type mismatches, and valid pass-through fixtures.
+- **GOALS retargeted to Phase 5 (2026-07-01):** statistical analysis on
+  `analysis_mart` — Spearman-first observational association, pooled OLS with
+  keyword-clustered SEs, guardrails, BH policy, `analysis_spec.v1.yaml`, and
+  `stats_*` artifacts wired through `seo-rank analyze`.
 - **GOALS retargeted to Phase 4.75 (2026-06-29):** page_text curation hardening
   after stored-run normalize failed on live nested `page_content` payloads.
 - **Phase 4.75 Slice 1 shipped:** `parsed_page_text()` decodes nested DataForSEO

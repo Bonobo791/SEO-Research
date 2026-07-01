@@ -22,38 +22,36 @@ def test_goals_and_roadmap_define_active_scope_and_backlog() -> None:
 
     assert "active-scope contract" in goals
     assert "Active Objective" in goals
-    assert "Phase 4.77" in goals
-    assert "Phase 4.77 objective" in goals
-    assert "adapter schema validation" in goals
-    assert "typed parse error" in goals
-    assert "boundary validation" in goals
-    assert "Phase 4.76" in goals
-    assert "Completed: Phase 4.76" in goals
+    assert "Phase 5" in goals
+    assert "Phase 5 objective" in goals
+    assert "statistical analysis" in goals
+    assert "analysis_mart" in goals
+    assert "analysis_spec.v1.yaml" in goals
+    assert "statsmodels" in goals
+    assert "Completed: Phase 4.77" in goals
+    assert "Phase 4.77 acceptance criteria" not in goals
     assert "Phase 4.5" not in goals
     assert "Phase 4 acceptance criteria" not in goals
     assert "Current Backlog" in roadmap
-    assert "Phase 4.76" in roadmap
-    assert "Phase 4.76 Slice 5 shipped" in roadmap
-    assert "content_parsing/live" in roadmap
-    assert "ip_pool_for_scan" in roadmap
-    assert "Phase 4.77" in roadmap
-    assert "adapter schema validation" in roadmap
-    assert "typed parse error" in roadmap
+    assert "Phase 5" in roadmap
+    assert "Statistical analysis" in roadmap
+    assert "analysis_spec.v1.yaml" in roadmap
+    assert "Phase 4.77 shipped" in roadmap
+    assert "GOALS retargeted to Phase 5" in roadmap
     assert "Phase 4.5 signed off" in roadmap
     assert "Phase 4 shipped" in roadmap
 
 
-def test_readme_reflects_phase_four_capabilities() -> None:
+def test_readme_documents_cli_capabilities() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
     assert "What works today" in readme
-    assert "Product direction" in readme
-    assert "Phase 4 shipped" in readme
     assert 'seo-rank run --seed "technical seo" --dry-run' in readme
-    assert "when `--output-dir` is omitted" in readme
+    assert "runs/{run_id}/" in readme
     assert "--live-bge" in readme
     assert "--live-gemini" in readme
     assert "--live-textrazor" in readme
+    assert "Phase " not in readme
 
 
 def test_manifest_records_resolved_pytest_commands() -> None:
@@ -105,15 +103,12 @@ def test_pyproject_declares_runtime_parquet_and_polars_dependencies() -> None:
 
 
 def test_phase_45_slice_7_regression_sweep_marks_round_trip_docs_as_shipped() -> None:
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
     testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
     architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
     roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
 
     assert "Phase 4.5 Slice 7 shipped" in roadmap
     assert "Phase 4.5 signed off" in roadmap
-    assert "Slice 7 shipped" in readme
-    assert "round-trip regression sweep" in readme
     assert "`seo-rank run` defaults to `runs/{run_id}/`" in architecture
     assert "Dedicated Parquet lake write → normalize → build-features → analyze round-trip regression sweep" in testing
     assert "round-trip regression sweep" in architecture
@@ -127,6 +122,6 @@ def test_phase_45_slice_9_regression_sweep_marks_mart_sink_docs_as_shipped() -> 
     assert "Phase 4.5 Slice 9 shipped" in roadmap
     assert "Phase 4.5 Slice 10 shipped" in roadmap
     assert "Phase 4.5 signed off" in roadmap
-    assert "125 tests" in architecture
-    assert "125 tests collected" in testing
+    assert "126 tests" in architecture
+    assert "126 tests collected" in testing
     assert "sink feature marts lazily with Parquet statistics" in testing

@@ -14,7 +14,7 @@ HOW_TO_USE_HEADING = "## How to use this file"
 TABLE_HEADER = "| ID | Fix | Phase | Priority | Status |"
 TABLE_SEPARATOR = "| --- | --- | --- | --- | --- |"
 ID_PATTERN = re.compile(r"\b(S\d+)-(\d+)\b", re.IGNORECASE)
-PHASE_PATTERN = re.compile(r"Phase\s+(\d+)\.(\d+)", re.IGNORECASE)
+PHASE_PATTERN = re.compile(r"Phase\s+(\d+)(?:\.(\d+))?", re.IGNORECASE)
 
 DOC_PATH_MARKERS = (
     "README.md",
@@ -50,12 +50,12 @@ DOC_VERB_PREFIXES = (
 )
 
 
-def infer_fixup_prefix(goals_text: str, *, default: str = "S477") -> str:
+def infer_fixup_prefix(goals_text: str, *, default: str = "S5") -> str:
     match = PHASE_PATTERN.search(goals_text)
     if not match:
         return default
     major, minor = match.groups()
-    return f"S{major}{minor}"
+    return f"S{major}{minor or ''}"
 
 
 def _split_table_row(line: str) -> list[str]:

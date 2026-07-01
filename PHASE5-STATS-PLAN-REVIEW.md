@@ -313,7 +313,7 @@ fixtures):
 | `ARCHITECTURE.md` | Add "Phase 5 estimand" before OLS Pre-Analysis; link to this file | Done |
 | `ROADMAP.md` | Phase 5 slices 1–10 + acceptance criteria + Phase 5.1 deferrals | Done |
 | `TESTING.md` | Golden `analysis_mart` + expected ρ/slope tolerance | Done |
-| `GOALS.md` | When Phase 5 becomes active scope, move stats items from Out Of Scope | Pending (retarget when Phase 5 starts) |
+| `GOALS.md` | When Phase 5 becomes active scope, move stats items from Out Of Scope | Done |
 
 ---
 

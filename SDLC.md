@@ -90,8 +90,8 @@ Product architecture and planning live in root markdown files (there is no
 - **Architecture and planned pipeline:** `ARCHITECTURE.md` — stack, shipped
   Phase 1 modules, offline data flow, planned live similarity and statistical
   analysis
-- **Active scope:** `GOALS.md` — Phase 1 complete; Phase 2 = live provider
-  boundaries
+- **Active scope:** `GOALS.md` — Phase 5 statistical analysis on
+  `analysis_mart` (Spearman + pooled OLS, guardrails, `stats_*` artifacts)
 - **Backlog and history:** `ROADMAP.md` — Phases 2–6 backlog
 - **Verification contract:** `TESTING.md` — pytest suite and coverage map
 - **Quick start:** `README.md` — what works today and repo layout

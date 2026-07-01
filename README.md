@@ -15,6 +15,58 @@ standard-library HTTP clients, env-gated live DataForSEO and TextRazor paths,
 and env-gated live Gemini (`gemini-embedding-2`) and BGE (FlagEmbedding on CUDA)
 page scoring.
 
+### What `seo-rank run` executes
+
+On every `run` (offline or live), per expanded cluster keyword:
+
+1. SERP normalization (top *N* organic rows, default 20)
+2. Page text from fixtures or DataForSEO `content_parsing/live`
+3. Passage splitting
+4. **Passage-level similarity features** — max/mean cosine per URL from deterministic
+   fixture embeddings (`compute_page_similarity_features`)
+5. **Page-level similarity scores** — three backends per URL (`compute_page_similarity_scores`
+   or live overrides below)
+6. TextRazor entities (fixture unless `--live-providers --live-textrazor`)
+7. Artifacts: `run.json`, `report.md`, and `parquet/raw_responses/`
+
+A plain `run` does **not** call `normalize`, `build-features`, or `analyze`. Use
+`--stored-run runs/RUN_ID` to re-materialize curated tables and marts from an
+existing run tree without provider calls.
+
+### Similarity backends (fixture vs live)
+
+All three page-level backends are always emitted in JSON/Markdown. Default and
+live runs without optional flags use **deterministic fixture scorers** in
+`similarity.py` (hash-style embeddings and a stand-in BGE formula). They are
+for pipeline shape and tests, not production-grade retrieval.
+
+| Backend | JSON key | Default `run` | Live override |
+|---------|----------|---------------|---------------|
+| BGE cross-encoder rerank | `bge` | Fixture formula | `--live-providers --live-bge` loads `BAAI/bge-reranker-v2-m3` (CUDA) |
+| Gemini Doc Retrieval | `gemini_doc_retrieval` | Fixture cosine | `--live-providers --live-gemini` (`gemini-embedding-2`, asymmetric query/doc) |
+| Gemini Semantic Similarity | `gemini_semantic_similarity` | Fixture cosine | same `--live-gemini` flag (symmetric sentence-similarity task) |
+
+With `--live-providers` only, DataForSEO is live but similarity stays on fixtures
+until `--live-bge` and/or `--live-gemini` are set. Live BGE **merges** real rerank
+scores over the base page-similarity rows; it does not replace Gemini columns.
+
+Retrieve-then-rerank (BM25 + bi-encoder recall, then BGE) is **not** implemented;
+see `ROADMAP.md` (BGE hybrid / retrieve-then-rerank backlog).
+
+### `seo-rank analyze` today
+
+`analyze` reads feature marts and writes `parquet/analysis_mart/` (SERP rank plus
+the three similarity columns and page text length). It does **not** re-fetch pages,
+re-run embeddings, or run rank–similarity statistics. Spearman ρ, pooled OLS,
+guardrails, and `stats_*` artifacts are specified in `GOALS.md` — **not implemented** in
+the CLI yet.
+
+### Standalone script
+
+`analysis/gemini_nwh_similarity.py` is a one-off experiment for a fixed keyword
+and hand-picked text blocks. It can call live Gemini and BGE when configured; it
+is not part of the default CLI `run` flow.
+
 ```bash
 python -m pytest
 seo-rank run --seed "technical seo" --dry-run
@@ -41,39 +93,9 @@ Live-provider contract:
   off, `store_raw_html: true`). They do **not** follow `--location` /
   `--language`. Keyword expansion and SERP still use those flags, so
   `--language fr --location France` returns French SERPs but US-fetched page
-  HTML. Aligning page-crawl locale with SERP locale is not supported in Phase
-  4.76.
+  HTML. Aligning page-crawl locale with SERP locale is **not supported** today.
 
-## Product direction
-
-**Phase 4 shipped.** Full cluster orchestration plus three page-level measurements
-on each top-20 organic SERP row:
-
-| Name | JSON key | Live flag |
-|------|----------|-----------|
-| BGE | `bge` | `--live-bge` |
-| Gemini Doc Retrieval | `gemini_doc_retrieval` | `--live-gemini` |
-| Gemini Semantic Similarity | `gemini_semantic_similarity` | `--live-gemini` |
-
-Offline and default live runs use deterministic fixtures. Opt-in flags swap in
-real backends when env gates and credentials are set.
-
-**Phase 4.5 (shipped):** run-scoped Parquet lake (`runs/{run_id}/` by default
-when `--output-dir` is omitted, or an explicit override path when supplied) with
-authoritative `raw_responses`, curated tables, feature marts, and `analysis_mart`
-plus a Polars LazyFrame library in `src/seo_rank/data/` (`normalize_run`,
-`build_feature_marts`, `build_analysis_mart`). CLI commands `normalize`,
-`build-features`, `analyze`, and `replay` are wired; `run --stored-run` re-materializes
-marts from a stored run tree without provider calls.
-**Slice 7 shipped:** docs alignment and the round-trip regression sweep are in
-place. **Next:** curated sink parity/statistics hardening in the Phase 4.5 write
-path. Later: passage/domain scopes (Phase 5.5), `statsmodels` OLS with
-Benjamini-Hochberg (Phase 5), and expanded report sections (Phase 6).
-
-Details: `GOALS.md` and `ARCHITECTURE.md` (see **Run-scoped Parquet lake** and
-**Polars data layer**).
-
-### Storage layout (Phase 4.5)
+### Storage layout 
 
 `seo-rank run` writes this layout under `runs/{run_id}/` when `--output-dir` is
 omitted. CLI subcommands materialize layers in place on an existing run tree.
@@ -97,7 +119,7 @@ runs/{run_id}/
     analysis_mart/part-*.parquet
 ```
 
-### CLI (Phase 4.5)
+### CLI 
 
 ```bash
 seo-rank normalize --run RUN_ID
@@ -120,12 +142,13 @@ response.
 | Path | Purpose |
 |------|---------|
 | `src/seo_rank/` | CLI and provider boundaries |
-| `src/seo_rank/data/` | Polars lake transforms (Phase 4.5): `scans`, `normalize`, `features`, `marts`, `validate` |
+| `src/seo_rank/data/` | Polars lake transforms: `scans`, `normalize`, `features`, `marts`, `validate` |
 | `tests/unit/` | pytest unit tests |
 | `ARCHITECTURE.md` | Product architecture, data flow, planned pipeline |
 | `GOALS.md` | Active-scope contract |
-| `FIXUPS.md` | Slice-scoped small fixes backlog (phase-tagged hardening) |
-| `ROADMAP.md` | Phased backlog and history |
+| `FIXUPS.md` | Slice-scoped small fixes backlog |
+| `ROADMAP.md` | Backlog and history |
+| `analysis/gemini_nwh_similarity.py` | Standalone Gemini/BGE block-scoring experiment |
 | `TESTING.md` | Verification contract |
 
 ## Documentation

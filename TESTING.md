@@ -14,7 +14,7 @@ Pytest configuration and verification contract for SEO-Research.
   interpreter
 - Lint / type-check / build / coverage: not configured
 - Expected test duration: fast (< 1s)
-- **Current verification status:** 125 tests collected; 125 passing
+- **Current verification status:** 126 tests collected; 126 passing
 
 ## Active Verification Command
 
@@ -92,7 +92,9 @@ Mock nondeterministic or destructive external effects (network, paid APIs,
 credentials). Prefer integration tests at real boundaries once live clients
 exist.
 
-## Planned tests (not yet in suite)
+## Planned tests (not yet in suite) — Phase 5 active scope
+
+See `GOALS.md` and `ROADMAP.md` § Phase 5 slices 1–10.
 
 - Feature marts and `analysis_mart` join keys (`run_id`, `target_keyword_id`,
   `canonical_url_hash`, `response_id`, `passage_id`)
