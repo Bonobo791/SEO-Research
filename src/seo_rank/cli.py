@@ -21,6 +21,7 @@ from seo_rank.data.scans import scan_curated_table, scan_raw_responses
 from seo_rank.dataforseo import (
     DataForSeoClientError,
     DataForSeoCredentialError,
+    DataForSeoParseError,
     DataForSeoCredentials,
     build_keyword_expansion_request,
     build_page_text_request,
@@ -32,6 +33,7 @@ from seo_rank.dataforseo import (
     normalize_keyword_expansion,
     normalize_serp_results,
     parsed_page_text,
+    validate_dataforseo_response,
     validate_dataforseo_credentials,
 )
 from seo_rank.bge_reranker import (
@@ -119,6 +121,7 @@ STORAGE_COMMAND_EXCEPTIONS = (
     OSError,
     ValueError,
     json.JSONDecodeError,
+    DataForSeoParseError,
     pl.exceptions.PolarsError,
 )
 
@@ -153,6 +156,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             BgeRerankerError,
             CliCommandError,
             DataForSeoClientError,
+            DataForSeoParseError,
             GeminiEmbeddingError,
             LiveProviderGateError,
             TextRazorClientError,
@@ -591,7 +595,8 @@ def build_live_payload(
         location_code=location_code,
         language_code=config.language,
     )
-    keyword_expansion = execute_dataforseo_request(
+    keyword_expansion = execute_validated_dataforseo_request(
+        "keyword_expansion",
         keyword_request,
         credentials=credentials.dataforseo,
         transport=dataforseo_transport,
@@ -664,7 +669,8 @@ def build_live_keyword_result(
     textrazor_transport,
     network_calls: list[str],
 ) -> dict[str, object]:
-    serp_response = execute_dataforseo_request(
+    serp_response = execute_validated_dataforseo_request(
+        "serp",
         build_serp_request(
             target_keyword,
             location_code=location_code,
@@ -686,7 +692,8 @@ def build_live_keyword_result(
     }
 
     page_text_responses = [
-        execute_dataforseo_request(
+        execute_validated_dataforseo_request(
+            "page_text",
             build_page_text_request(str(result["url"])),
             credentials=credentials.dataforseo,
             transport=dataforseo_transport,
@@ -782,6 +789,21 @@ def build_live_keyword_result(
         ],
         "textrazor_entities": textrazor_entities,
     }
+
+
+def execute_validated_dataforseo_request(
+    endpoint: str,
+    request,
+    *,
+    credentials: DataForSeoCredentials,
+    transport,
+) -> dict[str, object]:
+    response = execute_dataforseo_request(
+        request,
+        credentials=credentials,
+        transport=transport,
+    )
+    return validate_dataforseo_response(endpoint, response)
 
 
 def annotate_target_keyword(

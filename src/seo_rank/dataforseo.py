@@ -371,6 +371,11 @@ def _validate_content_parsing_result(
     _raise_unless_type(items, list, f"{result_path}.items")
     if not isinstance(items, list):
         return
+    has_content_item = any(
+        _content_parsing_item_has_body(item)
+        for item in items
+        if isinstance(item, Mapping)
+    )
     for item_index, item in enumerate(items):
         item_path = f"{result_path}.items[{item_index}]"
         if not isinstance(item, Mapping):
@@ -380,12 +385,18 @@ def _validate_content_parsing_result(
                 expected="object",
                 actual=item,
             )
-        _validate_content_parsing_item(item, item_path)
+        _validate_content_parsing_item(
+            item,
+            item_path,
+            allow_bodyless_items=has_content_item,
+        )
 
 
 def _validate_content_parsing_item(
     item: Mapping[str, object],
     item_path: str,
+    *,
+    allow_bodyless_items: bool = False,
 ) -> None:
     if "url" in item:
         _raise_unless_type(item["url"], str, f"{item_path}.url")
@@ -400,16 +411,28 @@ def _validate_content_parsing_item(
     for html_key in ("raw_html", "html", "page_html"):
         if html_key in item:
             _raise_unless_type(item[html_key], str, f"{item_path}.{html_key}")
-    if not any(
+    has_body = any(
         key in item
         for key in ("page_content", "page_as_markdown", "raw_html", "html", "page_html")
-    ):
+    )
+    if not has_body:
+        if allow_bodyless_items:
+            return
+        if any(key in item for key in ("crawl_status", "crawl_progress", "items", "items_count")):
+            return
         raise DataForSeoParseError(
             endpoint="page_text",
             path=item_path,
             expected="content parsing item with page_content, page_as_markdown, or html",
             actual=item,
         )
+
+
+def _content_parsing_item_has_body(item: Mapping[str, object]) -> bool:
+    return any(
+        key in item
+        for key in ("page_content", "page_as_markdown", "raw_html", "html", "page_html")
+    )
 
 
 def _raise_unless_type(

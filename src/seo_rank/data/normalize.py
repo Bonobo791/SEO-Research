@@ -14,11 +14,13 @@ from seo_rank.data.validate import (
     validate_materialized_frame_contract,
 )
 from seo_rank.dataforseo import (
+    DATAFORSEO_RESPONSE_SCHEMAS,
     decode_content_parsing_items,
     normalize_keyword_expansion,
     normalize_serp_results,
     parsed_page_text,
     parsed_page_text_details,
+    validate_dataforseo_response,
 )
 from seo_rank.similarity import compute_page_similarity_scores
 from seo_rank.text import normalize_page_text
@@ -429,6 +431,7 @@ def normalize_run(run_dir: Path) -> dict[str, object]:
     assert isinstance(dataset_catalog, dict)
 
     raw_responses = scan_raw_responses(run_dir)
+    validate_raw_response_bodies(raw_responses)
     curated_lazyframes = build_curated_lazyframes_from_raw_responses(
         raw_responses,
         run_id=run_id,
@@ -446,6 +449,18 @@ def normalize_run(run_dir: Path) -> dict[str, object]:
     run_payload["catalog"] = catalog
     run_json_path.write_text(json.dumps(run_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return catalog
+
+
+def validate_raw_response_bodies(raw_responses: pl.LazyFrame) -> None:
+    """Fail fast on any stored raw response schema drift before curated writes."""
+
+    for record in raw_responses.select(["endpoint", "response_body_bytes"]).collect(
+        engine="streaming"
+    ).to_dicts():
+        validate_endpoint = str(record["endpoint"])
+        if validate_endpoint not in DATAFORSEO_RESPONSE_SCHEMAS:
+            continue
+        _validated_response_body(record, endpoint=validate_endpoint)
 
 
 def load_raw_response_rows(run_dir: Path) -> list[dict[str, object]]:
@@ -571,7 +586,7 @@ def build_keywords_frame(frame: pl.DataFrame, *, run_id: str, seed: str) -> pl.D
     rows: list[dict[str, object]] = []
     for record in frame.to_dicts():
         response_id = str(record["response_id"])
-        body = json.loads(bytes(record["response_body_bytes"]).decode("utf-8"))
+        body = _validated_response_body(record, endpoint="keyword_expansion")
         for order, keyword in enumerate(
             normalize_keyword_expansion(body, seed=seed),
             start=1,
@@ -604,7 +619,7 @@ def build_serp_items_frame(
     for record in frame.to_dicts():
         response_id = str(record["response_id"])
         target_keyword = str(record["target_keyword"])
-        body = json.loads(bytes(record["response_body_bytes"]).decode("utf-8"))
+        body = _validated_response_body(record, endpoint="serp")
         target_keyword_id = stable_id(target_keyword)
         for result in normalize_serp_results(
             body,
@@ -640,7 +655,7 @@ def build_pages_and_passages_frame(
         response_id = str(record["response_id"])
         target_keyword = str(record["target_keyword"])
         target_keyword_id = stable_id(target_keyword)
-        body = json.loads(bytes(record["response_body_bytes"]).decode("utf-8"))
+        body = _validated_response_body(record, endpoint="page_text")
         page = parsed_page_text_details(body)
         url = str(page.get("url", ""))
         title = str(page.get("title", ""))
@@ -700,7 +715,7 @@ def build_page_content_fields_frame(
         response_id = str(record["response_id"])
         target_keyword = str(record["target_keyword"])
         target_keyword_id = stable_id(target_keyword)
-        body = json.loads(bytes(record["response_body_bytes"]).decode("utf-8"))
+        body = _validated_response_body(record, endpoint="page_text")
         page = parsed_page_text(body)
         url = str(page.get("url", "")).strip()
         if not url:
@@ -756,7 +771,7 @@ def build_page_html_frame(
         response_id = str(record["response_id"])
         target_keyword = str(record["target_keyword"])
         target_keyword_id = stable_id(target_keyword)
-        body = json.loads(bytes(record["response_body_bytes"]).decode("utf-8"))
+        body = _validated_response_body(record, endpoint="page_text")
         page = parsed_page_text_details(body)
         url = str(page.get("url", "")).strip()
         raw_html = str(page.get("raw_html", "")).strip()
@@ -878,6 +893,16 @@ def build_similarity_scores_frame(
             }
         )
     return pl.DataFrame(similarity_rows)
+
+
+def _validated_response_body(
+    record: Mapping[str, object],
+    *,
+    endpoint: str,
+) -> dict[str, object]:
+    body = json.loads(bytes(record["response_body_bytes"]).decode("utf-8"))
+    validate_dataforseo_response(endpoint, body)
+    return body
 
 
 def write_curated_lazyframe_dataset(

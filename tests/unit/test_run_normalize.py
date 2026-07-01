@@ -3,8 +3,13 @@ from pathlib import Path
 
 import polars as pl
 import pyarrow.dataset as ds
+import pytest
 
 from seo_rank.cli import main
+from seo_rank.dataforseo import (
+    DataForSeoParseError,
+    fixture_keyword_expansion_response,
+)
 from seo_rank.data.normalize import (
     CURATED_SCHEMAS,
     CURATED_VALIDATION_RULES,
@@ -879,6 +884,100 @@ def test_normalize_run_materializes_structured_fields_and_html_from_stored_run(
     assert catalog["datasets"]["page_html"]["row_count"] > 0
     assert catalog["datasets"]["pages"]["row_count"] > 0
     assert catalog["datasets"]["passages"]["row_count"] == 0
+
+
+def test_normalize_run_rejects_stored_raw_response_schema_drift(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    raw_responses_dir = output_dir / "parquet" / "raw_responses"
+    (raw_responses_dir / "endpoint=keyword_expansion").mkdir(parents=True)
+    (raw_responses_dir / "endpoint=serp").mkdir(parents=True)
+    (raw_responses_dir / "endpoint=page_text").mkdir(parents=True)
+    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
+
+    pl.DataFrame(
+        [
+            {
+                "run_id": "artifacts",
+                "response_id": "kw-resp-1",
+                "target_keyword": "technical seo",
+                "response_body_bytes": json.dumps(
+                    fixture_keyword_expansion_response("technical seo")
+                ).encode("utf-8"),
+            }
+        ]
+    ).write_parquet(raw_responses_dir / "endpoint=keyword_expansion" / "part-0.parquet")
+    pl.DataFrame(
+        [
+            {
+                "run_id": "artifacts",
+                "response_id": "serp-resp-1",
+                "target_keyword": "technical seo",
+                "response_body_bytes": json.dumps(
+                    {
+                        "tasks": [
+                            {
+                                "result": [
+                                    {
+                                        "items": [
+                                            {
+                                                "type": "organic",
+                                                "rank_group": 1,
+                                                "url": "https://example.com/page",
+                                                "title": "Technical SEO Page",
+                                                "description": "Fixture organic result.",
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ).encode(
+                    "utf-8"
+                ),
+            }
+        ]
+    ).write_parquet(raw_responses_dir / "endpoint=serp" / "part-0.parquet")
+    pl.DataFrame(
+        [
+            {
+                "run_id": "artifacts",
+                "response_id": "page-resp-1",
+                "target_keyword": "technical seo",
+                "response_body_bytes": json.dumps({"tasks": "not-a-list"}).encode(
+                    "utf-8"
+                ),
+            }
+        ]
+    ).write_parquet(raw_responses_dir / "endpoint=page_text" / "part-0.parquet")
+
+    (output_dir / "run.json").write_text(
+        json.dumps(
+            {
+                "run_id": "artifacts",
+                "config": {"seed": "technical seo", "depth": 1},
+                "catalog": {"datasets": {}},
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(DataForSeoParseError) as exc_info:
+        normalize_run(output_dir)
+
+    error = exc_info.value
+    assert error.endpoint == "page_text"
+    assert error.path == "tasks"
+    assert not any(
+        (output_dir / "parquet" / name).exists()
+        for name in CURATED_SCHEMAS
+    )
 
 
 def test_build_pages_and_passages_frame_keeps_page_rows_for_raw_html_without_text() -> None:

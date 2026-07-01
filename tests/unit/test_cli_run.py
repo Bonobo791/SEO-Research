@@ -4,6 +4,7 @@ from pathlib import Path
 import pyarrow.dataset as ds
 
 from seo_rank.dataforseo import DataForSeoClientError
+from seo_rank.dataforseo import fixture_keyword_expansion_response
 from seo_rank.cli import main
 
 
@@ -417,6 +418,92 @@ def test_run_live_providers_without_optional_flags_does_not_require_optional_cre
     assert payload["config"]["live_textrazor"] is False
     assert payload["config"]["live_gemini"] is False
     assert payload["textrazor_entities"] == []
+
+
+def test_run_rejects_live_provider_schema_drift_before_normalization(
+    tmp_path: Path,
+    capsys,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.setenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", "1")
+    monkeypatch.setenv("DATAFORSEO_LOGIN", "analyst@example.com")
+    monkeypatch.setenv("DATAFORSEO_PASSWORD", "dataforseo-secret")
+
+    def dataforseo_transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        del method, headers, body, timeout
+        if url.endswith("/keywords_data/google_ads/keywords_for_keywords/live"):
+            return {"tasks": "not-a-list"}
+        raise AssertionError(f"unexpected DataForSEO URL: {url}")
+
+    monkeypatch.setattr("seo_rank.cli.DEFAULT_DATAFORSEO_TRANSPORT", dataforseo_transport)
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--output-dir",
+            str(output_dir),
+            "--live-providers",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "DataForSEO keyword_expansion response schema drift" in captured.err
+    assert not (output_dir / "run.json").exists()
+
+
+def test_run_rejects_live_serp_schema_drift_before_normalization(
+    tmp_path: Path,
+    capsys,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.setenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", "1")
+    monkeypatch.setenv("DATAFORSEO_LOGIN", "analyst@example.com")
+    monkeypatch.setenv("DATAFORSEO_PASSWORD", "dataforseo-secret")
+
+    def dataforseo_transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        del method, headers, body, timeout
+        if url.endswith("/keywords_data/google_ads/keywords_for_keywords/live"):
+            return fixture_keyword_expansion_response("technical seo")
+        if url.endswith("/serp/google/organic/live/advanced"):
+            return {"tasks": "not-a-list"}
+        raise AssertionError(f"unexpected DataForSEO URL: {url}")
+
+    monkeypatch.setattr("seo_rank.cli.DEFAULT_DATAFORSEO_TRANSPORT", dataforseo_transport)
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--output-dir",
+            str(output_dir),
+            "--live-providers",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "DataForSEO serp response schema drift" in captured.err
+    assert not (output_dir / "run.json").exists()
 
 
 def test_run_rejects_live_gemini_without_live_providers(
