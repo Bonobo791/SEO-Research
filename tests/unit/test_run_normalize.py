@@ -188,7 +188,7 @@ def test_build_page_content_fields_frame_decodes_structured_fields() -> None:
     )
 
 
-def test_build_page_content_fields_frame_skips_empty_aggregate_text_rows() -> None:
+def test_build_page_content_fields_frame_keeps_structured_fields_without_aggregate_text() -> None:
     response_body = {
         "tasks": [
             {
@@ -219,7 +219,107 @@ def test_build_page_content_fields_frame_skips_empty_aggregate_text_rows() -> No
 
     result = build_page_content_fields_frame(frame, run_id="run-1")
 
-    assert result.is_empty()
+    rows = result.to_dicts()
+
+    assert len(rows) > 0
+    assert any(row["field_name"] == "status_code" for row in rows)
+
+
+def test_build_page_content_fields_frame_keeps_structured_fields_without_page_text() -> None:
+    response_body = {
+        "tasks": [
+            {
+                "data": {"url": "https://example.com/product"},
+                "result": [
+                    {
+                        "items": [
+                            {
+                                "url": "https://example.com/product",
+                                "status_code": 200,
+                                "page_content": {
+                                    "ratings": [
+                                        {
+                                            "name": None,
+                                            "rating_value": 4,
+                                            "max_rating_value": 5,
+                                            "rating_count": 12,
+                                            "relative_rating": 0.8,
+                                        }
+                                    ],
+                                    "offers": [
+                                        {
+                                            "name": "SEO Audit",
+                                            "price": 129,
+                                            "price_currency": "USD",
+                                            "price_valid_until": (
+                                                "2026-08-01 00:00:00 +00:00"
+                                            ),
+                                        }
+                                    ],
+                                    "comments": [
+                                        {
+                                            "rating": {
+                                                "name": None,
+                                                "rating_value": 5,
+                                                "max_rating_value": 5,
+                                                "rating_count": None,
+                                                "relative_rating": 1.0,
+                                            },
+                                            "title": "Helpful",
+                                            "publish_date": "2026-06-30",
+                                            "author": "Jordan",
+                                            "primary_content": [
+                                                {"text": "Great write-up."}
+                                            ],
+                                        }
+                                    ],
+                                    "contacts": {
+                                        "telephones": ["+1-555-0100"],
+                                        "emails": ["info@example.com"],
+                                    },
+                                },
+                                "raw_html": "<html><body><main>Raw HTML</main></body></html>",
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+    frame = pl.DataFrame(
+        [
+            {
+                "response_id": "resp-structured-1",
+                "target_keyword": "technical seo",
+                "response_body_bytes": json.dumps(response_body).encode("utf-8"),
+            }
+        ]
+    )
+
+    result = build_page_content_fields_frame(frame, run_id="run-1")
+    rows = result.to_dicts()
+
+    assert len(rows) > 0
+    assert any(
+        row["field_path"]
+        == "tasks[0].result[0].items[0].page_content.ratings[0].rating_value"
+        for row in rows
+    )
+    assert any(
+        row["field_path"]
+        == "tasks[0].result[0].items[0].page_content.offers[0].price"
+        for row in rows
+    )
+    assert any(
+        row["field_path"]
+        == "tasks[0].result[0].items[0].page_content.comments[0].primary_content[0].text"
+        for row in rows
+    )
+    assert any(
+        row["field_path"]
+        == "tasks[0].result[0].items[0].page_content.contacts.telephones[0]"
+        for row in rows
+    )
 
 
 def test_build_page_html_frame_persists_raw_html_without_page_text() -> None:
@@ -461,6 +561,181 @@ def test_normalize_run_materializes_page_content_fields(
     assert any(row["field_name"] == "status_code" for row in rows)
     assert any(row["field_name"] == "page_as_markdown" for row in rows)
     assert any(row["raw_html"] == "<html><body><main>Raw HTML body</main></body></html>" for row in html_rows)
+
+
+def test_normalize_run_materializes_structured_fields_and_html_from_stored_run(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    raw_responses_dir = output_dir / "parquet" / "raw_responses"
+    (raw_responses_dir / "endpoint=keyword_expansion").mkdir(parents=True)
+    (raw_responses_dir / "endpoint=serp").mkdir(parents=True)
+    (raw_responses_dir / "endpoint=page_text").mkdir(parents=True)
+    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
+
+    keyword_response_body = {
+        "tasks": [
+            {
+                "result": [
+                    {"keyword": "technical seo"},
+                ]
+            }
+        ]
+    }
+    serp_response_body = {
+        "tasks": [
+            {
+                "keyword": "technical seo",
+                "result": [
+                    {
+                        "items": [
+                            {
+                                "type": "organic",
+                                "rank_group": 1,
+                                "url": "https://example.com/product",
+                                "title": "Technical SEO Product",
+                                "description": "Fixture organic result.",
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+    response_body = {
+        "tasks": [
+            {
+                "data": {"url": "https://example.com/product"},
+                "result": [
+                    {
+                        "items": [
+                            {
+                                "url": "https://example.com/product",
+                                "status_code": 200,
+                                "page_content": {
+                                    "ratings": [
+                                        {
+                                            "name": None,
+                                            "rating_value": 4,
+                                            "max_rating_value": 5,
+                                            "rating_count": 12,
+                                            "relative_rating": 0.8,
+                                        }
+                                    ],
+                                    "offers": [
+                                        {
+                                            "price": 129,
+                                        }
+                                    ],
+                                    "comments": [
+                                        {
+                                            "rating": {
+                                                "name": None,
+                                                "rating_value": 5,
+                                                "max_rating_value": 5,
+                                                "rating_count": None,
+                                                "relative_rating": 1.0,
+                                            },
+                                        }
+                                    ],
+                                },
+                                "raw_html": "<html><body><main>Raw HTML body</main></body></html>",
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+    pl.DataFrame(
+        [
+            {
+                "run_id": "artifacts",
+                "response_id": "kw-resp-1",
+                "target_keyword": "technical seo",
+                "response_body_bytes": json.dumps(keyword_response_body).encode("utf-8"),
+            }
+        ]
+    ).write_parquet(raw_responses_dir / "endpoint=keyword_expansion" / "part-0.parquet")
+    pl.DataFrame(
+        [
+            {
+                "run_id": "artifacts",
+                "response_id": "serp-resp-1",
+                "target_keyword": "technical seo",
+                "response_body_bytes": json.dumps(serp_response_body).encode("utf-8"),
+            }
+        ]
+    ).write_parquet(raw_responses_dir / "endpoint=serp" / "part-0.parquet")
+    pl.DataFrame(
+        [
+            {
+                "run_id": "artifacts",
+                "response_id": "page-resp-1",
+                "target_keyword": "technical seo",
+                "response_body_bytes": json.dumps(response_body).encode("utf-8"),
+            }
+        ]
+    ).write_parquet(raw_responses_dir / "endpoint=page_text" / "part-0.parquet")
+
+    (output_dir / "run.json").write_text(
+        json.dumps(
+            {
+                "run_id": "artifacts",
+                "config": {"seed": "technical seo", "depth": 1},
+                "catalog": {"datasets": {}},
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    catalog = normalize_run(output_dir)
+
+    assert catalog["datasets"]["page_content_fields"]["row_count"] > 0
+    assert catalog["datasets"]["page_html"]["row_count"] > 0
+    assert catalog["datasets"]["pages"]["row_count"] > 0
+    assert catalog["datasets"]["passages"]["row_count"] == 0
+
+
+def test_build_pages_and_passages_frame_keeps_page_rows_for_raw_html_without_text() -> None:
+    response_body = {
+        "tasks": [
+            {
+                "data": {"url": "https://example.com/raw-html"},
+                "result": [
+                    {
+                        "items": [
+                            {
+                                "url": "https://example.com/raw-html",
+                                "raw_html": "<html><body>Raw HTML only</body></html>",
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+    frame = pl.DataFrame(
+        [
+            {
+                "response_id": "resp-raw-html",
+                "target_keyword": "technical seo",
+                "response_body_bytes": json.dumps(response_body).encode("utf-8"),
+            }
+        ]
+    )
+
+    result = build_pages_and_passages_frame(frame, run_id="run-1")
+    rows = result.to_dicts()
+
+    assert len(rows) == 1
+    assert rows[0]["passage_id"] is None
+    assert rows[0]["text"] == ""
+    assert rows[0]["url"] == "https://example.com/raw-html"
 
 
 def test_build_similarity_scores_frame_handles_empty_group() -> None:

@@ -587,7 +587,11 @@ def build_keywords_frame(frame: pl.DataFrame, *, run_id: str, seed: str) -> pl.D
                     "schema_version": CURATED_SCHEMA_VERSION,
                 }
             )
-    return pl.DataFrame(rows)
+    if not rows:
+        return pl.DataFrame(
+            schema=CURATED_VALIDATION_RULES["keywords"]["expected_schema"]
+        )
+    return pl.DataFrame(rows, schema=CURATED_VALIDATION_RULES["keywords"]["expected_schema"])
 
 
 def build_serp_items_frame(
@@ -637,11 +641,12 @@ def build_pages_and_passages_frame(
         target_keyword = str(record["target_keyword"])
         target_keyword_id = stable_id(target_keyword)
         body = json.loads(bytes(record["response_body_bytes"]).decode("utf-8"))
-        page = parsed_page_text(body)
+        page = parsed_page_text_details(body)
         url = str(page.get("url", ""))
         title = str(page.get("title", ""))
         text = str(page.get("text", "")).strip()
-        if not url or not text:
+        raw_html = str(page.get("raw_html", "")).strip()
+        if not url or (not text and not raw_html):
             continue
         canonical_url_hash = stable_id(url)
         page_id = stable_id(run_id, target_keyword, url)
@@ -656,27 +661,33 @@ def build_pages_and_passages_frame(
                 "url": url,
                 "title": title,
                 "text": text,
+                "passage_id": None,
+                "source": None,
+                "word_count": None,
                 "schema_version": CURATED_SCHEMA_VERSION,
             }
         )
-        for passage in normalize_page_text({"url": url, "text": text}):
-            rows.append(
-                {
-                    "run_id": run_id,
-                    "target_keyword_id": target_keyword_id,
-                    "target_keyword": target_keyword,
-                    "response_id": response_id,
-                    "page_id": page_id,
-                    "canonical_url_hash": canonical_url_hash,
-                    "url": url,
-                    "passage_id": stable_id(page_id, passage["passage_id"]),
-                    "source": passage["source"],
-                    "text": passage["text"],
-                    "word_count": int(passage["word_count"]),
-                    "schema_version": CURATED_SCHEMA_VERSION,
-                }
-            )
-    return pl.DataFrame(rows)
+        if text:
+            for passage in normalize_page_text({"url": url, "text": text}):
+                rows.append(
+                    {
+                        "run_id": run_id,
+                        "target_keyword_id": target_keyword_id,
+                        "target_keyword": target_keyword,
+                        "response_id": response_id,
+                        "page_id": page_id,
+                        "canonical_url_hash": canonical_url_hash,
+                        "url": url,
+                        "passage_id": stable_id(page_id, passage["passage_id"]),
+                        "source": passage["source"],
+                        "text": passage["text"],
+                        "word_count": int(passage["word_count"]),
+                        "schema_version": CURATED_SCHEMA_VERSION,
+                    }
+                )
+    if not rows:
+        return pl.DataFrame(schema=CURATED_PAGE_AND_PASSAGE_SCHEMA)
+    return pl.DataFrame(rows, schema=CURATED_PAGE_AND_PASSAGE_SCHEMA)
 
 
 def build_page_content_fields_frame(
@@ -692,8 +703,7 @@ def build_page_content_fields_frame(
         body = json.loads(bytes(record["response_body_bytes"]).decode("utf-8"))
         page = parsed_page_text(body)
         url = str(page.get("url", "")).strip()
-        text = str(page.get("text", "")).strip()
-        if not url or not text:
+        if not url:
             continue
         canonical_url_hash = stable_id(url)
         page_id = stable_id(run_id, target_keyword, url)

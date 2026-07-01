@@ -438,6 +438,18 @@ def test_decode_content_parsing_items_walks_nested_fields() -> None:
         == "info@example.com"
     )
     assert (
+        records["tasks[0].result[0].items[0].page_content.contacts.telephones[0]"][
+            "text"
+        ]
+        == "+1-555-0100"
+    )
+    assert (
+        records[
+            "tasks[0].result[0].items[0].page_content.comments[0].rating.relative_rating"
+        ]["structured_value"]
+        == "1.0"
+    )
+    assert (
         records["tasks[0].result[0].items[0].page_as_markdown"]["text"]
         == "# Example Page\n\nMarkdown fallback."
     )
