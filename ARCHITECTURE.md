@@ -84,7 +84,7 @@ The repository contains an **offline-verifiable CLI scaffold** (Phase 1 shipped)
 - **CLI:** `seo-rank run` writes `run.json` and `report.md` from fixtures (no
   network calls) or gated live providers; Phase 4.5 adds `normalize`,
   `build-features`, `analyze`, `replay`, and `run --stored-run` (Slice 6 shipped)
-- **Tests:** 74 tests under `tests/`; gate: `python -m pytest`; Phase 4.5 Slice 7
+- **Tests:** 80 tests under `tests/`; gate: `python -m pytest`; Phase 4.5 Slice 7
   shipped the round-trip regression sweep in `test_sdlc_docs.py`
 - **Product docs:** `ARCHITECTURE.md`, `GOALS.md`, `ROADMAP.md`, `README.md`,
   `TESTING.md`
@@ -239,6 +239,10 @@ each table collects once at sink. Every row includes join keys: `run_id`,
 | `passages` | Passage splits with offsets; no duplicate full page bodies |
 | `entities` | TextRazor entity rows when present |
 | `similarity_scores` | Page-level `bge`, `gemini_doc_retrieval`, `gemini_semantic_similarity` |
+
+Planned follow-on: region-aware content parsing will add explicit region rows
+for `page_content` sections alongside the aggregate `pages.text` body. The
+aggregate page row remains the source for passage splitting.
 
 Curated tables are **not** partitioned beyond the run directory. Sort rows at
 write time by primary retrieval keys, e.g. `target_keyword_id`, `canonical_url_hash`,

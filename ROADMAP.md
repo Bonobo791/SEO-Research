@@ -5,12 +5,34 @@ scope contract; keep deferred and historical items here.
 
 ## Current Backlog
 
-Active scope contract: `GOALS.md` (Phase 4.75).
+Active scope contract: `GOALS.md` (Phase 4.76).
 
-### Phase 4.75 — page_text curation hardening
+### Phase 4.76 — structured content_parsing capture
 
-Active contract: `GOALS.md` § Phase 4.75 objective and dev slices. Related
-polish: `FIXUPS.md` § Phase 4.75.
+Active contract: `GOALS.md` § Phase 4.76 objective and dev slices.
+
+API reference:
+https://docs.dataforseo.com/v3/on_page/content_parsing/live/
+
+- **Full `items[]` field walk** — decode and store every documented response
+  field (`type`, `fetch_time`, `status_code`, `page_content` tree,
+  `page_as_markdown`, `ratings`, `offers`, `comments`, `contacts`, nested
+  sections, table cells, link anchors, topic metadata, etc.) as individual
+  curated rows for analysis.
+- **Aggregate page body** — keep Phase 4.75 merged `pages.text` for passage
+  splitting and downstream similarity features.
+- **Raw HTML** — `store_raw_html: true` on live requests; persist HTML per page
+  (OnPage Raw HTML endpoint per DataForSEO docs).
+- **US English desktop request contract** — `switch_pool=false`,
+  `ip_pool_for_scan=us`, `accept_language=en-US`, `browser_preset=desktop`,
+  `enable_javascript=false`, `enable_browser_rendering=false`.
+- **Tests** — `test_dataforseo_requests.py`, `test_run_normalize.py`; re-normalize
+  smoke on stored live runs.
+
+### Phase 4.75 — page_text curation hardening (complete)
+
+Shipped contract: `GOALS.md` § Completed: Phase 4.75. Related polish:
+`FIXUPS.md` § Phase 4.75.
 
 - **Shared decoder** — `parsed_page_text()` is the single extractor for live and
   stored `page_text` payloads; normalization must not re-index raw JSON ad hoc.
@@ -18,8 +40,6 @@ polish: `FIXUPS.md` § Phase 4.75.
   `text`, not only `main_topic` sections.
 - **Empty crawl filter** — skip responses with no URL and no text before writing
   `pages` / `passages` (align with CLI `if page_text`).
-- **Tests** — `test_dataforseo_requests.py`, `test_run_normalize.py`; re-normalize
-  smoke on stored live runs.
 
 ### Phase 5 — Statistical analysis
 
@@ -136,3 +156,13 @@ polish: `FIXUPS.md` § Phase 4.75.
 - **Phase 4.75 Slice 1 shipped:** `parsed_page_text()` decodes nested DataForSEO
   `content_parsing` items; `build_pages_and_passages_frame()` uses the shared
   parser instead of flat `tasks[0].result[0]` indexing.
+- **Phase 4.75 Slice 2 shipped:** `_extract_page_content_text()` now walks all
+  relevant `page_content` regions, so `header` and other nested sections are
+  included in normalized page `text` and passage splitting.
+- **Phase 4.75 Slice 3 shipped:** `build_pages_and_passages_frame()` skips
+  `page_text` responses with no URL or no text, automatically dropping empty
+  bodies without any CLI flag and preventing blank curated rows or duplicate
+  `page_id` warnings from crawl failures.
+- **GOALS retargeted to Phase 4.76 (2026-07-01):** structured
+  `content_parsing/live` capture — per-field curated storage, aggregate
+  `pages.text`, raw HTML, and a fixed US English desktop request contract.

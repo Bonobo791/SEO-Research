@@ -13,7 +13,11 @@ blocks Slice 10 sign-off unless marked **required**.
 
 | ID | Fix | Phase | Priority | Status |
 | --- | --- | --- | --- | --- |
-| S475-01 | Skip empty `page_text` rows in `build_pages_and_passages_frame`: `continue` when `parsed_page_text()` yields no URL and no text (mirrors CLI `if page_text` filter); avoids empty `pages` rows and duplicate `page_id` warnings from crawl failures (e.g. `crawl_status: "Page content is empty"`) | 4.75 | nice-to-have | open |
+| S475-01 | Skip empty `page_text` rows in `build_pages_and_passages_frame`: `continue` when `parsed_page_text()` yields no URL and no text (mirrors CLI `if page_text` filter); avoids empty `pages` rows and duplicate `page_id` warnings from crawl failures (e.g. `crawl_status: "Page content is empty"`) | 4.75 | nice-to-have | done |
+| S475-02 | Add `secondary_content` and `table_content` fixtures to `test_parsed_page_text_extracts_nested_page_content` (or a sibling test) so Slice 2 regression coverage includes the section keys the pre-recursive extractor walked explicitly | 4.75 | nice-to-have | open |
+| S475-03 | Add a second top-level `page_content` region fixture (e.g. `footer`) in `test_dataforseo_requests.py` / `test_run_normalize.py` when a live DataForSEO sample is available — confirms recursive extraction beyond `header` + `main_topic` | 4.75 | nice-to-have | open |
+| S475-04 | Assert merged page-level `text` in `test_build_pages_and_passages_frame_parses_nested_page_content` (full `header` + `main_topic` string on the page row where `passage_id` is null), not only individual passage rows | 4.75 | nice-to-have | open |
+| S475-05 | Re-normalize stored runs that were created before the empty-text guard tightened, so URL-only empty bodies disappear from existing curated `pages` / `passages` rows; automatic at normalize time, no CLI flag | 4.75 | nice-to-have | open |
 
 ---
 

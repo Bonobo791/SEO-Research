@@ -533,6 +533,8 @@ def build_pages_and_passages_frame(
         url = str(page.get("url", ""))
         title = str(page.get("title", ""))
         text = str(page.get("text", "")).strip()
+        if not url or not text:
+            continue
         canonical_url_hash = stable_id(url)
         page_id = stable_id(run_id, target_keyword, url)
         rows.append(

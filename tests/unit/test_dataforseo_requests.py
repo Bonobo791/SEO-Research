@@ -147,6 +147,15 @@ def test_parsed_page_text_extracts_nested_page_content() -> None:
                         "items": [
                             {
                                 "page_content": {
+                                    "header": {
+                                        "primary_content": [
+                                            {
+                                                "text": (
+                                                    "Header intro with enough words."
+                                                )
+                                            }
+                                        ]
+                                    },
                                     "main_topic": [
                                         {
                                             "main_title": "Example Page",
@@ -168,7 +177,10 @@ def test_parsed_page_text_extracts_nested_page_content() -> None:
     assert parsed_page_text(response) == {
         "url": "https://example.com/page",
         "title": "Example Page",
-        "text": "First paragraph.\n\nSecond paragraph.",
+        "text": (
+            "Header intro with enough words.\n\n"
+            "First paragraph.\n\nSecond paragraph."
+        ),
     }
 
 

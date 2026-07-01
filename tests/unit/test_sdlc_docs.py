@@ -22,12 +22,19 @@ def test_goals_and_roadmap_define_active_scope_and_backlog() -> None:
 
     assert "active-scope contract" in goals
     assert "Active Objective" in goals
+    assert "Phase 4.76" in goals
+    assert "Phase 4.76 objective" in goals
+    assert "structured content_parsing capture" in goals
+    assert "store_raw_html" in goals
+    assert "accept_language" in goals
     assert "Phase 4.75" in goals
-    assert "Phase 4.75 objective" in goals
+    assert "Completed: Phase 4.75" in goals
     assert "Phase 4.5" not in goals
     assert "Phase 4 acceptance criteria" not in goals
     assert "Current Backlog" in roadmap
-    assert "Phase 4.75" in roadmap
+    assert "Phase 4.76" in roadmap
+    assert "structured content_parsing capture" in roadmap
+    assert "ip_pool_for_scan" in roadmap
     assert "Phase 4.5 signed off" in roadmap
     assert "Phase 4 shipped" in roadmap
 
@@ -116,6 +123,6 @@ def test_phase_45_slice_9_regression_sweep_marks_mart_sink_docs_as_shipped() -> 
     assert "Phase 4.5 Slice 9 shipped" in roadmap
     assert "Phase 4.5 Slice 10 shipped" in roadmap
     assert "Phase 4.5 signed off" in roadmap
-    assert "74 tests" in architecture
-    assert "74 tests collected" in testing
+    assert "80 tests" in architecture
+    assert "80 tests collected" in testing
     assert "sink feature marts lazily with Parquet statistics" in testing

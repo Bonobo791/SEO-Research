@@ -125,18 +125,54 @@ def test_build_similarity_scores_frame_handles_empty_group() -> None:
 
 
 def test_build_pages_and_passages_frame_parses_nested_page_content() -> None:
+    response_body = {
+        "tasks": [
+            {
+                "data": {"url": "https://example.com/page"},
+                "result": [
+                    {
+                        "items": [
+                            {
+                                "page_content": {
+                                    "header": {
+                                        "primary_content": [
+                                            {
+                                                "text": "Header intro with enough words."
+                                            }
+                                        ]
+                                    },
+                                    "main_topic": [
+                                        {
+                                            "primary_content": [
+                                                {
+                                                    "text": (
+                                                        "Technical SEO intro paragraph "
+                                                        "with enough words."
+                                                    )
+                                                },
+                                                {
+                                                    "text": (
+                                                        "Site structure matters for "
+                                                        "crawlability and indexation."
+                                                    )
+                                                },
+                                            ]
+                                        }
+                                    ],
+                                }
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
     frame = pl.DataFrame(
         [
             {
                 "response_id": "resp-1",
                 "target_keyword": "technical seo",
-                "response_body_bytes": (
-                    b'{"tasks":[{"data":{"url":"https://example.com/page"},"result":['
-                    b'{"items":[{"page_content":{"main_topic":[{"primary_content":['
-                    b'{"text":"Technical SEO intro paragraph with enough words."},'
-                    b'{"text":"Site structure matters for crawlability and indexation."}'
-                    b']}]},"header":{"primary_content":[{"text":"Header text."}]}}]}]}]}'
-                ),
+                "response_body_bytes": json.dumps(response_body).encode("utf-8"),
             }
         ]
     )
@@ -145,6 +181,11 @@ def test_build_pages_and_passages_frame_parses_nested_page_content() -> None:
     rows = result.to_dicts()
 
     assert any(row["url"] == "https://example.com/page" for row in rows if row.get("passage_id") is None)
+    assert any(
+        row["text"] == "Header intro with enough words."
+        for row in rows
+        if row.get("passage_id") is not None
+    )
     assert any(
         "Technical SEO intro paragraph" in row["text"]
         for row in rows
@@ -179,6 +220,44 @@ def test_build_pages_and_passages_frame_keeps_passage_ids_unique_across_keywords
     passage_ids = [row["passage_id"] for row in rows if row.get("passage_id") is not None]
 
     assert len(passage_ids) == len(set(passage_ids))
+
+
+def test_build_pages_and_passages_frame_skips_empty_text_rows_even_with_url() -> None:
+    response_body = {
+        "tasks": [
+            {
+                "data": {"url": "https://example.com/empty"},
+                "result": [
+                    {
+                        "items": [
+                            {
+                                "crawl_status": "Page content is empty",
+                                "items": [],
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+    frame = pl.DataFrame(
+        [
+            {
+                "response_id": "resp-1",
+                "target_keyword": "technical seo",
+                "response_body_bytes": json.dumps(response_body).encode("utf-8"),
+            },
+            {
+                "response_id": "resp-2",
+                "target_keyword": "technical seo",
+                "response_body_bytes": json.dumps(response_body).encode("utf-8"),
+            },
+        ]
+    )
+
+    result = build_pages_and_passages_frame(frame, run_id="run-1")
+
+    assert result.is_empty()
 
 
 def test_build_entities_frame_returns_typed_empty_frame_when_no_entities() -> None:

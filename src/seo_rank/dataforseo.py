@@ -458,23 +458,21 @@ def _extract_page_content_title(page_content: Mapping[str, Any]) -> str:
 
 def _extract_page_content_text(page_content: Mapping[str, Any]) -> str:
     texts: list[str] = []
-    main_topics = page_content.get("main_topic", [])
-    if not isinstance(main_topics, list):
-        return ""
 
-    for topic in main_topics:
-        if not isinstance(topic, Mapping):
-            continue
-        for section_name in ("primary_content", "secondary_content", "table_content"):
-            section = topic.get(section_name)
-            if not isinstance(section, list):
-                continue
-            for item in section:
-                if not isinstance(item, Mapping):
+    def collect_text(value: Any) -> None:
+        if isinstance(value, Mapping):
+            text = value.get("text")
+            if isinstance(text, str):
+                stripped = text.strip()
+                if stripped:
+                    texts.append(stripped)
+            for key, nested_value in value.items():
+                if key == "text":
                     continue
-                text = item.get("text")
-                if isinstance(text, str):
-                    stripped = text.strip()
-                    if stripped:
-                        texts.append(stripped)
+                collect_text(nested_value)
+        elif isinstance(value, list):
+            for item in value:
+                collect_text(item)
+
+    collect_text(page_content)
     return "\n\n".join(texts)
