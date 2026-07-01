@@ -9,6 +9,7 @@ from seo_rank.data.normalize import (
     CURATED_SCHEMAS,
     CURATED_VALIDATION_RULES,
     build_entities_frame,
+    build_page_content_fields_frame,
     build_similarity_scores_frame,
     build_pages_and_passages_frame,
     normalize_run,
@@ -103,6 +104,283 @@ def test_normalize_run_does_not_load_raw_rows_eagerly(
     catalog = normalize_run(output_dir)
 
     assert catalog["datasets"]["keywords"]["row_count"] == 25
+
+
+def test_build_page_content_fields_frame_decodes_structured_fields() -> None:
+    response_body = {
+        "tasks": [
+            {
+                "data": {"url": "https://example.com/page"},
+                "result": [
+                    {
+                        "items": [
+                            {
+                                "url": "https://example.com/page",
+                                "status_code": 200,
+                                "page_content": {
+                                    "header": {
+                                        "primary_content": [
+                                            {"text": "Header intro with enough words."}
+                                        ]
+                                    },
+                                    "main_topic": [
+                                        {
+                                            "primary_content": [
+                                                {
+                                                    "text": (
+                                                        "Technical SEO intro paragraph "
+                                                        "with enough words."
+                                                    )
+                                                }
+                                            ],
+                                            "secondary_content": [
+                                                {
+                                                    "text": (
+                                                        "Secondary supporting section "
+                                                        "with enough words."
+                                                    )
+                                                }
+                                            ],
+                                        }
+                                    ],
+                                },
+                                "page_as_markdown": (
+                                    "# Technical SEO\n\n"
+                                    "Markdown fallback should not be used here."
+                                ),
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+    frame = pl.DataFrame(
+        [
+            {
+                "response_id": "resp-1",
+                "target_keyword": "technical seo",
+                "response_body_bytes": json.dumps(response_body).encode("utf-8"),
+            }
+        ]
+    )
+
+    result = build_page_content_fields_frame(frame, run_id="run-1")
+    rows = result.to_dicts()
+
+    assert result.schema == CURATED_VALIDATION_RULES["page_content_fields"][
+        "expected_schema"
+    ]
+    assert len(rows) >= 4
+    assert any(
+        row["field_path"] == "tasks[0].result[0].items[0].status_code" for row in rows
+    )
+    assert any(
+        row["field_path"]
+        == "tasks[0].result[0].items[0].page_content.header.primary_content[0].text"
+        for row in rows
+    )
+    assert any(row["field_name"] == "page_as_markdown" for row in rows)
+    assert any(
+        row["text"] == "Technical SEO intro paragraph with enough words."
+        for row in rows
+    )
+
+
+def test_build_page_content_fields_frame_skips_empty_aggregate_text_rows() -> None:
+    response_body = {
+        "tasks": [
+            {
+                "data": {"url": "https://example.com/empty"},
+                "result": [
+                    {
+                        "items": [
+                            {
+                                "url": "https://example.com/empty",
+                                "status_code": 200,
+                                "page_content": {},
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+    frame = pl.DataFrame(
+        [
+            {
+                "response_id": "resp-empty",
+                "target_keyword": "technical seo",
+                "response_body_bytes": json.dumps(response_body).encode("utf-8"),
+            }
+        ]
+    )
+
+    result = build_page_content_fields_frame(frame, run_id="run-1")
+
+    assert result.is_empty()
+
+
+def test_normalize_run_materializes_page_content_fields(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    raw_responses_dir = output_dir / "parquet" / "raw_responses"
+    (raw_responses_dir / "endpoint=keyword_expansion").mkdir(parents=True)
+    (raw_responses_dir / "endpoint=serp").mkdir(parents=True)
+    (raw_responses_dir / "endpoint=page_text").mkdir(parents=True)
+    (raw_responses_dir / "endpoint=entities").mkdir(parents=True)
+    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
+
+    keyword_response_body = {
+        "tasks": [
+            {
+                "result": [
+                    {"keyword": "technical seo"},
+                    {"keyword": "technical seo audit"},
+                ]
+            }
+        ]
+    }
+    serp_response_body = {
+        "tasks": [
+            {
+                "keyword": "technical seo",
+                "result": [
+                    {
+                        "items": [
+                            {
+                                "type": "organic",
+                                "rank_group": 1,
+                                "url": "https://example.com/page",
+                                "title": "Technical SEO Page",
+                                "description": "Fixture organic result for technical seo.",
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+    response_body = {
+        "tasks": [
+            {
+                "data": {"url": "https://example.com/page"},
+                "result": [
+                    {
+                        "items": [
+                            {
+                                "url": "https://example.com/page",
+                                "status_code": 200,
+                                "page_content": {
+                                    "header": {
+                                        "primary_content": [
+                                            {"text": "Header intro with enough words."}
+                                        ]
+                                    },
+                                    "main_topic": [
+                                        {
+                                            "primary_content": [
+                                                {
+                                                    "text": (
+                                                        "Technical SEO intro paragraph "
+                                                        "with enough words."
+                                                    )
+                                                }
+                                            ]
+                                        }
+                                    ],
+                                },
+                                "page_as_markdown": (
+                                    "# Technical SEO\n\n"
+                                    "Markdown fallback should be captured."
+                                ),
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+    entity_response_body = {
+        "response": {
+            "entities": [
+                {
+                    "entityId": "technical-seo",
+                    "matchedText": "Technical SEO",
+                    "confidenceScore": 7.5,
+                    "relevanceScore": 0.92,
+                    "type": ["Topic", "SEO"],
+                }
+            ]
+        }
+    }
+    pl.DataFrame(
+        [
+            {
+                "run_id": "artifacts",
+                "response_id": "kw-resp-1",
+                "target_keyword": "technical seo",
+                "response_body_bytes": json.dumps(keyword_response_body).encode("utf-8"),
+            }
+        ]
+    ).write_parquet(raw_responses_dir / "endpoint=keyword_expansion" / "part-0.parquet")
+    pl.DataFrame(
+        [
+            {
+                "run_id": "artifacts",
+                "response_id": "serp-resp-1",
+                "target_keyword": "technical seo",
+                "response_body_bytes": json.dumps(serp_response_body).encode("utf-8"),
+            }
+        ]
+    ).write_parquet(raw_responses_dir / "endpoint=serp" / "part-0.parquet")
+    pl.DataFrame(
+        [
+            {
+                "run_id": "artifacts",
+                "response_id": "page-resp-1",
+                "target_keyword": "technical seo",
+                "response_body_bytes": json.dumps(response_body).encode("utf-8"),
+            }
+        ]
+    ).write_parquet(raw_responses_dir / "endpoint=page_text" / "part-0.parquet")
+    pl.DataFrame(
+        [
+            {
+                "run_id": "artifacts",
+                "response_id": "entity-resp-1",
+                "target_keyword": "technical seo",
+                "response_body_bytes": json.dumps(entity_response_body).encode("utf-8"),
+            }
+        ]
+    ).write_parquet(raw_responses_dir / "endpoint=entities" / "part-0.parquet")
+
+    (output_dir / "run.json").write_text(
+        json.dumps(
+            {
+                "run_id": "artifacts",
+                "config": {"seed": "technical seo", "depth": 1},
+                "catalog": {"datasets": {}},
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    catalog = normalize_run(output_dir)
+
+    assert catalog["datasets"]["page_content_fields"]["row_count"] > 0
+    page_content_fields_dir = output_dir / "parquet" / "page_content_fields"
+    assert page_content_fields_dir.exists()
+
+    rows = ds.dataset(page_content_fields_dir, format="parquet").to_table().to_pylist()
+    assert any(row["field_name"] == "page_content" for row in rows)
+    assert any(row["field_name"] == "status_code" for row in rows)
+    assert any(row["field_name"] == "page_as_markdown" for row in rows)
 
 
 def test_build_similarity_scores_frame_handles_empty_group() -> None:

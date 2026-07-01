@@ -228,3 +228,6 @@ text so similarity features better mirror hybrid search-engine retrieval
   fixed US English desktop contract (`ip_pool_for_scan=us`,
   `accept_language=en-US`, JS/rendering off, `store_raw_html=true`); the
   `--javascript-parsing` CLI knob was removed.
+- **Phase 4.76 Slice 3 shipped:** curated `page_content_fields` now materialize
+  one row per decoded `content_parsing/live` field with stable ids and JSON
+  path metadata while leaving aggregate `pages.text` unchanged.

@@ -3,8 +3,10 @@
 Tracked hardening and polish items surfaced during Phase 4.5 Slice 3 (lazy
 curated normalization), Slice 6 (CLI surfaces), Slice 9 (mart sink contract),
 Phase 4.76 Slice 1 (content_parsing request contract) review, Slice 2
-(item field decoder) review, and senior QA release-readiness review for
-Slices 3–5. Each item names
+(item field decoder) review, Slice 3 (per-field storage) code review,
+senior QA release-readiness review for Slices 3–5, and the Jul 2026 senior QA
+pass (default sign-off gate, hook/manifest alignment, live-smoke health). Each
+item names
 the **phase/slice** where it should land. Nothing here blocks Slice 10 sign-off
 unless marked **required**.
 
@@ -38,24 +40,67 @@ Slices 3–5 unless a row is marked **required**.
 
 ---
 
+## Phase 4.76 — Slice 3 (per-field storage — post-ship polish)
+
+Follow-ups from Slice 3 code review (`page_content_fields` curated sink).
+None block Slice 4 HTML wiring unless marked **required**.
+
+| ID | Fix | Phase | Priority | Status |
+| --- | --- | --- | --- | --- |
+| S476-17 | Align `build_page_content_fields_frame` skip logic with `build_pages_and_passages_frame`: skip when aggregate `parsed_page_text()` text is empty (not only when URL is missing) so `page_content_fields` rows always join to `pages` on `page_id`; URL-only `fallback_url` crawls must not emit orphan field rows | 4.76 Slice 5 | required | open |
+| S476-18 | Remove redundant `page_content_field_rows = page_content_fields` alias in `build_curated_lazyframes_from_raw_responses` return dict | 4.76 Slice 3 | nice-to-have | open |
+| S476-19 | Consider a single `page_text` `map_batches` UDF that emits both page/passage rows and field rows to avoid double `json.loads` + `parsed_page_text` / `decode_content_parsing_items` per response | 4.76 Slice 3 | nice-to-have | open |
+| S476-20 | Assert `field_row_id` uniqueness and stability (`stable_id(page_id, response_id, field_path, ordinal)`) in `test_build_page_content_fields_frame_decodes_structured_fields` and `test_normalize_run_materializes_page_content_fields` | 4.76 Slice 5 | nice-to-have | open |
+| S476-21 | Assert scalar sink contract in normalize tests: e.g. `status_code` row has `structured_value == "200"` and empty `text` (decoder covered in `test_dataforseo_requests.py`; sink path not yet) | 4.76 Slice 5 | nice-to-have | open |
+| S476-22 | Keep `FIXUPS.md` unit baseline count in sync when the suite changes (was 88 at senior QA review; 91 after Slice 3 ship) | 4.76 docs | nice-to-have | open |
+
+---
+
 ## Phase 4.76 — Slice 5 (tests and QA — senior review)
 
 Follow-ups from senior QA release-readiness review (Phase 4.76 slices 3–5).
 **Required** rows are TDD gates or sign-off blockers; write failing tests before
-implementing sinks. Unit baseline: `pytest tests/unit` (88 tests, all pass as of
-review).
+implementing sinks. Unit baseline: `pytest tests/unit` (90 tests, all pass as of
+Jul 2026 senior QA review).
 
 | ID | Fix | Phase | Priority | Status |
 | --- | --- | --- | --- | --- |
-| S476-08 | Write failing `test_normalize_run_materializes_page_content_fields` before Slice 3 sink: per-field rows with `field_path`, `ordinal`, and stable ids (`run_id`, `response_id`, `page_id`) | 4.76 Slice 5 | required | open |
+| S476-08 | Write failing `test_normalize_run_materializes_page_content_fields` before Slice 3 sink: per-field rows with `field_path`, `ordinal`, and stable ids (`run_id`, `response_id`, `page_id`) | 4.76 Slice 5 | required | done |
 | S476-09 | Write failing `test_normalize_run_stores_raw_html_when_present` before Slice 4 HTML wiring: HTML linked by `page_id` / `response_id` when crawl payload includes raw HTML | 4.76 Slice 5 | required | open |
 | S476-10 | Write failing `test_build_pages_and_passages_frame_preserves_aggregate_text_with_field_decode`: merged `pages.text` matches Phase 4.75 aggregate path when decoder is wired | 4.76 Slice 5 | required | open |
-| S476-11 | Write failing `test_normalize_run_skips_empty_crawl_with_field_decode`: URL-only or empty-body crawls still omitted from `pages` / `passages` after field-decode path | 4.76 Slice 5 | required | open |
+| S476-11 | Write failing `test_normalize_run_skips_empty_crawl_with_field_decode`: URL-only or empty-body crawls omitted from `pages` / `passages` **and** `page_content_fields` after field-decode path (drives S476-17; today fields can orphan when URL exists but aggregate text is empty) | 4.76 Slice 5 | required | open |
 | S476-12 | Add stored-run re-normalize smoke fixture (multi-field `items[]` + HTML) and assert curated lake row counts; extend `test_round_trip.py` or `test_run_normalize.py` | 4.76 Slice 5 | required | open |
-| S476-13 | Gate or fix live integration smoke: `test_live_provider_smoke_writes_artifacts` fails with Gemini `404 Not Found` when `SEO_RANK_ENABLE_GEMINI=1` — validate API key/model/endpoint or skip when credentials are unhealthy | QA / integration | required | open |
-| S476-14 | Document default Phase 4.76 sign-off gate as `pytest tests/unit`; full suite (`pytest`) requires `SEO_RANK_RUN_LIVE_INTEGRATION=1` plus healthy provider env | QA / docs | nice-to-have | open |
+| S476-13 | Gate or fix live integration smoke: `test_live_provider_smoke_writes_artifacts` fails with Gemini `404 Not Found` when `SEO_RANK_ENABLE_GEMINI=1` (reproduced Jul 2026: bare `pytest` → 90 pass, 1 fail) — validate API key/model/endpoint or skip when embed health check fails | QA / integration | required | open |
+| S476-14 | Document default Phase 4.76 sign-off gate as `pytest tests/unit`; full suite (`pytest`) runs integration when `SEO_RANK_RUN_LIVE_INTEGRATION=1` in `.env` and needs healthy provider credentials | QA / docs | required | open |
 | S476-15 | Add Phase 4.76 manual sign-off checklist to `TESTING.md` or `docs/qa/`: live crawl contract, `normalize --run` per-field + HTML, re-normalize on pre-4.76 run, locale note (`--language` does not change page crawl pool) | 4.76 docs | nice-to-have | open |
 | S476-16 | Rollback criterion for slices 3–4: if per-field or HTML wiring changes `pages` / `passages` row counts or breaks existing normalize fixtures, revert and re-run `test_run_normalize.py` + `test_round_trip.py` before merge | 4.76 Slice 5 | nice-to-have | open |
+
+---
+
+## Senior QA — release infrastructure (Jul 2026)
+
+Follow-ups from the Jul 2026 senior QA pass. Priority order: S476-14 + S476-23
+(default gate), then S476-13 (live smoke health), then Slice 5 TDD rows
+(S476-09–S476-12).
+
+| ID | Fix | Phase | Priority | Status |
+| --- | --- | --- | --- | --- |
+| S476-23 | Pin `.codex-sdlc/manifest.json` `test_command` (and git-hook proof) to `pytest tests/unit` or `pytest -m "not integration"` so SDLC hooks do not invoke live smoke when `.env` sets `SEO_RANK_RUN_LIVE_INTEGRATION=1` | QA / SDLC | required | open |
+| S476-24 | Add `addopts = "-m 'not integration'"` to `[tool.pytest.ini_options]` in `pyproject.toml` so bare `pytest` matches unit-only sign-off; live smoke runs only with `pytest -m integration` | QA / pytest | nice-to-have | open |
+| S476-25 | Scaffold `docs/qa/release-phase-4.76.md` (senior-qa `scaffold_test_plan.py`): must-pass commands, manual checklist (S476-15), rollback criteria (S476-16), and live-integration optional gate | 4.76 docs | nice-to-have | open |
+| S476-26 | Fix `TESTING.md` verification status: state unit baseline (`pytest tests/unit` → 90 pass) separately from full `pytest` when live gates are on (integration runs and may fail; not "1 skipped") | QA / docs | nice-to-have | open |
+| S476-27 | Before Slice 4 HTML wiring, run TDD in order: S476-09 → S476-10 → S476-11 → S476-12 (failing tests first, then implement aggregate + `raw_html` sinks) | 4.76 Slices 4–5 | required | open |
+| S476-28 | Slice 4–5 merge sign-off must-pass: `pytest tests/unit -q` plus targeted `test_run_normalize.py` + `test_round_trip.py`; do not treat bare `pytest` as green until S476-13 and S476-23/24 are closed | 4.76 Slice 5 | required | open |
+
+---
+
+## Phase 4.76 — Slice 3 (already done)
+
+| ID | Fix | Phase | Status |
+| --- | --- | --- | --- |
+| S476-DONE-01 | Ship curated `page_content_fields` PyArrow schema, Polars validation rules, lazy `map_batches` sink, catalog wiring, and doc updates (`GOALS.md`, `ARCHITECTURE.md`, `ROADMAP.md`, `TESTING.md`) | 4.76 Slice 3 | done |
+| S476-DONE-02 | Fix `decode_content_parsing_items()` to set `structured_value = json.dumps(value)` for string scalars so `page_content_fields` `non_null_columns` validation passes on sink | 4.76 Slice 3 | done |
+| S476-DONE-03 | Add `test_build_page_content_fields_frame_decodes_structured_fields` and `test_normalize_run_materializes_page_content_fields` (partial S476-08; `field_row_id` stability assertions deferred to S476-20) | 4.76 Slice 3 | done |
 
 ---
 

@@ -14,6 +14,7 @@ from seo_rank.data.validate import (
     validate_materialized_frame_contract,
 )
 from seo_rank.dataforseo import (
+    decode_content_parsing_items,
     normalize_keyword_expansion,
     normalize_serp_results,
     parsed_page_text,
@@ -62,6 +63,25 @@ CURATED_SCHEMAS = {
             ("url", pa.string()),
             ("title", pa.string()),
             ("text", pa.string()),
+            ("schema_version", pa.string()),
+        ]
+    ),
+    "page_content_fields": pa.schema(
+        [
+            ("run_id", pa.string()),
+            ("target_keyword_id", pa.string()),
+            ("target_keyword", pa.string()),
+            ("response_id", pa.string()),
+            ("page_id", pa.string()),
+            ("canonical_url_hash", pa.string()),
+            ("url", pa.string()),
+            ("field_row_id", pa.string()),
+            ("field_path", pa.string()),
+            ("field_name", pa.string()),
+            ("value_type", pa.string()),
+            ("text", pa.string()),
+            ("structured_value", pa.string()),
+            ("ordinal", pa.int64()),
             ("schema_version", pa.string()),
         ]
     ),
@@ -196,6 +216,44 @@ CURATED_VALIDATION_RULES = {
             "text",
             "schema_version",
         ),
+    },
+    "page_content_fields": {
+        "expected_schema": {
+            "run_id": pl.Utf8,
+            "target_keyword_id": pl.Utf8,
+            "target_keyword": pl.Utf8,
+            "response_id": pl.Utf8,
+            "page_id": pl.Utf8,
+            "canonical_url_hash": pl.Utf8,
+            "url": pl.Utf8,
+            "field_row_id": pl.Utf8,
+            "field_path": pl.Utf8,
+            "field_name": pl.Utf8,
+            "value_type": pl.Utf8,
+            "text": pl.Utf8,
+            "structured_value": pl.Utf8,
+            "ordinal": pl.Int64,
+            "schema_version": pl.Utf8,
+        },
+        "unique_columns": ("field_row_id",),
+        "non_null_columns": (
+            "run_id",
+            "target_keyword_id",
+            "target_keyword",
+            "response_id",
+            "page_id",
+            "canonical_url_hash",
+            "url",
+            "field_row_id",
+            "field_path",
+            "field_name",
+            "value_type",
+            "text",
+            "structured_value",
+            "ordinal",
+            "schema_version",
+        ),
+        "bounded_columns": {"ordinal": (0, None)},
     },
     "passages": {
         "expected_schema": {
@@ -410,6 +468,10 @@ def build_curated_lazyframes_from_raw_responses(
         lambda frame: build_pages_and_passages_frame(frame, run_id=run_id),
         schema=CURATED_PAGE_AND_PASSAGE_SCHEMA,
     )
+    page_content_fields = page_responses.map_batches(
+        lambda frame: build_page_content_fields_frame(frame, run_id=run_id),
+        schema=CURATED_VALIDATION_RULES["page_content_fields"]["expected_schema"],
+    )
     pages = pages_and_passages.filter(pl.col("passage_id").is_null()).select(
         [
             "run_id",
@@ -440,6 +502,7 @@ def build_curated_lazyframes_from_raw_responses(
             "schema_version",
         ]
     ).filter(pl.col("passage_id").is_not_null())
+    page_content_field_rows = page_content_fields
     entities = entity_responses.map_batches(
         lambda frame: build_entities_frame(frame, run_id=run_id),
         schema=CURATED_VALIDATION_RULES["entities"]["expected_schema"],
@@ -453,6 +516,7 @@ def build_curated_lazyframes_from_raw_responses(
         "keywords": keywords,
         "serp_items": serp_items,
         "pages": pages,
+        "page_content_fields": page_content_field_rows,
         "passages": passages,
         "entities": entities,
         "similarity_scores": similarity_scores,
@@ -568,6 +632,63 @@ def build_pages_and_passages_frame(
                     "schema_version": CURATED_SCHEMA_VERSION,
                 }
             )
+    return pl.DataFrame(rows)
+
+
+def build_page_content_fields_frame(
+    frame: pl.DataFrame,
+    *,
+    run_id: str,
+) -> pl.DataFrame:
+    rows: list[dict[str, object]] = []
+    for record in frame.to_dicts():
+        response_id = str(record["response_id"])
+        target_keyword = str(record["target_keyword"])
+        target_keyword_id = stable_id(target_keyword)
+        body = json.loads(bytes(record["response_body_bytes"]).decode("utf-8"))
+        page = parsed_page_text(body)
+        url = str(page.get("url", "")).strip()
+        text = str(page.get("text", "")).strip()
+        if not url or not text:
+            continue
+        canonical_url_hash = stable_id(url)
+        page_id = stable_id(run_id, target_keyword, url)
+        field_records, _ = decode_content_parsing_items(body)
+        for field_record in field_records:
+            field_path = str(field_record["field_path"])
+            ordinal = int(field_record["ordinal"])
+            rows.append(
+                {
+                    "run_id": run_id,
+                    "target_keyword_id": target_keyword_id,
+                    "target_keyword": target_keyword,
+                    "response_id": response_id,
+                    "page_id": page_id,
+                    "canonical_url_hash": canonical_url_hash,
+                    "url": url,
+                    "field_row_id": stable_id(
+                        page_id,
+                        response_id,
+                        field_path,
+                        ordinal,
+                    ),
+                    "field_path": field_path,
+                    "field_name": str(field_record["field_name"]),
+                    "value_type": str(field_record["value_type"]),
+                    "text": str(field_record["text"]),
+                    "structured_value": (
+                        None
+                        if field_record["structured_value"] is None
+                        else str(field_record["structured_value"])
+                    ),
+                    "ordinal": ordinal,
+                    "schema_version": CURATED_SCHEMA_VERSION,
+                }
+            )
+    if not rows:
+        return pl.DataFrame(
+            schema=CURATED_VALIDATION_RULES["page_content_fields"]["expected_schema"]
+        )
     return pl.DataFrame(rows)
 
 
@@ -713,6 +834,9 @@ def write_curated_dataset(
             str(row.get("canonical_url_hash") or ""),
             str(row.get("serp_rank") or row.get("keyword_order") or ""),
             str(row.get("response_id") or row.get("source_response_id") or ""),
+            str(row.get("page_id") or ""),
+            str(row.get("field_path") or ""),
+            str(row.get("ordinal")) if row.get("ordinal") is not None else "",
         ),
     )
     pl.from_arrow(pa.Table.from_pylist(sorted_rows, schema=schema)).lazy().sink_parquet(

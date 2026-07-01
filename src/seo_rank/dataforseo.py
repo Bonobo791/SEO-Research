@@ -528,6 +528,7 @@ def decode_content_parsing_items(
         structured_value: str | None = None
         if isinstance(value, str):
             text = value
+            structured_value = json.dumps(value, ensure_ascii=False)
             if field_name == "text":
                 if in_page_content:
                     stripped = value.strip()

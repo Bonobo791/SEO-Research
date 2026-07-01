@@ -84,7 +84,7 @@ The repository contains an **offline-verifiable CLI scaffold** (Phase 1 shipped)
 - **CLI:** `seo-rank run` writes `run.json` and `report.md` from fixtures (no
   network calls) or gated live providers; Phase 4.5 adds `normalize`,
   `build-features`, `analyze`, `replay`, and `run --stored-run` (Slice 6 shipped)
-- **Tests:** 87 tests under `tests/`; gate: `python -m pytest`; Phase 4.5 Slice 7
+- **Tests:** 92 tests under `tests/`; gate: `python -m pytest`; Phase 4.5 Slice 7
   shipped the round-trip regression sweep in `test_sdlc_docs.py`
 - **Product docs:** `ARCHITECTURE.md`, `GOALS.md`, `ROADMAP.md`, `README.md`,
   `TESTING.md`
@@ -177,6 +177,7 @@ runs/{run_id}/
     keywords/part-*.parquet
     serp_items/part-*.parquet
     pages/part-*.parquet
+    page_content_fields/part-*.parquet
     passages/part-*.parquet
     entities/part-*.parquet
     similarity_scores/part-*.parquet
@@ -191,7 +192,7 @@ runs/{run_id}/
 
 | Layer | Tables | Producer | Purpose |
 |-------|--------|----------|---------|
-| **Curated** | `keywords`, `serp_items`, `pages`, `passages`, `entities`, `similarity_scores` | `normalize.py` | Parse `raw_responses` once into typed tables |
+| **Curated** | `keywords`, `serp_items`, `pages`, `page_content_fields`, `passages`, `entities`, `similarity_scores` | `normalize.py` | Parse `raw_responses` once into typed tables |
 | **Feature marts** | `keyword_serp`, `page_features`, `passage_features`, `domain_features` | `features.py` | Reusable similarity and ranking features |
 | **Analysis mart** | `analysis_mart` | `marts.py` | One row per `target_keyword × SERP URL` for Phase 5 |
 
@@ -236,13 +237,13 @@ each table collects once at sink. Every row includes join keys: `run_id`,
 | `keywords` | Expanded cluster keywords with caps and dedup metadata |
 | `serp_items` | Organic SERP rows (top 20), ranks, URLs, titles |
 | `pages` | Full parsed page text and page-level metadata (text lives here only) |
+| `page_content_fields` | One row per decoded `content_parsing/live` field with path metadata and stable ids |
 | `passages` | Passage splits with offsets; no duplicate full page bodies |
 | `entities` | TextRazor entity rows when present |
 | `similarity_scores` | Page-level `bge`, `gemini_doc_retrieval`, `gemini_semantic_similarity` |
 
-Planned follow-on: region-aware content parsing will add explicit region rows
-for `page_content` sections alongside the aggregate `pages.text` body. The
-aggregate page row remains the source for passage splitting.
+Planned follow-on: raw HTML persistence still needs a dedicated sink path, and
+the aggregate page row remains the source for passage splitting.
 
 Curated tables are **not** partitioned beyond the run directory. Sort rows at
 write time by primary retrieval keys, e.g. `target_keyword_id`, `canonical_url_hash`,
