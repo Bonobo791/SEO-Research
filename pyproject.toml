@@ -8,7 +8,14 @@ version = "0.1.0"
 description = "Offline-first SEO ranking similarity CLI scaffold"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["pyarrow>=21.0", "polars>=1.0"]
+dependencies = [
+  "pyarrow>=21.0",
+  "polars>=1.0",
+  "numpy>=1.26",
+  "scipy>=1.11",
+  "statsmodels>=0.14",
+  "PyYAML>=6.0",
+]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
