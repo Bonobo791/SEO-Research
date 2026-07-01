@@ -446,6 +446,168 @@ def parsed_page_text(response: Mapping[str, Any]) -> dict[str, str]:
     return {}
 
 
+def decode_content_parsing_items(
+    response: Mapping[str, Any],
+) -> tuple[list[dict[str, object]], str]:
+    """Decode structured DataForSEO content parsing items into field records."""
+
+    field_records: list[dict[str, object]] = []
+    body_text_segments: list[str] = []
+    markdown_text_segments: list[str] = []
+    direct_text_segments: list[str] = []
+    ordinal = 0
+
+    def append_record(
+        *,
+        field_path: str,
+        field_name: str,
+        value_type: str,
+        text: str,
+        structured_value: str | None,
+    ) -> None:
+        nonlocal ordinal
+        field_records.append(
+            {
+                "field_path": field_path,
+                "field_name": field_name,
+                "value_type": value_type,
+                "text": text,
+                "structured_value": structured_value,
+                "ordinal": ordinal,
+            }
+        )
+        ordinal += 1
+
+    def collect(value: Any, field_path: str, *, in_page_content: bool) -> None:
+        field_name = _content_parsing_field_name(field_path)
+        if isinstance(value, Mapping):
+            append_record(
+                field_path=field_path,
+                field_name=field_name,
+                value_type="object",
+                text="",
+                structured_value=json.dumps(
+                    value,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            )
+            next_in_page_content = in_page_content or field_name == "page_content"
+            for key, nested_value in value.items():
+                collect(
+                    nested_value,
+                    f"{field_path}.{key}",
+                    in_page_content=next_in_page_content,
+                )
+            return
+
+        if isinstance(value, list):
+            append_record(
+                field_path=field_path,
+                field_name=field_name,
+                value_type="array",
+                text="",
+                structured_value=json.dumps(
+                    value,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            )
+            for index, nested_value in enumerate(value):
+                collect(
+                    nested_value,
+                    f"{field_path}[{index}]",
+                    in_page_content=in_page_content,
+                )
+            return
+
+        value_type = _content_parsing_value_type(value)
+        text = ""
+        structured_value: str | None = None
+        if isinstance(value, str):
+            text = value
+            if field_name == "text":
+                if in_page_content:
+                    stripped = value.strip()
+                    if stripped:
+                        body_text_segments.append(stripped)
+                elif ".result[" in field_path:
+                    stripped = value.strip()
+                    if stripped:
+                        direct_text_segments.append(stripped)
+            elif field_name == "page_as_markdown":
+                stripped = value.strip()
+                if stripped:
+                    markdown_text_segments.append(stripped)
+        else:
+            structured_value = json.dumps(value, ensure_ascii=False)
+
+        append_record(
+            field_path=field_path,
+            field_name=field_name,
+            value_type=value_type,
+            text=text,
+            structured_value=structured_value,
+        )
+
+    tasks = response.get("tasks", [])
+    if not isinstance(tasks, list):
+        return [], ""
+
+    for task_index, task in enumerate(tasks):
+        if not isinstance(task, Mapping):
+            continue
+        results = task.get("result", [])
+        if not isinstance(results, list):
+            continue
+        for result_index, result in enumerate(results):
+            if not isinstance(result, Mapping):
+                continue
+            items = result.get("items", [])
+            if not isinstance(items, list):
+                continue
+            for item_index, item in enumerate(items):
+                if not isinstance(item, Mapping):
+                    continue
+                base_path = f"tasks[{task_index}].result[{result_index}].items[{item_index}]"
+                for key, value in item.items():
+                    collect(value, f"{base_path}.{key}", in_page_content=key == "page_content")
+
+    if body_text_segments:
+        text = "\n\n".join(body_text_segments)
+    elif markdown_text_segments:
+        text = "\n\n".join(markdown_text_segments)
+    else:
+        text = "\n\n".join(direct_text_segments)
+
+    return field_records, text
+
+
+def _content_parsing_value_type(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, (int, float)):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, Mapping):
+        return "object"
+    return type(value).__name__
+
+
+def _content_parsing_field_name(field_path: str) -> str:
+    field_name = field_path.rsplit(".", 1)[-1]
+    while field_name.endswith("]") and "[" in field_name:
+        field_name = field_name[: field_name.rfind("[")]
+    return field_name
+
+
 def _extract_page_content_title(page_content: Mapping[str, Any]) -> str:
     main_topics = page_content.get("main_topic", [])
     if not isinstance(main_topics, list):

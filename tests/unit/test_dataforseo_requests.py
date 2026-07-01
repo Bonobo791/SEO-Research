@@ -3,6 +3,7 @@ import pytest
 from seo_rank.dataforseo import (
     DataForSeoCredentialError,
     DataForSeoCredentials,
+    decode_content_parsing_items,
     build_keyword_expansion_request,
     build_page_text_request,
     build_serp_request,
@@ -209,3 +210,260 @@ def test_parsed_page_text_preserves_url_for_empty_page_content() -> None:
         "title": "",
         "text": "",
     }
+
+
+def test_decode_content_parsing_items_walks_nested_fields() -> None:
+    response = {
+        "tasks": [
+            {
+                "data": {"url": "https://example.com/page"},
+                "result": [
+                    {
+                        "items": [
+                            {
+                                "type": "article",
+                                "fetch_time": "2026-07-01 12:00:00 +00:00",
+                                "status_code": 200,
+                                "page_content": {
+                                    "header": {
+                                        "primary_content": [
+                                            {
+                                                "text": (
+                                                    "Header intro with enough words."
+                                                )
+                                            }
+                                        ]
+                                    },
+                                    "main_topic": [
+                                        {
+                                            "main_title": "Example Page",
+                                            "h_title": "Example Page",
+                                            "author": "Alex",
+                                            "language": "en",
+                                            "level": 2,
+                                            "primary_content": [
+                                                {"text": "First paragraph."},
+                                                {
+                                                    "text": "Second paragraph with link.",
+                                                    "urls": [
+                                                        {
+                                                            "url": (
+                                                                "https://example.com/link"
+                                                            ),
+                                                            "anchor_text": "Example link",
+                                                        }
+                                                    ],
+                                                },
+                                            ],
+                                            "secondary_content": [
+                                                {"text": "Sidebar note."}
+                                            ],
+                                            "table_content": [
+                                                {
+                                                    "header": [
+                                                        {
+                                                            "row_cells": [
+                                                                {
+                                                                    "text": "Column A",
+                                                                    "urls": [
+                                                                        {
+                                                                            "url": (
+                                                                                "https://example.com/column-a"
+                                                                            ),
+                                                                            "anchor_text": (
+                                                                                "Column A"
+                                                                            ),
+                                                                        }
+                                                                    ],
+                                                                    "is_header": True,
+                                                                }
+                                                            ]
+                                                        }
+                                                    ],
+                                                    "body": [
+                                                        {
+                                                            "row_cells": [
+                                                                {
+                                                                    "text": "Row 1",
+                                                                    "urls": [
+                                                                        {
+                                                                            "url": (
+                                                                                "https://example.com/row-1"
+                                                                            ),
+                                                                            "anchor_text": "Row 1",
+                                                                        }
+                                                                    ],
+                                                                    "is_header": False,
+                                                                }
+                                                            ]
+                                                        }
+                                                    ],
+                                                    "footer": [
+                                                        {
+                                                            "row_cells": [
+                                                                {
+                                                                    "text": "Footnote",
+                                                                    "urls": [
+                                                                        {
+                                                                            "url": (
+                                                                                "https://example.com/footnote"
+                                                                            ),
+                                                                            "anchor_text": "Footnote",
+                                                                        }
+                                                                    ],
+                                                                    "is_header": False,
+                                                                }
+                                                            ]
+                                                        }
+                                                    ],
+                                                }
+                                            ],
+                                        }
+                                    ],
+                                    "secondary_topic": [
+                                        {
+                                            "h_title": "Related",
+                                            "main_title": "Example Page",
+                                            "primary_content": [
+                                                {"text": "Secondary topic copy."}
+                                            ],
+                                        }
+                                    ],
+                                    "ratings": [
+                                        {
+                                            "name": None,
+                                            "rating_value": 4,
+                                            "max_rating_value": 5,
+                                            "rating_count": 12,
+                                            "relative_rating": 0.8,
+                                        }
+                                    ],
+                                    "offers": [
+                                        {
+                                            "name": "SEO Audit",
+                                            "price": 129,
+                                            "price_currency": "USD",
+                                            "price_valid_until": (
+                                                "2026-08-01 00:00:00 +00:00"
+                                            ),
+                                        }
+                                    ],
+                                    "comments": [
+                                        {
+                                            "rating": {
+                                                "name": None,
+                                                "rating_value": 5,
+                                                "max_rating_value": 5,
+                                                "rating_count": None,
+                                                "relative_rating": 1.0,
+                                            },
+                                            "title": "Helpful",
+                                            "publish_date": "2026-06-30",
+                                            "author": "Jordan",
+                                            "primary_content": [
+                                                {"text": "Great write-up."}
+                                            ],
+                                        }
+                                    ],
+                                    "contacts": {
+                                        "telephones": ["+1-555-0100"],
+                                        "emails": ["info@example.com"],
+                                    },
+                                },
+                                "page_as_markdown": "# Example Page\n\nMarkdown fallback.",
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+
+    field_records, text = decode_content_parsing_items(response)
+    records = {record["field_path"]: record for record in field_records}
+
+    assert text != ""
+    assert "Header intro with enough words." in text
+    assert "Great write-up." in text
+    assert "# Example Page" not in text
+    assert records["tasks[0].result[0].items[0].type"]["field_name"] == "type"
+    assert records["tasks[0].result[0].items[0].type"]["value_type"] == "string"
+    assert records["tasks[0].result[0].items[0].status_code"]["structured_value"] == "200"
+    assert (
+        records[
+            "tasks[0].result[0].items[0].page_content.header.primary_content[0].text"
+        ]["text"]
+        == "Header intro with enough words."
+    )
+    assert (
+        records[
+            "tasks[0].result[0].items[0].page_content.main_topic[0].primary_content[1].urls[0].anchor_text"
+        ]["text"]
+        == "Example link"
+    )
+    assert (
+        records[
+            "tasks[0].result[0].items[0].page_content.main_topic[0].primary_content[1].urls[0]"
+        ]["field_name"]
+        == "urls"
+    )
+    assert (
+        records[
+            "tasks[0].result[0].items[0].page_content.main_topic[0].table_content[0].body[0].row_cells[0].urls[0].url"
+        ]["text"]
+        == "https://example.com/row-1"
+    )
+    assert (
+        records["tasks[0].result[0].items[0].page_content.ratings[0].rating_value"][
+            "structured_value"
+        ]
+        == "4"
+    )
+    assert (
+        records["tasks[0].result[0].items[0].page_content.offers[0].price"][
+            "structured_value"
+        ]
+        == "129"
+    )
+    assert (
+        records[
+            "tasks[0].result[0].items[0].page_content.comments[0].primary_content[0].text"
+        ]["text"]
+        == "Great write-up."
+    )
+    assert (
+        records["tasks[0].result[0].items[0].page_content.contacts.emails[0]"][
+            "text"
+        ]
+        == "info@example.com"
+    )
+    assert (
+        records["tasks[0].result[0].items[0].page_as_markdown"]["text"]
+        == "# Example Page\n\nMarkdown fallback."
+    )
+
+
+def test_decode_content_parsing_items_falls_back_to_markdown() -> None:
+    response = {
+        "tasks": [
+            {
+                "result": [
+                    {
+                        "items": [
+                            {
+                                "page_as_markdown": "# Markdown Only\n\nFallback body.",
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    }
+
+    field_records, text = decode_content_parsing_items(response)
+
+    assert text == "# Markdown Only\n\nFallback body."
+    assert any(
+        record["field_path"] == "tasks[0].result[0].items[0].page_as_markdown"
+        for record in field_records
+    )

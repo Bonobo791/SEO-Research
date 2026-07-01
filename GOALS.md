@@ -48,17 +48,17 @@ a later phase opens non-US proxy pools.
 
 #### Progress
 
-**Slices:** 1 of 5 shipped, 4 open.
+**Slices:** 2 of 5 shipped, 3 open.
 
 | # | Slice | Layer | Status | Primary deliverable |
 | - | ----- | ----- | ------ | ------------------- |
 | 1 | Request contract | Provider | Shipped | `build_page_text_request()` emits the fixed parameter set above |
-| 2 | Item field decoder | Curated | Open | Decoder walks `items[]` fields (`type`, `fetch_time`, `status_code`, `page_content` tree, `page_as_markdown`, `ratings`, `offers`, `comments`, `contacts`, …) per API docs |
+| 2 | Item field decoder | Curated | Shipped | Decoder walks `items[]` fields (`type`, `fetch_time`, `status_code`, `page_content` tree, `page_as_markdown`, `ratings`, `offers`, `comments`, `contacts`, …) per API docs |
 | 3 | Per-field storage | Curated | Open | New curated table(s): one row per extracted field/element with stable ids and JSON path metadata |
 | 4 | Aggregate + HTML wiring | Curated | Open | `pages.text` unchanged (merged content); `raw_html` stored per page/response; passages still from aggregate text only |
 | 5 | Tests and re-normalize | Curated | Open | Fixtures cover multi-field items, HTML retention, and stored-run normalize |
 
-**Remaining to close Phase 4.76:** slices 2–5.
+**Remaining to close Phase 4.76:** slices 3–5.
 
 #### Dev slices
 
@@ -67,7 +67,7 @@ a later phase opens non-US proxy pools.
    - Tests: `test_build_page_text_request_uses_content_parsing_endpoint` asserts
      the full parameter object.
 
-2. **[ ] Slice 2 — Item field decoder**
+2. **[x] Slice 2 — Item field decoder**
    - Add a structured decoder for every documented `items[]` field and nested
      `page_content` region (`header`, `footer`, `main_topic`, `secondary_topic`,
      `primary_content`, `secondary_content`, `table_content`, `ratings`, `offers`,
@@ -137,13 +137,13 @@ See `ROADMAP.md` for Phase 5 (OLS) and Phase 5.5 (passage/domain scoring).
 | Acceptance item | Slice(s) | Status |
 | --------------- | -------- | ------ |
 | `build_page_text_request()` uses US English desktop contract (`switch_pool=false`, `ip_pool_for_scan=us`, `accept_language=en-US`, `browser_preset=desktop`, JS/rendering off, `store_raw_html=true`) | 1 | Complete |
-| Every documented `items[]` field decodes to storable records | 2 | Not started |
+| Every documented `items[]` field decodes to storable records | 2 | Complete |
 | Per-field rows land in curated Parquet with stable ids | 3 | Not started |
 | Aggregate `pages.text` preserved; raw HTML stored per page | 4 | Not started |
 | Unit tests + stored-run re-normalize cover fields, aggregate, and HTML | 5 | Not started |
 
 - [x] Live `page_text` requests emit the fixed parameter set. *(Slice 1.)*
-- [ ] Item decoder walks full `items[]` / `page_content` tree per API docs.
+- [x] Item decoder walks full `items[]` / `page_content` tree per API docs.
   *(Slice 2.)*
 - [ ] Curated per-field table(s) materialize on normalize. *(Slice 3.)*
 - [ ] `pages` / `passages` aggregate path unchanged; HTML persisted. *(Slice 4.)*

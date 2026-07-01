@@ -2,7 +2,9 @@
 
 Tracked hardening and polish items surfaced during Phase 4.5 Slice 3 (lazy
 curated normalization), Slice 6 (CLI surfaces), Slice 9 (mart sink contract),
-and Phase 4.76 Slice 1 (content_parsing request contract) review. Each item names
+Phase 4.76 Slice 1 (content_parsing request contract) review, Slice 2
+(item field decoder) review, and senior QA release-readiness review for
+Slices 3–5. Each item names
 the **phase/slice** where it should land. Nothing here blocks Slice 10 sign-off
 unless marked **required**.
 
@@ -19,6 +21,41 @@ Follow-ups from Slice 1 review. None block Slices 2–5.
 | S476-01 | Document breaking CLI removal of `--javascript-parsing` in `README.md` (release note / changelog line) so scripts that still pass the flag know argparse will reject it | 4.76 Slice 1 | nice-to-have | open |
 | S476-02 | Add transport-capture assertion in a live-provider CLI test: mock or spy the outgoing `content_parsing/live` request body at the integration boundary (unit test `test_build_page_text_request_uses_content_parsing_endpoint` already asserts the builder; live-path tests only mock responses today) | 4.76 Slice 1 | nice-to-have | open |
 | S476-03 | Consider order-insensitive body comparison in `test_build_page_text_request_uses_content_parsing_endpoint` (subset / dict equality) so parameter reordering in `build_page_text_request()` does not break the test; current key order matches source and is consistent with other builder tests in the same file | 4.76 Slice 1 | nice-to-have | open |
+
+---
+
+## Phase 4.76 — Slice 2 (item field decoder — post-ship polish)
+
+Follow-ups from Slice 2 review (`decode_content_parsing_items()`). None block
+Slices 3–5 unless a row is marked **required**.
+
+| ID | Fix | Phase | Priority | Status |
+| --- | --- | --- | --- | --- |
+| S476-04 | Unify aggregate text extraction: derive merged `pages.text` from `decode_content_parsing_items()` (or a shared helper) instead of maintaining parallel logic in `parsed_page_text()` / `_extract_page_content_text()` — prevents drift between live CLI, normalize, and per-field decode | 4.76 Slice 4 | nice-to-have | open |
+| S476-05 | Decide per-field Parquet row shape for container nodes: `decode_content_parsing_items()` emits parent object/array rows with full `structured_value` JSON plus child rows — confirm Slice 3 schema keeps both or leaf-only rows to avoid ~2× storage and repeated `json.dumps` on subtrees | 4.76 Slice 3 | nice-to-have | open |
+| S476-06 | Add a one-line pointer in `ROADMAP.md` that Phase 4.75 is complete and canonical detail lives in `GOALS.md` § Completed (replaces the removed Phase 4.75 block) | 4.76 docs | nice-to-have | open |
+| S476-07 | Document in Slice 3 curated schema that scalar numbers and booleans land in `structured_value` with empty `text` (e.g. `status_code: 200` → `structured_value` `"200"`, not `text`) so downstream consumers read the right column | 4.76 Slice 3 | nice-to-have | open |
+
+---
+
+## Phase 4.76 — Slice 5 (tests and QA — senior review)
+
+Follow-ups from senior QA release-readiness review (Phase 4.76 slices 3–5).
+**Required** rows are TDD gates or sign-off blockers; write failing tests before
+implementing sinks. Unit baseline: `pytest tests/unit` (88 tests, all pass as of
+review).
+
+| ID | Fix | Phase | Priority | Status |
+| --- | --- | --- | --- | --- |
+| S476-08 | Write failing `test_normalize_run_materializes_page_content_fields` before Slice 3 sink: per-field rows with `field_path`, `ordinal`, and stable ids (`run_id`, `response_id`, `page_id`) | 4.76 Slice 5 | required | open |
+| S476-09 | Write failing `test_normalize_run_stores_raw_html_when_present` before Slice 4 HTML wiring: HTML linked by `page_id` / `response_id` when crawl payload includes raw HTML | 4.76 Slice 5 | required | open |
+| S476-10 | Write failing `test_build_pages_and_passages_frame_preserves_aggregate_text_with_field_decode`: merged `pages.text` matches Phase 4.75 aggregate path when decoder is wired | 4.76 Slice 5 | required | open |
+| S476-11 | Write failing `test_normalize_run_skips_empty_crawl_with_field_decode`: URL-only or empty-body crawls still omitted from `pages` / `passages` after field-decode path | 4.76 Slice 5 | required | open |
+| S476-12 | Add stored-run re-normalize smoke fixture (multi-field `items[]` + HTML) and assert curated lake row counts; extend `test_round_trip.py` or `test_run_normalize.py` | 4.76 Slice 5 | required | open |
+| S476-13 | Gate or fix live integration smoke: `test_live_provider_smoke_writes_artifacts` fails with Gemini `404 Not Found` when `SEO_RANK_ENABLE_GEMINI=1` — validate API key/model/endpoint or skip when credentials are unhealthy | QA / integration | required | open |
+| S476-14 | Document default Phase 4.76 sign-off gate as `pytest tests/unit`; full suite (`pytest`) requires `SEO_RANK_RUN_LIVE_INTEGRATION=1` plus healthy provider env | QA / docs | nice-to-have | open |
+| S476-15 | Add Phase 4.76 manual sign-off checklist to `TESTING.md` or `docs/qa/`: live crawl contract, `normalize --run` per-field + HTML, re-normalize on pre-4.76 run, locale note (`--language` does not change page crawl pool) | 4.76 docs | nice-to-have | open |
+| S476-16 | Rollback criterion for slices 3–4: if per-field or HTML wiring changes `pages` / `passages` row counts or breaks existing normalize fixtures, revert and re-run `test_run_normalize.py` + `test_round_trip.py` before merge | 4.76 Slice 5 | nice-to-have | open |
 
 ---
 

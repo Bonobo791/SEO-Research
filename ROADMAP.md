@@ -99,18 +99,6 @@ text so similarity features better mirror hybrid search-engine retrieval
      `similarity_scores` schema.
    - Unit tests for score shaping; optional env-gated integration smoke.
 
-### Phase 4.75 — page_text curation hardening (complete)
-
-Shipped contract: `GOALS.md` § Completed: Phase 4.75. Related polish:
-`FIXUPS.md` § Phase 4.75.
-
-- **Shared decoder** — `parsed_page_text()` is the single extractor for live and
-  stored `page_text` payloads; normalization must not re-index raw JSON ad hoc.
-- **Multi-region text** — merge `header` and other `page_content` keys into page
-  `text`, not only `main_topic` sections.
-- **Empty crawl filter** — skip responses with no URL and no text before writing
-  `pages` / `passages` (align with CLI `if page_text`).
-
 ### Phase 5 — Statistical analysis
 
 - OLS pre-analysis preparation (root `ARCHITECTURE.md`)
