@@ -21,6 +21,7 @@ seo-rank = "seo_rank.cli:main"
 where = ["src"]
 
 [tool.pytest.ini_options]
+pythonpath = ["."]
 testpaths = ["tests"]
 markers = [
   "integration: live provider smoke tests skipped unless explicitly enabled",
