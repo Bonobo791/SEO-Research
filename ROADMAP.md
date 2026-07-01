@@ -229,6 +229,43 @@ text so similarity features better mirror hybrid search-engine retrieval
      `similarity_scores` schema.
    - Unit tests for score shaping; optional env-gated integration smoke.
 
+### Phase 5.9 — Crash-Safe DataForSEO Persistence and Reuse
+
+Persist validated DataForSEO responses immediately after each request returns,
+so a crash leaves behind usable partial data instead of only end-of-run output.
+When a new run matches a prior pull by effective request configuration, prompt
+the user before reusing the existing DataForSEO data. Matching is based on the
+effective config, not raw argv text: compare the seed plus every
+request-affecting flag actually used in the run, treating omitted flags as
+their effective defaults.
+
+**Primary behavior**
+
+- Save each validated DataForSEO response as soon as it is received.
+- Update the run catalog incrementally so crash recovery reflects what is
+  already on disk.
+- Store provenance for the effective DataForSEO request config, including the
+  seed and all request-affecting flags used in the run.
+- Treat omitted flags as their effective defaults when comparing a new run to
+  prior pulls.
+- Prompt the user before reusing matching prior DataForSEO data.
+- Fail explicitly in non-interactive mode if reuse would otherwise require a
+  prompt.
+- Record the reuse decision in run metadata so operators can tell whether a
+  run reused prior data or performed fresh pulls.
+
+**Test plan**
+
+- Crash-safety test: simulate failure after the first DataForSEO response and
+  verify that the first response is already on disk.
+- Reuse-matching test: confirm the effective config is compared by seed plus
+  the actual flag set in use.
+- Prompt-path test: verify the CLI asks before reusing a matching prior
+  DataForSEO pull.
+- Non-interactive test: verify matching data does not get reused implicitly.
+- Catalog/provenance test: confirm the saved metadata is sufficient to identify
+  prior matching pulls.
+
 ### Phase 6 — Reporting
 
 - Expanded `report.md` sections for observational limits and top-20 censoring

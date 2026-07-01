@@ -420,6 +420,90 @@ def test_run_live_providers_without_optional_flags_does_not_require_optional_cre
     assert payload["textrazor_entities"] == []
 
 
+def test_run_live_providers_uses_longer_dataforseo_timeout(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.setenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", "1")
+    monkeypatch.setenv("DATAFORSEO_LOGIN", "analyst@example.com")
+    monkeypatch.setenv("DATAFORSEO_PASSWORD", "dataforseo-secret")
+
+    timeouts: list[float] = []
+
+    def dataforseo_transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        del method, headers, body
+        timeouts.append(timeout)
+        if url.endswith("/keywords_data/google_ads/keywords_for_keywords/live"):
+            return {
+                "tasks": [
+                    {
+                        "result": [
+                            {"keyword": "technical seo", "search_volume": 1000},
+                        ],
+                    }
+                ],
+            }
+        if url.endswith("/serp/google/organic/live/advanced"):
+            return {
+                "tasks": [
+                    {
+                        "result": [
+                            {
+                                "items": [
+                                    {
+                                        "type": "organic",
+                                        "rank_group": 1,
+                                        "url": "https://example.com/live",
+                                        "title": "SERP Result",
+                                        "description": "Live provider result.",
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        if url.endswith("/on_page/content_parsing/live"):
+            return {
+                "tasks": [
+                    {
+                        "result": [
+                            {
+                                "url": "https://example.com/live",
+                                "title": "Parsed Page",
+                                "text": "Technical SEO helps crawlers find pages.",
+                            }
+                        ],
+                    }
+                ],
+            }
+        raise AssertionError(f"unexpected DataForSEO URL: {url}")
+
+    monkeypatch.setattr("seo_rank.cli.DEFAULT_DATAFORSEO_TRANSPORT", dataforseo_transport)
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--output-dir",
+            str(output_dir),
+            "--live-providers",
+        ]
+    )
+
+    assert exit_code == 0
+    assert timeouts == [120.0, 120.0, 120.0]
+
+
 def test_run_rejects_live_provider_schema_drift_before_normalization(
     tmp_path: Path,
     capsys,

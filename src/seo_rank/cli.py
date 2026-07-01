@@ -67,6 +67,7 @@ LIVE_GEMINI_ENV_FLAG = "SEO_RANK_ENABLE_GEMINI"
 LIVE_TEXTRAZOR_ENV_FLAG = "SEO_RANK_ENABLE_TEXTRAZOR"
 DEFAULT_DATAFORSEO_TRANSPORT = None
 DEFAULT_TEXTRAZOR_TRANSPORT = None
+DATAFORSEO_LIVE_REQUEST_TIMEOUT = 120.0
 DATAFORSEO_LOCATION_CODES = {
     "United States": 2840,
 }
@@ -802,6 +803,7 @@ def execute_validated_dataforseo_request(
         request,
         credentials=credentials,
         transport=transport,
+        timeout=DATAFORSEO_LIVE_REQUEST_TIMEOUT,
     )
     return validate_dataforseo_response(endpoint, response)
 

@@ -2,6 +2,7 @@ import importlib.util
 from pathlib import Path
 
 import pytest
+from seo_rank.gemini_embeddings import build_live_embed_content as shared_build_live_embed_content
 
 
 SCRIPT = Path("/var/home/user/PycharmProjects/SEO-Research/analysis/gemini_nwh_similarity.py")
@@ -121,6 +122,12 @@ def test_main_reports_bge_and_gemini_document_relevance(monkeypatch, capsys) -> 
     assert "BGE" in captured
     assert "Gemini document relevance" in captured
     assert '"gemini_doc_retrieval"' in captured
+
+
+def test_analysis_script_reuses_shared_live_embed_builder() -> None:
+    module = load_module()
+
+    assert module.build_live_embed_content is shared_build_live_embed_content
 
 
 def test_compute_semantic_similarity_scores_falls_back_to_fixture_bge_when_live_dependency_missing(

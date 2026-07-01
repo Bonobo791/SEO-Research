@@ -122,6 +122,27 @@ def test_phase_45_slice_9_regression_sweep_marks_mart_sink_docs_as_shipped() -> 
     assert "Phase 4.5 Slice 9 shipped" in roadmap
     assert "Phase 4.5 Slice 10 shipped" in roadmap
     assert "Phase 4.5 signed off" in roadmap
-    assert "126 tests" in architecture
-    assert "126 tests collected" in testing
+    assert "136 tests" in architecture
+    assert "136 tests collected; 135 passing, 1 skipped" in testing
     assert "sink feature marts lazily with Parquet statistics" in testing
+
+
+def test_phase_5_slice_1_defines_analysis_spec_v1() -> None:
+    spec = (ROOT / "analysis_spec.v1.yaml").read_text(encoding="utf-8")
+    architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
+    roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
+    plan_review = (ROOT / "PHASE5-STATS-PLAN-REVIEW.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "version: v1" in spec
+    assert "outcome: -log(serp_rank)" in spec
+    assert "primary_backend: bge" in spec
+    assert "backend_order:" in spec
+    assert "keyword_clustered_se: target_keyword_id" in spec
+    assert "bh_family: per_backend_keyword_tests" in spec
+    assert "bh_when_keyword_count_gte: 10" in spec
+    assert "actionable_association:" in spec
+    assert "analysis_spec.v1.yaml" in architecture
+    assert "analysis_spec.v1.yaml" in roadmap
+    assert "analysis_spec.v1.yaml" in plan_review

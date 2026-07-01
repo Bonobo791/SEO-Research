@@ -14,7 +14,7 @@ Pytest configuration and verification contract for SEO-Research.
   interpreter
 - Lint / type-check / build / coverage: not configured
 - Expected test duration: fast (< 1s)
-- **Current verification status:** 126 tests collected; 126 passing
+- **Current verification status:** 136 tests collected; 135 passing, 1 skipped
 
 ## Active Verification Command
 

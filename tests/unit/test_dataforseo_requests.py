@@ -208,6 +208,17 @@ def test_validate_dataforseo_response_reports_missing_field_as_absent() -> None:
     assert "got field absent" in str(error)
 
 
+def test_validate_dataforseo_response_accepts_non_organic_serp_rows_without_url() -> None:
+    response = fixture_serp_response("technical seo")
+    response["tasks"][0]["result"][0]["items"][0] = {
+        "type": "people_also_ask",
+        "rank_group": 12,
+        "description": "Fixture people-also-ask result.",
+    }
+
+    assert validate_dataforseo_response("serp", response) is response
+
+
 def test_validate_dataforseo_response_rejects_unknown_endpoint() -> None:
     with pytest.raises(DataForSeoParseError) as exc_info:
         validate_dataforseo_response("unknown", {})
@@ -283,6 +294,63 @@ def test_validate_dataforseo_response_accepts_nested_page_content_fixture() -> N
     }
 
     assert validate_dataforseo_response("page_text", response) is response
+
+
+def test_validate_dataforseo_response_accepts_null_page_as_markdown() -> None:
+    response = {
+        "tasks": [
+            {
+                "data": {"url": "https://example.com/technical-seo/1"},
+                "result": [
+                    {
+                        "items": [
+                            {
+                                "url": "https://example.com/technical-seo/1",
+                                "page_as_markdown": None,
+                                "page_content": {
+                                    "main_topic": [
+                                        {
+                                            "main_title": "Example Page",
+                                            "primary_content": [
+                                                {"text": "First paragraph."}
+                                            ],
+                                        }
+                                    ]
+                                },
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+
+    assert validate_dataforseo_response("page_text", response) is response
+
+
+def test_validate_dataforseo_response_rejects_null_only_page_as_markdown() -> None:
+    response = {
+        "tasks": [
+            {
+                "data": {"url": "https://example.com/technical-seo/1"},
+                "result": [
+                    {
+                        "items": [
+                            {
+                                "url": "https://example.com/technical-seo/1",
+                                "page_as_markdown": None,
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+
+    with pytest.raises(DataForSeoParseError) as exc_info:
+        validate_dataforseo_response("page_text", response)
+
+    assert "page_content, page_as_markdown, or html" in str(exc_info.value)
 
 
 def test_validate_dataforseo_response_accepts_empty_page_response() -> None:

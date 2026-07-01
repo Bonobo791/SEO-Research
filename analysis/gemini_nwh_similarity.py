@@ -21,6 +21,7 @@ from seo_rank.bge_reranker import load_bge_reranker, sigmoid
 from seo_rank.gemini_embeddings import (
     GEMINI_EMBEDDING_DIMENSIONALITY,
     GEMINI_EMBEDDING_MODEL,
+    build_live_embed_content,
     cosine_similarity,
     prepare_document,
     prepare_query,
@@ -198,38 +199,6 @@ def compute_semantic_similarity_scores(
             }
         )
     return scores
-
-
-def build_live_embed_content(api_key: str) -> Callable[..., Sequence[float]]:
-    from google import genai
-    from google.genai.types import EmbedContentConfig
-
-    client = genai.Client(vertexai=False, api_key=api_key)
-
-    def embed_content(
-        content: str,
-        *,
-        api_key: str,
-        model: str,
-        output_dimensionality: int,
-    ) -> Sequence[float]:
-        if api_key != client.models._api_client.api_key:
-            raise ValueError("embed_content called with an unexpected api key")
-        response = client.models.embed_content(
-            model=model,
-            contents=content,
-            config=EmbedContentConfig(output_dimensionality=output_dimensionality),
-        )
-        embeddings = getattr(response, "embeddings", None)
-        if not embeddings:
-            raise RuntimeError("Gemini embedding response did not include vectors")
-        values = getattr(embeddings[0], "values", None)
-        if values is None:
-            raise RuntimeError("Gemini embedding response contained invalid values")
-        return values
-
-    return embed_content
-
 
 def main() -> int:
     ensure_project_env_loaded()

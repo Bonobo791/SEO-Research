@@ -1,0 +1,91 @@
+version: v1
+name: Phase 5 statistical analysis estimand
+source_docs:
+  architecture: ARCHITECTURE.md
+  roadmap: ROADMAP.md
+  plan_review: PHASE5-STATS-PLAN-REVIEW.md
+
+decision:
+  primary: [association_exists, backend_comparison]
+  primary_backend: bge
+  backend_order:
+    - bge
+    - gemini_doc_retrieval
+    - gemini_semantic_similarity
+  versioning_note: Phase 5.75 uses analysis_spec.v2.yaml; do not reinterpret v1 runs with v2 spec.
+
+panel:
+  grain: target_keyword_id x canonical_url_hash
+  observation_scope: top_20_serp_results_per_keyword
+  score_columns:
+    - bge_normalized_score
+    - gemini_doc_retrieval_normalized_score
+    - gemini_semantic_similarity_normalized_score
+  keyword_clustered_se: target_keyword_id
+  url_two_way_cluster_sensitivity: canonical_url_hash
+
+estimand:
+  outcome: -log(serp_rank)
+  primary_metric: keyword_level_spearman_rho
+  baseline_model: log(page_text_length + 1) + C(target_keyword_id)
+  feature_model: normalized_similarity + log(page_text_length + 1) + C(target_keyword_id)
+  multivariate_model:
+    - bge_normalized_score
+    - gemini_doc_retrieval_normalized_score
+    - gemini_semantic_similarity_normalized_score
+    - log(page_text_length + 1)
+    - C(target_keyword_id)
+
+inference:
+  bh_family: per_backend_keyword_tests
+  bh_q: 0.05
+  bh_when_keyword_count_gte: 10
+  bh_skipped_reason: underpowered
+  diagnostics_bh_policy: never_adjust_diagnostic_p_values
+
+guardrails:
+  hard_fail:
+    - name: keywords_with_complete_primary_backend_scores
+      relation: gte
+      threshold: 10
+    - name: serp_rank_variance_within_keyword
+      relation: gt
+      threshold: 0
+  warn:
+    - name: non_null_score_rate_per_backend
+      relation: gte
+      threshold: 0.90
+    - name: similarity_variance_within_keyword
+      relation: gt
+      threshold: 0
+    - name: influential_rows_rate
+      relation: lte
+      threshold: 0.05
+
+actionable_association:
+  backend: bge
+  median_abs_rho_gte: 0.25
+  same_sign_fraction_gte: 0.60
+  pooled_ci_excludes_zero: true
+
+effect_size:
+  translation: approximate_delta_rank_per_1sd_similarity
+  note: use the clustered pooled regression coefficient and the observed backend score standard deviation.
+
+sensitivity:
+  multivariate_vif_threshold: 5
+  backend_drop_order:
+    - gemini_semantic_similarity
+    - gemini_doc_retrieval
+    - bge
+  two_way_cluster:
+    clusters:
+      - target_keyword_id
+      - canonical_url_hash
+    robustness_only: true
+
+limitations:
+  - observational_only
+  - top_20_truncation
+  - no_causal_claims
+  - measurement_error_conservative

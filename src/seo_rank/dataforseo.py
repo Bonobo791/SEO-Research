@@ -88,14 +88,6 @@ DATAFORSEO_RESPONSE_SCHEMAS: dict[str, tuple[DataForSeoFieldSchema, ...]] = {
             ("tasks", "[]", "result", "[]", "items", "[]", "rank_group"),
             int,
         ),
-        DataForSeoFieldSchema(
-            ("tasks", "[]", "result", "[]", "items", "[]", "url"),
-            str,
-        ),
-        DataForSeoFieldSchema(
-            ("tasks", "[]", "result", "[]", "items", "[]", "title"),
-            str,
-        ),
     ),
     "page_text": (
         DataForSeoFieldSchema(("tasks",), list),
@@ -247,6 +239,8 @@ def validate_dataforseo_response(
         _validate_dataforseo_field(response, endpoint=endpoint, schema=field_schema)
     if endpoint == "page_text":
         _validate_content_parsing_response(response)
+    elif endpoint == "serp":
+        _validate_serp_response(response)
     return response
 
 
@@ -360,15 +354,30 @@ def _validate_content_parsing_result(
 ) -> None:
     text = result.get("text")
     if text is not None:
-        _raise_unless_type(result.get("url"), str, f"{result_path}.url")
-        _raise_unless_type(result.get("title", ""), str, f"{result_path}.title")
-        _raise_unless_type(text, str, f"{result_path}.text")
+        _raise_unless_type(
+            result.get("url"),
+            str,
+            f"{result_path}.url",
+            endpoint="page_text",
+        )
+        _raise_unless_type(
+            result.get("title", ""),
+            str,
+            f"{result_path}.title",
+            endpoint="page_text",
+        )
+        _raise_unless_type(
+            text,
+            str,
+            f"{result_path}.text",
+            endpoint="page_text",
+        )
         return
 
     items = result.get("items")
     if items is None and result.get("items_count") == 0:
         return
-    _raise_unless_type(items, list, f"{result_path}.items")
+    _raise_unless_type(items, list, f"{result_path}.items", endpoint="page_text")
     if not isinstance(items, list):
         return
     has_content_item = any(
@@ -398,23 +407,31 @@ def _validate_content_parsing_item(
     *,
     allow_bodyless_items: bool = False,
 ) -> None:
-    if "url" in item:
-        _raise_unless_type(item["url"], str, f"{item_path}.url")
-    if "page_content" in item:
-        _raise_unless_type(item["page_content"], Mapping, f"{item_path}.page_content")
-    if "page_as_markdown" in item:
+    if item.get("url") is not None:
+        _raise_unless_type(item["url"], str, f"{item_path}.url", endpoint="page_text")
+    if item.get("page_content") is not None:
+        _raise_unless_type(
+            item["page_content"],
+            Mapping,
+            f"{item_path}.page_content",
+            endpoint="page_text",
+        )
+    if item.get("page_as_markdown") is not None:
         _raise_unless_type(
             item["page_as_markdown"],
             str,
             f"{item_path}.page_as_markdown",
+            endpoint="page_text",
         )
     for html_key in ("raw_html", "html", "page_html"):
-        if html_key in item:
-            _raise_unless_type(item[html_key], str, f"{item_path}.{html_key}")
-    has_body = any(
-        key in item
-        for key in ("page_content", "page_as_markdown", "raw_html", "html", "page_html")
-    )
+        if item.get(html_key) is not None:
+            _raise_unless_type(
+                item[html_key],
+                str,
+                f"{item_path}.{html_key}",
+                endpoint="page_text",
+            )
+    has_body = _content_parsing_item_has_body(item)
     if not has_body:
         if allow_bodyless_items:
             return
@@ -428,9 +445,61 @@ def _validate_content_parsing_item(
         )
 
 
+def _validate_serp_response(response: Mapping[str, object]) -> None:
+    tasks = response.get("tasks", [])
+    if not isinstance(tasks, list):
+        return
+    for task_index, task in enumerate(tasks):
+        if not isinstance(task, Mapping):
+            continue
+        results = task.get("result", [])
+        if not isinstance(results, list):
+            continue
+        for result_index, result in enumerate(results):
+            if not isinstance(result, Mapping):
+                continue
+            items = result.get("items", [])
+            if not isinstance(items, list):
+                continue
+            for item_index, item in enumerate(items):
+                if not isinstance(item, Mapping):
+                    continue
+                if item.get("type") != "organic":
+                    continue
+                item_path = f"tasks[{task_index}].result[{result_index}].items[{item_index}]"
+                if "url" not in item:
+                    raise DataForSeoParseError(
+                        endpoint="serp",
+                        path=f"{item_path}.url",
+                        expected="present",
+                        actual=None,
+                        actual_type="field absent",
+                    )
+                _raise_unless_type(
+                    item["url"],
+                    str,
+                    f"{item_path}.url",
+                    endpoint="serp",
+                )
+                if "title" not in item:
+                    raise DataForSeoParseError(
+                        endpoint="serp",
+                        path=f"{item_path}.title",
+                        expected="present",
+                        actual=None,
+                        actual_type="field absent",
+                    )
+                _raise_unless_type(
+                    item["title"],
+                    str,
+                    f"{item_path}.title",
+                    endpoint="serp",
+                )
+
+
 def _content_parsing_item_has_body(item: Mapping[str, object]) -> bool:
     return any(
-        key in item
+        item.get(key) is not None
         for key in ("page_content", "page_as_markdown", "raw_html", "html", "page_html")
     )
 
@@ -439,10 +508,12 @@ def _raise_unless_type(
     value: object,
     expected_type: type | tuple[type, ...],
     path: str,
+    *,
+    endpoint: str,
 ) -> None:
     if not isinstance(value, expected_type):
         raise DataForSeoParseError(
-            endpoint="page_text",
+            endpoint=endpoint,
             path=path,
             expected=_expected_type_name(expected_type),
             actual=value,

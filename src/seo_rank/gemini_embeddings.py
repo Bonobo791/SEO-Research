@@ -2,6 +2,7 @@
 
 import math
 from collections.abc import Sequence
+from typing import Callable
 
 from seo_rank.similarity import fixture_bge_reranker_score
 
@@ -109,6 +110,16 @@ def compute_gemini_page_similarity_scores(
     return scores
 
 
+def _embedding_values_from_response(response: object) -> Sequence[float]:
+    embeddings = getattr(response, "embeddings", None)
+    if not embeddings:
+        raise GeminiEmbeddingError("Gemini embedding response did not include vectors")
+    values = getattr(embeddings[0], "values", None)
+    if values is None:
+        raise GeminiEmbeddingError("Gemini embedding response contained invalid values")
+    return values
+
+
 def default_embed_content(
     content: str,
     *,
@@ -125,19 +136,40 @@ def default_embed_content(
             "'google-genai'. Install with: pip install -e '.[similarity,dev]'"
         ) from error
 
-    client = genai.Client(api_key=api_key)
+    # Google AI Studio keys must use the generativelanguage API even when
+    # GOOGLE_GENAI_USE_ENTERPRISE=true would otherwise route to Vertex AI.
+    client = genai.Client(vertexai=False, api_key=api_key)
     response = client.models.embed_content(
         model=model,
         contents=content,
         config=EmbedContentConfig(output_dimensionality=output_dimensionality),
     )
-    embeddings = getattr(response, "embeddings", None)
-    if not embeddings:
-        raise GeminiEmbeddingError("Gemini embedding response did not include vectors")
-    values = getattr(embeddings[0], "values", None)
-    if not isinstance(values, Sequence):
-        raise GeminiEmbeddingError("Gemini embedding response contained invalid values")
-    return values
+    return _embedding_values_from_response(response)
+
+
+def build_live_embed_content(api_key: str) -> Callable[..., Sequence[float]]:
+    from google import genai
+    from google.genai.types import EmbedContentConfig
+
+    client = genai.Client(vertexai=False, api_key=api_key)
+
+    def embed_content(
+        content: str,
+        *,
+        api_key: str,
+        model: str,
+        output_dimensionality: int,
+    ) -> Sequence[float]:
+        if api_key != client.models._api_client.api_key:
+            raise ValueError("embed_content called with an unexpected api key")
+        response = client.models.embed_content(
+            model=model,
+            contents=content,
+            config=EmbedContentConfig(output_dimensionality=output_dimensionality),
+        )
+        return _embedding_values_from_response(response)
+
+    return embed_content
 
 
 def to_vector(values: Sequence[float]) -> Vector:
