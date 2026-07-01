@@ -90,6 +90,41 @@ def test_load_bge_reranker_builds_pinned_flagembedding_model() -> None:
     ]
 
 
+def test_load_bge_reranker_patches_missing_prepare_for_model_compatibility() -> None:
+    class FakeTokenizer:
+        bos_token_id = 0
+        eos_token_id = 2
+
+        def num_special_tokens_to_add(self, pair: bool = False) -> int:
+            return 4 if pair else 2
+
+    class FakeReranker:
+        def __init__(self) -> None:
+            self.tokenizer = FakeTokenizer()
+
+    def build_reranker(model_name: str, **kwargs):
+        assert model_name == BGE_RERANKER_MODEL
+        assert kwargs == {
+            "use_fp16": True,
+            "devices": ["cuda"],
+        }
+        return FakeReranker()
+
+    reranker = load_bge_reranker(
+        build_reranker=build_reranker,
+        is_gpu_available=lambda: True,
+    )
+
+    assert hasattr(reranker.tokenizer, "prepare_for_model")
+    assert reranker.tokenizer.prepare_for_model(
+        [11, 12],
+        [21, 22],
+        truncation="only_second",
+        max_length=10,
+        padding=False,
+    ) == {"input_ids": [0, 11, 12, 2, 2, 21, 22, 2]}
+
+
 def test_compute_bge_page_similarity_scores_reuses_provided_reranker() -> None:
     load_calls = 0
 

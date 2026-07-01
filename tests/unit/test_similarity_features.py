@@ -99,3 +99,24 @@ def test_compute_page_similarity_scores_returns_dual_backend_page_scores() -> No
             },
         },
     ]
+
+
+def test_compute_page_similarity_scores_distinguishes_partial_keyword_overlap() -> None:
+    pages = [
+        {
+            "url": "https://example.com/a",
+            "text": "Northwest Houston market updates for local home buyers.",
+        },
+        {
+            "url": "https://example.com/b",
+            "text": "Ryan & Royale Jockers Team",
+        },
+    ]
+
+    scores = compute_page_similarity_scores("best northwest houston realtors", pages)
+
+    assert (
+        scores[0]["page_similarity"]["bge"]["raw_score"]
+        > scores[1]["page_similarity"]["bge"]["raw_score"]
+    )
+    assert scores[1]["page_similarity"]["bge"]["raw_score"] == 0.12

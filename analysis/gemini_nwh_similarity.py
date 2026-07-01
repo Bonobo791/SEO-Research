@@ -17,7 +17,7 @@ if str(REPO_SRC) not in sys.path:
     sys.path.insert(0, str(REPO_SRC))
 
 from seo_rank.env import ensure_project_env_loaded
-from seo_rank.bge_reranker import BgeRerankerError, load_bge_reranker, sigmoid
+from seo_rank.bge_reranker import load_bge_reranker, sigmoid
 from seo_rank.gemini_embeddings import (
     GEMINI_EMBEDDING_DIMENSIONALITY,
     GEMINI_EMBEDDING_MODEL,
@@ -83,6 +83,25 @@ TEXT_BLOCKS: list[dict[str, str]] = [
 ]
 
 
+class _FixtureBgeReranker:
+    def compute_score(self, pairs: Sequence[Sequence[str]]) -> list[float]:
+        return [
+            fixture_bge_reranker_score(keyword_value, text_value)
+            for keyword_value, text_value in pairs
+        ]
+
+
+def _load_bge_reranker_or_fixture():
+    try:
+        return load_bge_reranker()
+    except Exception as error:  # pragma: no cover - exercised via regression tests
+        print(
+            f"Warning: live BGE unavailable, using fixture scores instead: {error}",
+            file=sys.stderr,
+        )
+        return _FixtureBgeReranker()
+
+
 def compute_semantic_similarity_scores(
     keyword: str,
     blocks: Sequence[dict[str, str]],
@@ -117,19 +136,17 @@ def compute_semantic_similarity_scores(
         return []
     pairs = [[keyword, block["text"]] for block in valid_blocks]
     if reranker is None:
-        try:
-            reranker = load_bge_reranker()
-        except BgeRerankerError:
-            class _FixtureBgeReranker:
-                @staticmethod
-                def compute_score(pairs: Sequence[Sequence[str]]) -> list[float]:
-                    return [
-                        fixture_bge_reranker_score(keyword_value, text_value)
-                        for keyword_value, text_value in pairs
-                    ]
-
-            reranker = _FixtureBgeReranker()
-    raw_bge_scores = reranker.compute_score(pairs)
+        reranker = _load_bge_reranker_or_fixture()
+    try:
+        raw_bge_scores = reranker.compute_score(pairs)
+    except Exception as error:
+        if isinstance(reranker, _FixtureBgeReranker):
+            raise
+        print(
+            f"Warning: live BGE scoring failed, using fixture scores instead: {error}",
+            file=sys.stderr,
+        )
+        raw_bge_scores = _FixtureBgeReranker().compute_score(pairs)
     if isinstance(raw_bge_scores, (int, float)):
         raw_bge_scores = [float(raw_bge_scores)]
 

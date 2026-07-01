@@ -14,7 +14,7 @@ Pytest configuration and verification contract for SEO-Research.
   interpreter
 - Lint / type-check / build / coverage: not configured
 - Expected test duration: fast (< 1s)
-- **Current verification status:** 84 tests collected; 83 passing, 1 skipped
+- **Current verification status:** 87 tests collected; 86 passing, 1 skipped
 
 ## Active Verification Command
 
@@ -61,7 +61,7 @@ placeholders only.
 | `test_keyword_expansion.py` | 25-keyword cap, deduplication, raw provider payload |
 | `test_serp_normalization.py` | Organic-only SERP rows, depth cap |
 | `test_env.py` | `.env` discovery, parsing, and override of shell exports |
-| `test_bge_reranker.py` | Live BGE GPU gate, pinned model loading, and batched score shaping |
+| `test_bge_reranker.py` | Live BGE GPU gate, pinned model loading, tokenizer compatibility shim, and batched score shaping |
 | `test_gemini_embeddings.py` | Live Gemini prompt formatting, model args, and score shaping with injected embeddings |
 | `test_passage_normalization.py` | Passage split, short-text filter |
 | `test_similarity_features.py` | Fixture passage aggregation plus BGE, Gemini Doc Retrieval, and Gemini Semantic Similarity page scoring |

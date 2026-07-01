@@ -173,6 +173,56 @@ def test_compute_semantic_similarity_scores_falls_back_to_fixture_bge_when_live_
     ]
 
 
+def test_compute_semantic_similarity_scores_falls_back_to_fixture_bge_when_live_loader_raises_unexpected_error(
+    monkeypatch,
+) -> None:
+    module = load_module()
+
+    vectors = {
+        "task: search result | query: best northwest houston realtors": (1.0, 0.0),
+        "task: sentence similarity | query: best northwest houston realtors": (1.0, 0.0),
+        "title: Alpha | text: Best Northwest Houston Realtors for every home": (1.0, 0.0),
+        "task: sentence similarity | query: Best Northwest Houston Realtors for every home": (
+            1.0,
+            0.0,
+        ),
+    }
+
+    def fake_embed_content(content, *, api_key, model, output_dimensionality):
+        assert api_key == "gemini-secret"
+        assert model == module.GEMINI_EMBEDDING_MODEL
+        assert output_dimensionality == module.GEMINI_EMBEDDING_DIMENSIONALITY
+        return vectors[content]
+
+    def raise_unexpected_error():
+        raise AttributeError("XLMRobertaTokenizer has no attribute prepare_for_model")
+
+    monkeypatch.setattr(module, "load_bge_reranker", raise_unexpected_error)
+    scores = module.compute_semantic_similarity_scores(
+        "best northwest houston realtors",
+        [{"label": "Alpha", "text": "Best Northwest Houston Realtors for every home"}],
+        api_key="gemini-secret",
+        embed_content=fake_embed_content,
+    )
+
+    assert scores == [
+        {
+            "label": "Alpha",
+            "page_similarity": {
+                "bge": {"raw_score": 0.98, "normalized_score": 0.727108},
+                "gemini_doc_retrieval": {
+                    "raw_score": 1.0,
+                    "normalized_score": 1.0,
+                },
+                "gemini_semantic_similarity": {
+                    "raw_score": 1.0,
+                    "normalized_score": 1.0,
+                },
+            },
+        }
+    ]
+
+
 def test_main_reports_gemini_provider_errors(monkeypatch) -> None:
     module = load_module()
 

@@ -1,6 +1,7 @@
 """Live BGE reranker helpers for page-level similarity scoring."""
 
 import math
+from types import MethodType
 from collections.abc import Sequence
 
 BGE_RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
@@ -21,11 +22,89 @@ def load_bge_reranker(
         raise BgeRerankerError("Live BGE scoring requires a CUDA GPU")
     if build_reranker is None:
         build_reranker = default_build_reranker
-    return build_reranker(
+    reranker = build_reranker(
         BGE_RERANKER_MODEL,
         use_fp16=True,
         devices=["cuda"],
     )
+    _patch_prepare_for_model_compatibility(reranker)
+    return reranker
+
+
+def _patch_prepare_for_model_compatibility(reranker: object) -> None:
+    tokenizer = getattr(reranker, "tokenizer", None)
+    if tokenizer is None or hasattr(tokenizer, "prepare_for_model"):
+        return
+
+    def prepare_for_model(
+        self,
+        ids,
+        pair_ids=None,
+        truncation=None,
+        max_length=None,
+        padding=False,
+        **kwargs,
+    ):
+        del padding, kwargs
+
+        first_sequence = list(ids)
+        second_sequence = list(pair_ids) if pair_ids is not None else None
+        bos_token_id = getattr(self, "bos_token_id", None)
+        eos_token_id = getattr(self, "eos_token_id", None)
+        if bos_token_id is None:
+            bos_token_id = getattr(self, "cls_token_id", None)
+        if eos_token_id is None:
+            eos_token_id = getattr(self, "sep_token_id", None)
+        if bos_token_id is None or eos_token_id is None:
+            raise BgeRerankerError(
+                "Live BGE scoring requires tokenizer special tokens that "
+                "are unavailable in this transformers version"
+            )
+
+        if second_sequence is None:
+            limit = (
+                None
+                if max_length is None
+                else max(0, max_length - self.num_special_tokens_to_add(pair=False))
+            )
+            if limit is not None and len(first_sequence) > limit:
+                first_sequence = first_sequence[:limit]
+            input_ids = [bos_token_id, *first_sequence, eos_token_id]
+        else:
+            limit = (
+                None
+                if max_length is None
+                else max(0, max_length - self.num_special_tokens_to_add(pair=True))
+            )
+            if limit is not None:
+                overflow = len(first_sequence) + len(second_sequence) - limit
+                if overflow > 0:
+                    if truncation in (None, True, "only_second", "longest_first"):
+                        second_trim = min(overflow, len(second_sequence))
+                        second_sequence = second_sequence[: len(second_sequence) - second_trim]
+                        overflow -= second_trim
+                        if overflow > 0:
+                            first_sequence = first_sequence[: len(first_sequence) - overflow]
+                    else:
+                        second_sequence = second_sequence[:limit]
+            input_ids = [
+                bos_token_id,
+                *first_sequence,
+                eos_token_id,
+                eos_token_id,
+                *second_sequence,
+                eos_token_id,
+            ]
+
+        return {"input_ids": input_ids}
+
+    try:
+        tokenizer.prepare_for_model = MethodType(prepare_for_model, tokenizer)
+    except Exception as error:  # pragma: no cover - defensive compatibility fallback
+        raise BgeRerankerError(
+            "Live BGE scoring requires a mutable tokenizer for transformers "
+            "compatibility"
+        ) from error
 
 
 def compute_bge_page_similarity_scores(

@@ -66,6 +66,39 @@ https://docs.dataforseo.com/v3/on_page/content_parsing/live/
      `content_parsing/live` fields.
    - Verify valid responses still pass through unchanged.
 
+### Phase 4.78 — BGE Google-like scoring pipeline
+
+Extend the live BGE path beyond single-shot `bge-reranker-v2-m3` on full page
+text so similarity features better mirror hybrid search-engine retrieval
+(lexical recall + neural rerank). Gemini backends stay separate.
+
+- **Hybrid lexical signal** — add a BM25 or BGE-M3 sparse score per
+  `(keyword, page)` and fuse it with the cross-encoder reranker output.
+  Normalize lexical and neural scores before fusion (raw BM25 and cosine/rerank
+  scales differ). Persist fused score alongside existing `bge` raw/normalized
+  fields for Phase 5 OLS comparison.
+- **Two-stage retrieve-then-rerank** — first stage: bi-encoder retrieval with
+  `BAAI/bge-m3` or `BAAI/bge-large-en-v1.5` (query instruction on keyword
+  only for v1.5; documents unmodified). Second stage: rerank the SERP candidate
+  set with `BAAI/bge-reranker-v2-m3`. Expose retrieval score, rerank score, and
+  optional combined rank for observational analysis against observed Google
+  positions.
+
+#### Dev slices
+
+1. **[ ] Slice 1 — Lexical / sparse feature**
+   - Implement BM25 (Pyserini or equivalent) or BGE-M3 sparse weights per page.
+   - Score normalization and fusion contract with existing `similarity_scores`.
+
+2. **[ ] Slice 2 — Bi-encoder retrieval stage**
+   - Embed keyword + page corpus with `bge-m3` or `bge-large-en-v1.5`.
+   - Emit dense retrieval score per SERP URL before reranking.
+
+3. **[ ] Slice 3 — Pipeline wiring and tests**
+   - Wire retrieve → rerank in CLI live path (`--live-bge`) and curated
+     `similarity_scores` schema.
+   - Unit tests for score shaping; optional env-gated integration smoke.
+
 ### Phase 4.75 — page_text curation hardening (complete)
 
 Shipped contract: `GOALS.md` § Completed: Phase 4.75. Related polish:

@@ -1,6 +1,7 @@
 """Deterministic fixture embedding similarity features."""
 
 import math
+import re
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -123,7 +124,20 @@ def fixture_bge_reranker_score(keyword: str, text: str) -> float:
         return 0.98
     if "index" in normalized_text or "canonical" in normalized_text:
         return 0.74
-    return 0.12
+
+    keyword_tokens = {
+        token for token in re.findall(r"[a-z0-9]+", normalized_keyword) if token
+    }
+    if not keyword_tokens:
+        return 0.12
+
+    text_tokens = set(re.findall(r"[a-z0-9]+", normalized_text))
+    shared_tokens = keyword_tokens & text_tokens
+    if not shared_tokens:
+        return 0.12
+
+    overlap_ratio = len(shared_tokens) / len(keyword_tokens)
+    return round(min(0.12 + (0.78 * overlap_ratio), 0.97), 6)
 
 
 def cosine_similarity(left: Vector, right: Vector) -> float:
