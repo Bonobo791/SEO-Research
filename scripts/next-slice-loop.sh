@@ -12,7 +12,7 @@ cd "$REPO_ROOT"
 REVIEW_DIR="${REVIEW_DIR:-$REPO_ROOT/.reviews}"
 mkdir -p "$REVIEW_DIR"
 
-CODEX_PROMPT="${CODEX_PROMPT:-\$sdlc Work on the next slice. Implementation only — do not run code review or senior QA; Cursor Agent handles those after this step.}"
+CODEX_PROMPT="${CODEX_PROMPT:-\$sdlc Work on the next slice.}"
 CODE_REVIEW_PROMPT="${CODE_REVIEW_PROMPT:-/code-reviewer Review the current uncommitted diff. Include only code and test fixups — skip documentation-only suggestions (README, ARCHITECTURE, GOALS, ROADMAP, TESTING, FIXUPS, SDLC docs). Do not edit any files. End your response with a section exactly titled:
 
 ## FIXUPS_ROWS
