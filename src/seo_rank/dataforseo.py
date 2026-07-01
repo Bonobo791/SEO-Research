@@ -381,6 +381,17 @@ def fixture_page_text_response(url: str, keyword: str) -> dict[str, object]:
 
 
 def parsed_page_text(response: Mapping[str, Any]) -> dict[str, str]:
+    page = parsed_page_text_details(response)
+    if not page:
+        return {}
+    return {
+        "url": page["url"],
+        "title": page["title"],
+        "text": page["text"],
+    }
+
+
+def parsed_page_text_details(response: Mapping[str, Any]) -> dict[str, str]:
     tasks = response.get("tasks", [])
     if not isinstance(tasks, list):
         return {}
@@ -414,7 +425,7 @@ def parsed_page_text(response: Mapping[str, Any]) -> dict[str, str]:
                 and isinstance(title, str)
                 and isinstance(text, str)
             ):
-                return {"url": url, "title": title, "text": text}
+                return {"url": url, "title": title, "text": text, "raw_html": ""}
 
             items = result.get("items", [])
             if not isinstance(items, list):
@@ -435,14 +446,16 @@ def parsed_page_text(response: Mapping[str, Any]) -> dict[str, str]:
                     text = _extract_page_content_text(page_content)
                 if not text and isinstance(page_as_markdown, str):
                     text = page_as_markdown.strip()
-                if item_url or title or text:
+                raw_html = _extract_page_html(item)
+                if item_url or title or text or raw_html:
                     return {
                         "url": item_url,
                         "title": title,
                         "text": text,
+                        "raw_html": raw_html,
                     }
     if fallback_url:
-        return {"url": fallback_url, "title": "", "text": ""}
+        return {"url": fallback_url, "title": "", "text": "", "raw_html": ""}
     return {}
 
 
@@ -643,3 +656,26 @@ def _extract_page_content_text(page_content: Mapping[str, Any]) -> str:
 
     collect_text(page_content)
     return "\n\n".join(texts)
+
+
+def _extract_page_html(item: Mapping[str, Any]) -> str:
+    html_keys = ("raw_html", "html", "page_html")
+
+    def collect(value: Any) -> str:
+        if isinstance(value, Mapping):
+            for key in html_keys:
+                raw_html = value.get(key)
+                if isinstance(raw_html, str) and raw_html.strip():
+                    return raw_html
+            for nested_value in value.values():
+                raw_html = collect(nested_value)
+                if raw_html:
+                    return raw_html
+        elif isinstance(value, list):
+            for nested_value in value:
+                raw_html = collect(nested_value)
+                if raw_html:
+                    return raw_html
+        return ""
+
+    return collect(item)

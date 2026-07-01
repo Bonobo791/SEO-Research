@@ -231,3 +231,6 @@ text so similarity features better mirror hybrid search-engine retrieval
 - **Phase 4.76 Slice 3 shipped:** curated `page_content_fields` now materialize
   one row per decoded `content_parsing/live` field with stable ids and JSON
   path metadata while leaving aggregate `pages.text` unchanged.
+- **Phase 4.76 Slice 4 shipped:** normalization now preserves the aggregate
+  `pages.text` path and writes raw HTML to a sibling `page_html` table keyed by
+  `page_id` / `response_id`.

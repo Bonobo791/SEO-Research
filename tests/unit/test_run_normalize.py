@@ -9,6 +9,7 @@ from seo_rank.data.normalize import (
     CURATED_SCHEMAS,
     CURATED_VALIDATION_RULES,
     build_entities_frame,
+    build_page_html_frame,
     build_page_content_fields_frame,
     build_similarity_scores_frame,
     build_pages_and_passages_frame,
@@ -221,6 +222,79 @@ def test_build_page_content_fields_frame_skips_empty_aggregate_text_rows() -> No
     assert result.is_empty()
 
 
+def test_build_page_html_frame_persists_raw_html_without_page_text() -> None:
+    response_body = {
+        "tasks": [
+            {
+                "data": {"url": "https://example.com/empty"},
+                "result": [
+                    {
+                        "items": [
+                            {
+                                "url": "https://example.com/empty",
+                                "raw_html": "<html><body><main>Raw HTML</main></body></html>",
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+    frame = pl.DataFrame(
+        [
+            {
+                "response_id": "resp-html-1",
+                "target_keyword": "technical seo",
+                "response_body_bytes": json.dumps(response_body).encode("utf-8"),
+            }
+        ]
+    )
+
+    result = build_page_html_frame(frame, run_id="run-1")
+    rows = result.to_dicts()
+
+    assert result.schema == CURATED_VALIDATION_RULES["page_html"]["expected_schema"]
+    assert len(rows) == 1
+    assert rows[0]["raw_html"] == "<html><body><main>Raw HTML</main></body></html>"
+    assert rows[0]["url"] == "https://example.com/empty"
+
+
+def test_build_page_html_frame_does_not_cross_pair_url_and_html_across_items() -> None:
+    response_body = {
+        "tasks": [
+            {
+                "data": {"url": "https://example.com/first"},
+                "result": [
+                    {
+                        "items": [
+                            {
+                                "url": "https://example.com/first",
+                            },
+                            {
+                                "url": "https://example.com/second",
+                                "raw_html": "<html><body>Second item HTML</body></html>",
+                            },
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+    frame = pl.DataFrame(
+        [
+            {
+                "response_id": "resp-html-2",
+                "target_keyword": "technical seo",
+                "response_body_bytes": json.dumps(response_body).encode("utf-8"),
+            }
+        ]
+    )
+
+    result = build_page_html_frame(frame, run_id="run-1")
+
+    assert result.is_empty()
+
+
 def test_normalize_run_materializes_page_content_fields(
     tmp_path: Path,
     monkeypatch,
@@ -292,6 +366,7 @@ def test_normalize_run_materializes_page_content_fields(
                                         }
                                     ],
                                 },
+                                "raw_html": "<html><body><main>Raw HTML body</main></body></html>",
                                 "page_as_markdown": (
                                     "# Technical SEO\n\n"
                                     "Markdown fallback should be captured."
@@ -374,13 +449,18 @@ def test_normalize_run_materializes_page_content_fields(
     catalog = normalize_run(output_dir)
 
     assert catalog["datasets"]["page_content_fields"]["row_count"] > 0
+    assert catalog["datasets"]["page_html"]["row_count"] > 0
     page_content_fields_dir = output_dir / "parquet" / "page_content_fields"
+    page_html_dir = output_dir / "parquet" / "page_html"
     assert page_content_fields_dir.exists()
+    assert page_html_dir.exists()
 
     rows = ds.dataset(page_content_fields_dir, format="parquet").to_table().to_pylist()
+    html_rows = ds.dataset(page_html_dir, format="parquet").to_table().to_pylist()
     assert any(row["field_name"] == "page_content" for row in rows)
     assert any(row["field_name"] == "status_code" for row in rows)
     assert any(row["field_name"] == "page_as_markdown" for row in rows)
+    assert any(row["raw_html"] == "<html><body><main>Raw HTML body</main></body></html>" for row in html_rows)
 
 
 def test_build_similarity_scores_frame_handles_empty_group() -> None:

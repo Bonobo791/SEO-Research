@@ -15,6 +15,7 @@ https://docs.dataforseo.com/v3/on_page/content_parsing/live/
 
 Prior shipped work (Phase 4.75 page_text curation hardening, the run-scoped
 Parquet lake, page-level similarity) is documented in `ROADMAP.md` § History.
+Completed: Phase 4.75 is recorded there as shipped work.
 
 ### Phase 4.76 objective
 
@@ -48,14 +49,14 @@ a later phase opens non-US proxy pools.
 
 #### Progress
 
-**Slices:** 3 of 5 shipped, 2 open.
+**Slices:** 4 of 5 shipped, 1 open.
 
 | # | Slice | Layer | Status | Primary deliverable |
 | - | ----- | ----- | ------ | ------------------- |
 | 1 | Request contract | Provider | Shipped | `build_page_text_request()` emits the fixed parameter set above |
 | 2 | Item field decoder | Curated | Shipped | Decoder walks `items[]` fields (`type`, `fetch_time`, `status_code`, `page_content` tree, `page_as_markdown`, `ratings`, `offers`, `comments`, `contacts`, …) per API docs |
 | 3 | Per-field storage | Curated | Shipped | New curated table(s): one row per extracted field/element with stable ids and JSON path metadata |
-| 4 | Aggregate + HTML wiring | Curated | Open | `pages.text` unchanged (merged content); `raw_html` stored per page/response; passages still from aggregate text only |
+| 4 | Aggregate + HTML wiring | Curated | Shipped | `pages.text` unchanged (merged content); `raw_html` stored per page/response; passages still from aggregate text only |
 | 5 | Tests and re-normalize | Curated | Open | Fixtures cover multi-field items, HTML retention, and stored-run normalize |
 
 **Remaining to close Phase 4.76:** slices 4–5.
@@ -81,7 +82,7 @@ a later phase opens non-US proxy pools.
      `structured_value` (JSON), `ordinal`.
    - Sink via existing validation-before-sink contract.
 
-4. **[ ] Slice 4 — Aggregate + HTML wiring**
+4. **[x] Slice 4 — Aggregate + HTML wiring**
    - `build_pages_and_passages_frame()` emits aggregate `pages` / `passages` as
      today; add `raw_html` on `pages` or a sibling `page_html` table.
    - Fetch or attach HTML from the OnPage Raw HTML path when
@@ -139,74 +140,17 @@ See `ROADMAP.md` for Phase 5 (OLS) and Phase 5.5 (passage/domain scoring).
 | `build_page_text_request()` uses US English desktop contract (`switch_pool=false`, `ip_pool_for_scan=us`, `accept_language=en-US`, `browser_preset=desktop`, JS/rendering off, `store_raw_html=true`) | 1 | Complete |
 | Every documented `items[]` field decodes to storable records | 2 | Complete |
 | Per-field rows land in curated Parquet with stable ids | 3 | Complete |
-| Aggregate `pages.text` preserved; raw HTML stored per page | 4 | Not started |
+| Aggregate `pages.text` preserved; raw HTML stored per page | 4 | Complete |
 | Unit tests + stored-run re-normalize cover fields, aggregate, and HTML | 5 | Not started |
 
 - [x] Live `page_text` requests emit the fixed parameter set. *(Slice 1.)*
 - [x] Item decoder walks full `items[]` / `page_content` tree per API docs.
   *(Slice 2.)*
 - [x] Curated per-field table(s) materialize on normalize. *(Slice 3.)*
-- [ ] `pages` / `passages` aggregate path unchanged; HTML persisted. *(Slice 4.)*
+- [x] `pages` / `passages` aggregate path unchanged; HTML persisted. *(Slice 4.)*
 - [ ] Tests and re-normalize smoke pass. *(Slice 5.)*
 
 ---
-
-## Completed: Phase 4.75 (page_text curation hardening)
-
-### Phase 4.75 objective
-
-Close gaps between live DataForSEO `page_text` response shapes and curated
-`pages` / `passages` tables. The CLI and normalize path must share one decoder
-(`parsed_page_text()`); empty or failed crawls must not pollute curated tables.
-
-#### Progress
-
-**Slices:** 3 of 3 shipped, 0 open.
-
-| # | Slice | Layer | Status | Primary deliverable |
-| - | ----- | ----- | ------ | ------------------- |
-| 1 | Nested `page_content` decode | Curated | Shipped | `parsed_page_text()` reads `tasks[].result[].items[].page_content`; `build_pages_and_passages_frame()` uses shared parser |
-| 2 | Multi-region text extraction | Curated | Shipped | `_extract_page_content_text()` merges `header` and other `page_content` keys, not only `main_topic` |
-| 3 | Empty crawl row filter | Curated | Shipped | Skip `page_text` rows with no URL and no text (mirrors CLI `if page_text`); fixes duplicate `page_id` warnings |
-
-**Phase 4.75:** complete.
-
-**Related polish:** `FIXUPS.md` § Phase 4.75 (S475-01 tracks slice 3).
-
-### Dev slices
-
-1. **[x] Slice 1 — Nested `page_content` decode**
-   - Extend `parsed_page_text()` for live DataForSEO nested payloads
-     (`page_content`, `page_as_markdown`, task-level URL fallback).
-   - Route `build_pages_and_passages_frame()` through `parsed_page_text()` instead
-     of brittle `tasks[0].result[0]` indexing.
-   - Tests: `test_parsed_page_text_extracts_nested_page_content`,
-     `test_build_pages_and_passages_frame_parses_nested_page_content`.
-
-2. **[x] Slice 2 — Multi-region text extraction**
-   - Walk all relevant `page_content` regions (e.g. `header`, not only
-     `main_topic` primary/secondary/table sections).
-   - Merge extracted copy into the synthesized page `text` used by normalization
-     and passage splitting.
-   - Tests: multi-region fixtures in `test_dataforseo_requests.py` and
-     `test_run_normalize.py`.
-
-3. **[x] Slice 3 — Empty crawl row filter**
-   - In `build_pages_and_passages_frame()`, `continue` when `parsed_page_text()`
-     yields no URL or no text.
-   - Align stored-run behavior with CLI collection (`if page_text` filter).
-   - Tests: empty-crawl fixture (`crawl_status: "Page content is empty"`) produces
-     no `pages` row; no duplicate `page_id` on re-normalize of affected runs.
-
-### Phase 4.75 acceptance criteria
-
-**Status:** complete (3 of 3 slices shipped).
-
-| Acceptance item | Slice(s) | Status |
-| --------------- | -------- | ------ |
-| Nested live `page_content` payloads decode without `KeyError` | 1 | Complete |
-| Header and other `page_content` regions included in page `text` | 2 | Complete |
-| Empty or failed crawls omitted from `pages` / `passages` | 3 | Complete |
 
 ## Operating Rules
 

@@ -18,6 +18,7 @@ from seo_rank.dataforseo import (
     normalize_keyword_expansion,
     normalize_serp_results,
     parsed_page_text,
+    parsed_page_text_details,
 )
 from seo_rank.similarity import compute_page_similarity_scores
 from seo_rank.text import normalize_page_text
@@ -63,6 +64,19 @@ CURATED_SCHEMAS = {
             ("url", pa.string()),
             ("title", pa.string()),
             ("text", pa.string()),
+            ("schema_version", pa.string()),
+        ]
+    ),
+    "page_html": pa.schema(
+        [
+            ("run_id", pa.string()),
+            ("target_keyword_id", pa.string()),
+            ("target_keyword", pa.string()),
+            ("response_id", pa.string()),
+            ("page_id", pa.string()),
+            ("canonical_url_hash", pa.string()),
+            ("url", pa.string()),
+            ("raw_html", pa.string()),
             ("schema_version", pa.string()),
         ]
     ),
@@ -214,6 +228,31 @@ CURATED_VALIDATION_RULES = {
             "url",
             "title",
             "text",
+            "schema_version",
+        ),
+    },
+    "page_html": {
+        "expected_schema": {
+            "run_id": pl.Utf8,
+            "target_keyword_id": pl.Utf8,
+            "target_keyword": pl.Utf8,
+            "response_id": pl.Utf8,
+            "page_id": pl.Utf8,
+            "canonical_url_hash": pl.Utf8,
+            "url": pl.Utf8,
+            "raw_html": pl.Utf8,
+            "schema_version": pl.Utf8,
+        },
+        "unique_columns": ("page_id", "response_id"),
+        "non_null_columns": (
+            "run_id",
+            "target_keyword_id",
+            "target_keyword",
+            "response_id",
+            "page_id",
+            "canonical_url_hash",
+            "url",
+            "raw_html",
             "schema_version",
         ),
     },
@@ -472,6 +511,10 @@ def build_curated_lazyframes_from_raw_responses(
         lambda frame: build_page_content_fields_frame(frame, run_id=run_id),
         schema=CURATED_VALIDATION_RULES["page_content_fields"]["expected_schema"],
     )
+    page_html = page_responses.map_batches(
+        lambda frame: build_page_html_frame(frame, run_id=run_id),
+        schema=CURATED_VALIDATION_RULES["page_html"]["expected_schema"],
+    )
     pages = pages_and_passages.filter(pl.col("passage_id").is_null()).select(
         [
             "run_id",
@@ -516,6 +559,7 @@ def build_curated_lazyframes_from_raw_responses(
         "keywords": keywords,
         "serp_items": serp_items,
         "pages": pages,
+        "page_html": page_html,
         "page_content_fields": page_content_field_rows,
         "passages": passages,
         "entities": entities,
@@ -689,6 +733,42 @@ def build_page_content_fields_frame(
         return pl.DataFrame(
             schema=CURATED_VALIDATION_RULES["page_content_fields"]["expected_schema"]
         )
+    return pl.DataFrame(rows)
+
+
+def build_page_html_frame(
+    frame: pl.DataFrame,
+    *,
+    run_id: str,
+) -> pl.DataFrame:
+    rows: list[dict[str, object]] = []
+    for record in frame.to_dicts():
+        response_id = str(record["response_id"])
+        target_keyword = str(record["target_keyword"])
+        target_keyword_id = stable_id(target_keyword)
+        body = json.loads(bytes(record["response_body_bytes"]).decode("utf-8"))
+        page = parsed_page_text_details(body)
+        url = str(page.get("url", "")).strip()
+        raw_html = str(page.get("raw_html", "")).strip()
+        if not url or not raw_html:
+            continue
+        canonical_url_hash = stable_id(url)
+        page_id = stable_id(run_id, target_keyword, url)
+        rows.append(
+            {
+                "run_id": run_id,
+                "target_keyword_id": target_keyword_id,
+                "target_keyword": target_keyword,
+                "response_id": response_id,
+                "page_id": page_id,
+                "canonical_url_hash": canonical_url_hash,
+                "url": url,
+                "raw_html": raw_html,
+                "schema_version": CURATED_SCHEMA_VERSION,
+            }
+        )
+    if not rows:
+        return pl.DataFrame(schema=CURATED_VALIDATION_RULES["page_html"]["expected_schema"])
     return pl.DataFrame(rows)
 
 
