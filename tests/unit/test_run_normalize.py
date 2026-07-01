@@ -14,6 +14,7 @@ from seo_rank.data.normalize import (
     build_similarity_scores_frame,
     build_pages_and_passages_frame,
     normalize_run,
+    stable_id,
     write_curated_dataset,
 )
 
@@ -107,6 +108,121 @@ def test_normalize_run_does_not_load_raw_rows_eagerly(
     assert catalog["datasets"]["keywords"]["row_count"] == 25
 
 
+def test_normalize_run_stores_raw_html_when_present(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
+
+    assert (
+        main(
+            [
+                "run",
+                "--seed",
+                "technical seo",
+                "--depth",
+                "1",
+                "--output-dir",
+                str(output_dir),
+                "--dry-run",
+            ]
+        )
+        == 0
+    )
+
+    page_text_dir = output_dir / "parquet" / "raw_responses" / "endpoint=page_text"
+
+    response_body = {
+        "tasks": [
+            {
+                "data": {"url": "https://example.com/product"},
+                "result": [
+                    {
+                        "items": [
+                            {
+                                "url": "https://example.com/product",
+                                "status_code": 200,
+                                "page_content": {
+                                    "ratings": [
+                                        {
+                                            "rating_value": 4,
+                                            "max_rating_value": 5,
+                                            "rating_count": 12,
+                                            "relative_rating": 0.8,
+                                        }
+                                    ],
+                                    "offers": [
+                                        {
+                                            "price": 129,
+                                            "price_currency": "USD",
+                                        }
+                                    ],
+                                    "comments": [
+                                        {
+                                            "rating": {
+                                                "rating_value": 5,
+                                                "max_rating_value": 5,
+                                                "relative_rating": 1.0,
+                                            }
+                                        }
+                                    ],
+                                },
+                                "raw_html": "<html><body><main>Raw HTML body</main></body></html>",
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+
+    pl.DataFrame(
+        [
+            {
+                "run_id": "artifacts",
+                "response_id": "page-resp-1",
+                "target_keyword": "technical seo",
+                "response_body_bytes": json.dumps(response_body).encode("utf-8"),
+            }
+        ]
+    ).write_parquet(page_text_dir / "part-structured-only.parquet")
+
+    catalog = normalize_run(output_dir)
+
+    assert catalog["datasets"]["page_content_fields"]["row_count"] > 0
+    assert catalog["datasets"]["page_html"]["row_count"] > 0
+
+    page_content_fields_dir = output_dir / "parquet" / "page_content_fields"
+    page_html_dir = output_dir / "parquet" / "page_html"
+    page_rows = ds.dataset(output_dir / "parquet" / "pages", format="parquet").to_table().to_pylist()
+    field_rows = ds.dataset(page_content_fields_dir, format="parquet").to_table().to_pylist()
+    html_rows = ds.dataset(page_html_dir, format="parquet").to_table().to_pylist()
+
+    structured_field = next(
+        row
+        for row in field_rows
+        if row["response_id"] == "page-resp-1" and row["field_name"] == "status_code"
+    )
+    html_row = next(row for row in html_rows if row["response_id"] == "page-resp-1")
+
+    assert structured_field["field_path"] == "tasks[0].result[0].items[0].status_code"
+    assert structured_field["structured_value"] == "200"
+    assert structured_field["text"] == ""
+    assert structured_field["field_row_id"] == stable_id(
+        structured_field["page_id"],
+        structured_field["response_id"],
+        structured_field["field_path"],
+        structured_field["ordinal"],
+    )
+    assert html_row["page_id"] == structured_field["page_id"]
+    assert html_row["raw_html"] == "<html><body><main>Raw HTML body</main></body></html>"
+    assert any(
+        row["page_id"] == structured_field["page_id"] and row["text"] == ""
+        for row in page_rows
+    )
+
+
 def test_build_page_content_fields_frame_decodes_structured_fields() -> None:
     response_body = {
         "tasks": [
@@ -185,6 +301,70 @@ def test_build_page_content_fields_frame_decodes_structured_fields() -> None:
     assert any(
         row["text"] == "Technical SEO intro paragraph with enough words."
         for row in rows
+    )
+
+
+def test_build_pages_and_passages_frame_preserves_aggregate_text_with_field_decode() -> None:
+    response_body = {
+        "tasks": [
+            {
+                "data": {"url": "https://example.com/page"},
+                "result": [
+                    {
+                        "items": [
+                            {
+                                "url": "https://example.com/page",
+                                "page_content": {
+                                    "header": {
+                                        "primary_content": [
+                                            {"text": "Header intro with enough words."}
+                                        ]
+                                    },
+                                    "main_topic": [
+                                        {
+                                            "primary_content": [
+                                                {
+                                                    "text": (
+                                                        "Technical SEO intro paragraph "
+                                                        "with enough words."
+                                                    )
+                                                }
+                                            ]
+                                        }
+                                    ],
+                                },
+                                "page_as_markdown": "# Example Page\n\nMarkdown fallback.",
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+    frame = pl.DataFrame(
+        [
+            {
+                "response_id": "resp-aggregate-1",
+                "target_keyword": "technical seo",
+                "response_body_bytes": json.dumps(response_body).encode("utf-8"),
+            }
+        ]
+    )
+
+    result = build_pages_and_passages_frame(frame, run_id="run-1")
+    rows = result.to_dicts()
+    page_rows = [row for row in rows if row.get("passage_id") is None]
+
+    assert len(page_rows) == 1
+    assert page_rows[0]["text"] == (
+        "Header intro with enough words.\n\n"
+        "Technical SEO intro paragraph with enough words."
+    )
+    assert page_rows[0]["url"] == "https://example.com/page"
+    assert any(
+        row["text"] == "Header intro with enough words."
+        for row in rows
+        if row.get("passage_id") is not None
     )
 
 

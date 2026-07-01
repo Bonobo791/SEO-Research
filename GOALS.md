@@ -5,117 +5,74 @@
 
 ## Active Objective
 
-Build Phase 4.76 **structured content_parsing capture** so live and stored-run
-normalization walks every field in the DataForSEO `content_parsing/live`
-`items[]` response, persists each field for analysis, keeps the aggregate page
-body for passage splitting, and stores raw HTML alongside parsed content.
+Build Phase 4.77 **adapter schema validation** so every DataForSEO response is
+validated at the provider adapter boundary against explicit endpoint schemas
+before normalization or curated writes. Schema drift must fail loud with a typed
+parse error, not leak silently into downstream tables.
 
 API reference:
 https://docs.dataforseo.com/v3/on_page/content_parsing/live/
 
-Prior shipped work (Phase 4.75 page_text curation hardening, the run-scoped
+Prior shipped work (Phase 4.76 structured content_parsing capture, the run-scoped
 Parquet lake, page-level similarity) is documented in `ROADMAP.md` § History.
-Completed: Phase 4.75 is recorded there as shipped work.
+Completed: Phase 4.76 is recorded there as shipped work.
 
-### Phase 4.76 objective
+### Phase 4.77 objective
 
-Walk the full `tasks[].result[].items[]` payload documented for
-`on_page/content_parsing/live`, store extractable fields as individual curated
-rows for downstream analysis, and continue emitting one synthesized `pages.text`
-per URL (Phase 4.75 aggregate path) for `passages`. Persist the crawled page
-HTML when `store_raw_html` is enabled.
-
-#### Live request contract (`build_page_text_request`)
-
-Fixed parameters for US English desktop crawls (no JS, no browser rendering):
-
-| Parameter | Value | Rationale |
-| --------- | ----- | --------- |
-| `switch_pool` | `false` | Default proxy pool; avoid extra pool charges unless rate limits force it |
-| `ip_pool_for_scan` | `"us"` | US proxy pool for American English page content |
-| `enable_browser_rendering` | `false` | No CWV / full browser emulation (cost + scope) |
-| `enable_javascript` | `false` | Static HTML parse only |
-| `accept_language` | `"en-US"` | American English `Accept-Language` (API supports `xx`, `xx-XX`, `xxx-XX`, etc.) |
-| `browser_preset` | `"desktop"` | Desktop viewport preset when browser params apply |
-| `store_raw_html` | `true` | Retain HTML for audit, replay, and non-parsed analysis |
-
-**Locale note:** `page_text` crawls always use `ip_pool_for_scan: "us"` and
-`accept_language: "en-US"` regardless of `--location` / `--language`. Keyword
-expansion and SERP requests still honor those CLI flags. A run like
-`--language fr --location France` therefore returns French SERP results but
-fetches page HTML through the US English desktop contract above. This is
-intentional for Phase 4.76; locale-aligned page crawls are out of scope unless
-a later phase opens non-US proxy pools.
+Validate every DataForSEO response at the adapter boundary against explicit
+endpoint schemas before normalization or curated writes. Required fields,
+types, and known semantics must be enforced; unvalidated payloads must not reach
+normalization or re-normalization code.
 
 #### Progress
 
-**Slices:** 4 of 5 shipped, 1 open.
+**Slices:** 0 of 3 shipped, 3 open.
 
 | # | Slice | Layer | Status | Primary deliverable |
 | - | ----- | ----- | ------ | ------------------- |
-| 1 | Request contract | Provider | Shipped | `build_page_text_request()` emits the fixed parameter set above |
-| 2 | Item field decoder | Curated | Shipped | Decoder walks `items[]` fields (`type`, `fetch_time`, `status_code`, `page_content` tree, `page_as_markdown`, `ratings`, `offers`, `comments`, `contacts`, …) per API docs |
-| 3 | Per-field storage | Curated | Shipped | New curated table(s): one row per extracted field/element with stable ids and JSON path metadata |
-| 4 | Aggregate + HTML wiring | Curated | Shipped | `pages.text` unchanged (merged content); `raw_html` stored per page/response; passages still from aggregate text only |
-| 5 | Tests and re-normalize | Curated | Open | Fixtures cover multi-field items, HTML retention, and stored-run normalize |
+| 1 | Schema contracts | Provider | Open | Explicit schemas for `keyword_expansion`, `serp`, and `content_parsing/live` payloads |
+| 2 | Boundary enforcement | Provider | Open | Live and stored-run responses validated at the adapter seam with endpoint-scoped parse errors |
+| 3 | Drift coverage | Provider | Open | Fixtures for missing fields, type mismatches, and valid pass-through cases |
 
-**Remaining to close Phase 4.76:** slices 4–5.
+**Remaining to close Phase 4.77:** slices 1–3.
 
 #### Dev slices
 
-1. **[x] Slice 1 — Request contract**
-   - Update `build_page_text_request()` in `src/seo_rank/dataforseo.py`.
-   - Tests: `test_build_page_text_request_uses_content_parsing_endpoint` asserts
-     the full parameter object.
+1. **[ ] Slice 1 — Schema contracts**
+   - Define explicit schemas for DataForSEO adapter payloads.
+   - Choose the smallest library that gives typed parse errors in Python
+     (`Pydantic` or JSON Schema validation).
 
-2. **[x] Slice 2 — Item field decoder**
-   - Add a structured decoder for every documented `items[]` field and nested
-     `page_content` region (`header`, `footer`, `main_topic`, `secondary_topic`,
-     `primary_content`, `secondary_content`, `table_content`, `ratings`, `offers`,
-     `comments`, `contacts`, link `urls`, table cells, topic metadata, etc.).
-   - Return both a list of field records (path, field name, value type, text or
-     serialized payload) and the aggregate text string.
+2. **[ ] Slice 2 — Boundary enforcement**
+   - Validate live and stored-run DataForSEO responses at the adapter seam.
+   - Surface endpoint-specific parse errors before curated normalization.
 
-3. **[x] Slice 3 — Per-field storage**
-   - Define curated schema for `page_content_fields` (or equivalent): `run_id`,
-     `response_id`, `page_id`, `field_path`, `field_name`, `value_type`, `text`,
-     `structured_value` (JSON), `ordinal`.
-   - Sink via existing validation-before-sink contract.
+3. **[ ] Slice 3 — Drift coverage**
+   - Add fixtures for missing fields, type mismatches, and extra/renamed
+     `content_parsing/live` fields.
+   - Verify valid responses still pass through unchanged.
 
-4. **[x] Slice 4 — Aggregate + HTML wiring**
-   - `build_pages_and_passages_frame()` emits aggregate `pages` / `passages` as
-     today; add `raw_html` on `pages` or a sibling `page_html` table.
-   - Fetch or attach HTML from the OnPage Raw HTML path when
-     `store_raw_html=true` (per DataForSEO docs).
+#### Phase 4.77 intent
 
-5. **[ ] Slice 5 — Tests and re-normalize**
-   - Extend `test_dataforseo_requests.py` and `test_run_normalize.py` with
-     multi-field fixtures from the API reference.
-   - Re-normalize smoke on a stored live run with HTML + per-field rows.
-
-#### Phase 4.76 intent
-
-- **Individual fields** — every `items[]` field listed in the
-  [content_parsing/live](https://docs.dataforseo.com/v3/on_page/content_parsing/live/)
-  response reference is addressable in curated storage for analysis (topic
-  titles, section text, table cells, ratings, offers, contacts, etc.).
-- **Aggregate content** — one merged `pages.text` per URL (Phase 4.75 behavior)
-  for passage splitting and similarity features.
-- **Raw HTML** — store full page HTML for pages where the crawl succeeds, linked
-  by `page_id` / `response_id`.
-- **Stable US English desktop crawls** — request parameters above on every live
-  `page_text` call.
+- **boundary validation** — parse `keyword_expansion`, `serp`,
+  `content_parsing/live`, and stored-run raw responses with explicit schemas in
+  the provider adapter layer.
+- **Typed errors** — raise endpoint-scoped parse errors when required fields
+  are missing, types drift, or unknown semantics would otherwise flow downstream.
+- **No silent fallback** — keep raw JSON for audit, but do not hand unvalidated
+  payloads to normalization or re-normalization code.
+- **Tests** — fixture drift cases for `content_parsing/live`, a valid payload
+  pass-through case, and stored-run failure coverage.
 
 See `ROADMAP.md` for Phase 5 (OLS) and Phase 5.5 (passage/domain scoring).
 
 ## In Scope (current and near-term)
 
-- `build_page_text_request()` and item-field decoders in `src/seo_rank/dataforseo.py`.
-- `build_pages_and_passages_frame()` and new curated sinks in
-  `src/seo_rank/data/normalize.py`.
-- Unit tests in `tests/unit/test_dataforseo_requests.py` and
-  `tests/unit/test_run_normalize.py`.
-- Re-normalize validation on stored live runs (e.g. `seo-rank normalize --run …`).
+- Explicit endpoint schemas and validation helpers in `src/seo_rank/dataforseo.py`
+  (or a sibling provider schema module).
+- Adapter-boundary enforcement for live and stored-run DataForSEO responses.
+- Unit tests with drift fixtures and valid pass-through cases in
+  `tests/unit/test_dataforseo_requests.py` and related normalize tests.
 
 ## Out Of Scope
 
@@ -128,27 +85,24 @@ See `ROADMAP.md` for Phase 5 (OLS) and Phase 5.5 (passage/domain scoring).
 - Causal claims about ranking factors.
 - CI, deployment, production hosting.
 - Parquet `Variant` type for semi-structured provider payloads.
-- `enable_javascript`, `enable_browser_rendering`, or non-US proxy pools unless
-  a later phase explicitly opens them.
+- Changing Phase 4.76 crawl contract, per-field storage, or HTML wiring unless
+  schema validation requires it.
 
-## Phase 4.76 acceptance criteria
+## Phase 4.77 acceptance criteria
 
-**Status:** 3 of 5 slices shipped, 2 open.
+**Status:** 0 of 3 slices shipped, 3 open.
 
 | Acceptance item | Slice(s) | Status |
 | --------------- | -------- | ------ |
-| `build_page_text_request()` uses US English desktop contract (`switch_pool=false`, `ip_pool_for_scan=us`, `accept_language=en-US`, `browser_preset=desktop`, JS/rendering off, `store_raw_html=true`) | 1 | Complete |
-| Every documented `items[]` field decodes to storable records | 2 | Complete |
-| Per-field rows land in curated Parquet with stable ids | 3 | Complete |
-| Aggregate `pages.text` preserved; raw HTML stored per page | 4 | Complete |
-| Unit tests + stored-run re-normalize cover fields, aggregate, and HTML | 5 | Not started |
+| Explicit schemas cover `keyword_expansion`, `serp`, and `content_parsing/live` | 1 | Not started |
+| Adapter validates live and stored-run responses before normalization | 2 | Not started |
+| Drift fixtures fail loud; valid payloads pass through unchanged | 3 | Not started |
 
-- [x] Live `page_text` requests emit the fixed parameter set. *(Slice 1.)*
-- [x] Item decoder walks full `items[]` / `page_content` tree per API docs.
+- [ ] Endpoint schemas defined with typed parse errors. *(Slice 1.)*
+- [ ] Adapter boundary rejects unvalidated payloads before curated writes.
   *(Slice 2.)*
-- [x] Curated per-field table(s) materialize on normalize. *(Slice 3.)*
-- [x] `pages` / `passages` aggregate path unchanged; HTML persisted. *(Slice 4.)*
-- [ ] Tests and re-normalize smoke pass. *(Slice 5.)*
+- [ ] Drift and pass-through tests cover `content_parsing/live` and stored-run
+  paths. *(Slice 3.)*
 
 ---
 

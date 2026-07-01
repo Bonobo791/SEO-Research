@@ -5,30 +5,7 @@ scope contract; keep deferred and historical items here.
 
 ## Current Backlog
 
-Active scope contract: `GOALS.md` (Phase 4.76).
-
-### Phase 4.76 — structured content_parsing capture
-
-Active contract: `GOALS.md` § Phase 4.76 objective and dev slices.
-
-API reference:
-https://docs.dataforseo.com/v3/on_page/content_parsing/live/
-
-- **Full `items[]` field walk** — decode and store every documented response
-  field (`type`, `fetch_time`, `status_code`, `page_content` tree,
-  `page_as_markdown`, `ratings`, `offers`, `comments`, `contacts`, nested
-  sections, table cells, link anchors, topic metadata, etc.) as individual
-  curated rows for analysis.
-- **Aggregate page body** — keep Phase 4.75 merged `pages.text` for passage
-  splitting and downstream similarity features.
-- **Raw HTML** — `store_raw_html: true` on live requests; persist HTML per page
-  (OnPage Raw HTML endpoint per DataForSEO docs).
-- **US English desktop request contract** — `switch_pool=false`,
-  `ip_pool_for_scan=us`, `accept_language=en-US`, `browser_preset=desktop`,
-  `enable_javascript=false`, `enable_browser_rendering=false`. Page crawls do
-  not follow `--location` / `--language` (SERP and keyword expansion still do).
-- **Tests** — `test_dataforseo_requests.py`, `test_run_normalize.py`; re-normalize
-  smoke on stored live runs.
+Active scope contract: `GOALS.md` (Phase 4.77).
 
 ### Phase 4.77 — adapter schema validation
 
@@ -66,7 +43,18 @@ https://docs.dataforseo.com/v3/on_page/content_parsing/live/
      `content_parsing/live` fields.
    - Verify valid responses still pass through unchanged.
 
-### Phase 4.78 — BGE Google-like scoring pipeline
+### Phase 5 — Statistical analysis
+
+- OLS pre-analysis preparation (root `ARCHITECTURE.md`)
+- `statsmodels` OLS baseline vs similarity-feature models
+- Benjamini-Hochberg correction every run
+
+### Phase 5.5 - Analysis Expansion
+
+- Per keyword: top-20 SERP; passage and domain URL scoring vs target
+  keyword; domain URL cap 1000; skip domains over 1000 URLs
+
+### Phase 5.75 — BGE Google-like scoring pipeline
 
 Extend the live BGE path beyond single-shot `bge-reranker-v2-m3` on full page
 text so similarity features better mirror hybrid search-engine retrieval
@@ -98,17 +86,6 @@ text so similarity features better mirror hybrid search-engine retrieval
    - Wire retrieve → rerank in CLI live path (`--live-bge`) and curated
      `similarity_scores` schema.
    - Unit tests for score shaping; optional env-gated integration smoke.
-
-### Phase 5 — Statistical analysis
-
-- OLS pre-analysis preparation (root `ARCHITECTURE.md`)
-- `statsmodels` OLS baseline vs similarity-feature models
-- Benjamini-Hochberg correction every run
-
-### Phase 5.5 - Analysis Expansion
-
-- Per keyword: top-20 SERP; passage and domain URL scoring vs target
-  keyword; domain URL cap 1000; skip domains over 1000 URLs
 
 ### Phase 6 — Reporting
 
@@ -234,3 +211,6 @@ text so similarity features better mirror hybrid search-engine retrieval
 - **Phase 4.76 Slice 4 shipped:** normalization now preserves the aggregate
   `pages.text` path and writes raw HTML to a sibling `page_html` table keyed by
   `page_id` / `response_id`.
+- **Phase 4.76 Slice 5 shipped:** unit tests and stored-run re-normalize smoke
+  now cover multi-field content parsing fixtures, HTML retention, aggregate text
+  parity, and structured-only round-trip payloads.
