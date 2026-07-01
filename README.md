@@ -36,6 +36,13 @@ Live-provider contract:
 - `--live-textrazor` additionally enables live TextRazor entity extraction and
   requires `SEO_RANK_ENABLE_TEXTRAZOR=1` plus `TEXTRAZOR_API_KEY`.
 - If an optional live flag is not passed, that provider is skipped.
+- `page_text` crawls always use the fixed US English desktop contract
+  (`ip_pool_for_scan: us`, `accept_language: en-US`, JS and browser rendering
+  off, `store_raw_html: true`). They do **not** follow `--location` /
+  `--language`. Keyword expansion and SERP still use those flags, so
+  `--language fr --location France` returns French SERPs but US-fetched page
+  HTML. Aligning page-crawl locale with SERP locale is not supported in Phase
+  4.76.
 
 ## Product direction
 

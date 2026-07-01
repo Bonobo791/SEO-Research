@@ -90,8 +90,6 @@ def build_serp_request(
 
 def build_page_text_request(
     url: str,
-    *,
-    javascript_parsing: bool,
 ) -> ProviderRequest:
     """Build a DataForSEO parsed page text request without executing it."""
 
@@ -102,7 +100,13 @@ def build_page_text_request(
         body=[
             {
                 "url": url,
-                "enable_javascript": javascript_parsing,
+                "switch_pool": False,
+                "ip_pool_for_scan": "us",
+                "enable_browser_rendering": False,
+                "enable_javascript": False,
+                "accept_language": "en-US",
+                "browser_preset": "desktop",
+                "store_raw_html": True,
             }
         ],
     )

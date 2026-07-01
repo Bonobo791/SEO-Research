@@ -98,7 +98,6 @@ class RunConfig:
     depth: int
     output_dir: Path
     model_name: str
-    javascript_parsing: bool
     dry_run: bool
     skip_textrazor: bool
     live_providers: bool = False
@@ -203,7 +202,6 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--depth", type=positive_int, default=20)
     run.add_argument("--output-dir", type=Path)
     run.add_argument("--model-name", default="fixture-similarity-v1")
-    run.add_argument("--javascript-parsing", action="store_true")
     run.add_argument("--dry-run", action="store_true")
     run.add_argument("--skip-textrazor", action="store_true")
     run.add_argument(
@@ -274,7 +272,6 @@ def config_from_args(args: argparse.Namespace) -> RunConfig:
         depth=args.depth,
         output_dir=output_dir,
         model_name=args.model_name,
-        javascript_parsing=args.javascript_parsing,
         dry_run=args.dry_run,
         skip_textrazor=args.skip_textrazor,
         live_providers=args.live_providers,
@@ -306,7 +303,6 @@ def serialized_run_config_from_args(args: argparse.Namespace) -> dict[str, objec
         "device": args.device,
         "depth": args.depth,
         "model_name": args.model_name,
-        "javascript_parsing": args.javascript_parsing,
         "dry_run": args.dry_run,
         "skip_textrazor": args.skip_textrazor,
         "live_providers": args.live_providers,
@@ -691,10 +687,7 @@ def build_live_keyword_result(
 
     page_text_responses = [
         execute_dataforseo_request(
-            build_page_text_request(
-                str(result["url"]),
-                javascript_parsing=config.javascript_parsing,
-            ),
+            build_page_text_request(str(result["url"])),
             credentials=credentials.dataforseo,
             transport=dataforseo_transport,
         )

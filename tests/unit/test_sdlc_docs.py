@@ -35,6 +35,9 @@ def test_goals_and_roadmap_define_active_scope_and_backlog() -> None:
     assert "Phase 4.76" in roadmap
     assert "structured content_parsing capture" in roadmap
     assert "ip_pool_for_scan" in roadmap
+    assert "Phase 4.77" in roadmap
+    assert "adapter schema validation" in roadmap
+    assert "typed parse error" in roadmap
     assert "Phase 4.5 signed off" in roadmap
     assert "Phase 4 shipped" in roadmap
 

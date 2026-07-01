@@ -53,17 +53,20 @@ def test_build_serp_request_uses_organic_advanced_endpoint_with_depth() -> None:
 
 
 def test_build_page_text_request_uses_content_parsing_endpoint() -> None:
-    request = build_page_text_request(
-        "https://example.com/technical-seo/1",
-        javascript_parsing=True,
-    )
+    request = build_page_text_request("https://example.com/technical-seo/1")
 
     assert request.method == "POST"
     assert request.path == "/v3/on_page/content_parsing/live"
     assert request.body == [
         {
             "url": "https://example.com/technical-seo/1",
-            "enable_javascript": True,
+            "switch_pool": False,
+            "ip_pool_for_scan": "us",
+            "enable_browser_rendering": False,
+            "enable_javascript": False,
+            "accept_language": "en-US",
+            "browser_preset": "desktop",
+            "store_raw_html": True,
         }
     ]
 

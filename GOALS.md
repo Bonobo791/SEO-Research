@@ -38,23 +38,31 @@ Fixed parameters for US English desktop crawls (no JS, no browser rendering):
 | `browser_preset` | `"desktop"` | Desktop viewport preset when browser params apply |
 | `store_raw_html` | `true` | Retain HTML for audit, replay, and non-parsed analysis |
 
+**Locale note:** `page_text` crawls always use `ip_pool_for_scan: "us"` and
+`accept_language: "en-US"` regardless of `--location` / `--language`. Keyword
+expansion and SERP requests still honor those CLI flags. A run like
+`--language fr --location France` therefore returns French SERP results but
+fetches page HTML through the US English desktop contract above. This is
+intentional for Phase 4.76; locale-aligned page crawls are out of scope unless
+a later phase opens non-US proxy pools.
+
 #### Progress
 
-**Slices:** 0 of 5 shipped, 5 open.
+**Slices:** 1 of 5 shipped, 4 open.
 
 | # | Slice | Layer | Status | Primary deliverable |
 | - | ----- | ----- | ------ | ------------------- |
-| 1 | Request contract | Provider | Open | `build_page_text_request()` emits the fixed parameter set above |
+| 1 | Request contract | Provider | Shipped | `build_page_text_request()` emits the fixed parameter set above |
 | 2 | Item field decoder | Curated | Open | Decoder walks `items[]` fields (`type`, `fetch_time`, `status_code`, `page_content` tree, `page_as_markdown`, `ratings`, `offers`, `comments`, `contacts`, …) per API docs |
 | 3 | Per-field storage | Curated | Open | New curated table(s): one row per extracted field/element with stable ids and JSON path metadata |
 | 4 | Aggregate + HTML wiring | Curated | Open | `pages.text` unchanged (merged content); `raw_html` stored per page/response; passages still from aggregate text only |
 | 5 | Tests and re-normalize | Curated | Open | Fixtures cover multi-field items, HTML retention, and stored-run normalize |
 
-**Remaining to close Phase 4.76:** slices 1–5.
+**Remaining to close Phase 4.76:** slices 2–5.
 
 #### Dev slices
 
-1. **[ ] Slice 1 — Request contract**
+1. **[x] Slice 1 — Request contract**
    - Update `build_page_text_request()` in `src/seo_rank/dataforseo.py`.
    - Tests: `test_build_page_text_request_uses_content_parsing_endpoint` asserts
      the full parameter object.
@@ -124,17 +132,17 @@ See `ROADMAP.md` for Phase 5 (OLS) and Phase 5.5 (passage/domain scoring).
 
 ## Phase 4.76 acceptance criteria
 
-**Status:** 0 of 5 slices shipped, 5 open.
+**Status:** 1 of 5 slices shipped, 4 open.
 
 | Acceptance item | Slice(s) | Status |
 | --------------- | -------- | ------ |
-| `build_page_text_request()` uses US English desktop contract (`switch_pool=false`, `ip_pool_for_scan=us`, `accept_language=en-US`, `browser_preset=desktop`, JS/rendering off, `store_raw_html=true`) | 1 | Not started |
+| `build_page_text_request()` uses US English desktop contract (`switch_pool=false`, `ip_pool_for_scan=us`, `accept_language=en-US`, `browser_preset=desktop`, JS/rendering off, `store_raw_html=true`) | 1 | Complete |
 | Every documented `items[]` field decodes to storable records | 2 | Not started |
 | Per-field rows land in curated Parquet with stable ids | 3 | Not started |
 | Aggregate `pages.text` preserved; raw HTML stored per page | 4 | Not started |
 | Unit tests + stored-run re-normalize cover fields, aggregate, and HTML | 5 | Not started |
 
-- [ ] Live `page_text` requests emit the fixed parameter set. *(Slice 1.)*
+- [x] Live `page_text` requests emit the fixed parameter set. *(Slice 1.)*
 - [ ] Item decoder walks full `items[]` / `page_content` tree per API docs.
   *(Slice 2.)*
 - [ ] Curated per-field table(s) materialize on normalize. *(Slice 3.)*

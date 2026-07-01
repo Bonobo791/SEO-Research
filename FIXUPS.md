@@ -1,11 +1,24 @@
 # Small fixes backlog
 
 Tracked hardening and polish items surfaced during Phase 4.5 Slice 3 (lazy
-curated normalization), Slice 6 (CLI surfaces), and Slice 9 (mart sink contract)
-review. Each item names the **phase/slice** where it should land. Nothing here
-blocks Slice 10 sign-off unless marked **required**.
+curated normalization), Slice 6 (CLI surfaces), Slice 9 (mart sink contract),
+and Phase 4.76 Slice 1 (content_parsing request contract) review. Each item names
+the **phase/slice** where it should land. Nothing here blocks Slice 10 sign-off
+unless marked **required**.
 
 **Status key:** `open` | `done`
+
+---
+
+## Phase 4.76 — Slice 1 (request contract — post-ship polish)
+
+Follow-ups from Slice 1 review. None block Slices 2–5.
+
+| ID | Fix | Phase | Priority | Status |
+| --- | --- | --- | --- | --- |
+| S476-01 | Document breaking CLI removal of `--javascript-parsing` in `README.md` (release note / changelog line) so scripts that still pass the flag know argparse will reject it | 4.76 Slice 1 | nice-to-have | open |
+| S476-02 | Add transport-capture assertion in a live-provider CLI test: mock or spy the outgoing `content_parsing/live` request body at the integration boundary (unit test `test_build_page_text_request_uses_content_parsing_endpoint` already asserts the builder; live-path tests only mock responses today) | 4.76 Slice 1 | nice-to-have | open |
+| S476-03 | Consider order-insensitive body comparison in `test_build_page_text_request_uses_content_parsing_endpoint` (subset / dict equality) so parameter reordering in `build_page_text_request()` does not break the test; current key order matches source and is consistent with other builder tests in the same file | 4.76 Slice 1 | nice-to-have | open |
 
 ---
 

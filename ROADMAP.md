@@ -25,9 +25,46 @@ https://docs.dataforseo.com/v3/on_page/content_parsing/live/
   (OnPage Raw HTML endpoint per DataForSEO docs).
 - **US English desktop request contract** — `switch_pool=false`,
   `ip_pool_for_scan=us`, `accept_language=en-US`, `browser_preset=desktop`,
-  `enable_javascript=false`, `enable_browser_rendering=false`.
+  `enable_javascript=false`, `enable_browser_rendering=false`. Page crawls do
+  not follow `--location` / `--language` (SERP and keyword expansion still do).
 - **Tests** — `test_dataforseo_requests.py`, `test_run_normalize.py`; re-normalize
   smoke on stored live runs.
+
+### Phase 4.77 — adapter schema validation
+
+Future contract: validate every DataForSEO response at the adapter boundary
+against explicit endpoint schemas before normalization or curated writes.
+Schema drift must fail loud with a typed parse error, not leak silently into
+downstream tables.
+
+API reference:
+https://docs.dataforseo.com/v3/on_page/content_parsing/live/
+
+- **Boundary validation** — parse `keyword_expansion`, `serp`, `content_parsing/live`,
+  and stored-run raw responses with explicit schemas in the provider adapter
+  layer.
+- **Typed errors** — raise endpoint-scoped parse errors when required fields are
+  missing, types drift, or unknown semantics would otherwise flow downstream.
+- **No silent fallback** — keep raw JSON for audit, but do not hand unvalidated
+  payloads to normalization or re-normalization code.
+- **Tests** — fixture drift cases for `content_parsing/live`, a valid payload
+  pass-through case, and stored-run failure coverage.
+
+#### Dev slices
+
+1. **[ ] Slice 1 — Schema contracts**
+   - Define explicit schemas for DataForSEO adapter payloads.
+   - Choose the smallest library that gives typed parse errors in Python
+     (`Pydantic` or JSON Schema validation).
+
+2. **[ ] Slice 2 — Boundary enforcement**
+   - Validate live and stored-run DataForSEO responses at the adapter seam.
+   - Surface endpoint-specific parse errors before curated normalization.
+
+3. **[ ] Slice 3 — Drift coverage**
+   - Add fixtures for missing fields, type mismatches, and extra/renamed
+     `content_parsing/live` fields.
+   - Verify valid responses still pass through unchanged.
 
 ### Phase 4.75 — page_text curation hardening (complete)
 
@@ -166,3 +203,7 @@ Shipped contract: `GOALS.md` § Completed: Phase 4.75. Related polish:
 - **GOALS retargeted to Phase 4.76 (2026-07-01):** structured
   `content_parsing/live` capture — per-field curated storage, aggregate
   `pages.text`, raw HTML, and a fixed US English desktop request contract.
+- **Phase 4.76 Slice 1 shipped:** `build_page_text_request()` always emits the
+  fixed US English desktop contract (`ip_pool_for_scan=us`,
+  `accept_language=en-US`, JS/rendering off, `store_raw_html=true`); the
+  `--javascript-parsing` CLI knob was removed.

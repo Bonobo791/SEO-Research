@@ -77,7 +77,6 @@ def test_run_writes_offline_json_and_markdown_artifacts(
             str(output_dir),
             "--model-name",
             "fixture-similarity-v1",
-            "--javascript-parsing",
             "--dry-run",
             "--skip-textrazor",
         ]
@@ -99,7 +98,6 @@ def test_run_writes_offline_json_and_markdown_artifacts(
         "depth": 3,
         "output_dir": str(output_dir),
         "model_name": "fixture-similarity-v1",
-        "javascript_parsing": True,
         "dry_run": True,
         "skip_textrazor": True,
         "live_providers": False,

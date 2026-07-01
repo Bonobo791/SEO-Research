@@ -13,7 +13,6 @@ def test_offline_payload_expands_seed_keywords_from_capped_provider_fixture(tmp_
             depth=3,
             output_dir=tmp_path,
             model_name="fixture-similarity-v1",
-            javascript_parsing=False,
             dry_run=True,
             skip_textrazor=True,
         )
