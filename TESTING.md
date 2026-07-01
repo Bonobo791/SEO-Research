@@ -14,7 +14,7 @@ Pytest configuration and verification contract for SEO-Research.
   interpreter
 - Lint / type-check / build / coverage: not configured
 - Expected test duration: fast (< 1s)
-- **Current verification status:** 80 tests collected; 79 passing, 1 skipped
+- **Current verification status:** 84 tests collected; 83 passing, 1 skipped
 
 ## Active Verification Command
 
@@ -65,6 +65,7 @@ placeholders only.
 | `test_gemini_embeddings.py` | Live Gemini prompt formatting, model args, and score shaping with injected embeddings |
 | `test_passage_normalization.py` | Passage split, short-text filter |
 | `test_similarity_features.py` | Fixture passage aggregation plus BGE, Gemini Doc Retrieval, and Gemini Semantic Similarity page scoring |
+| `test_analysis_gemini_nwh_similarity.py` | Analysis script block scoring with BGE, Gemini document relevance, and Gemini semantic similarity plus provider error handling |
 | `test_textrazor_normalization.py` | Entity schema normalization |
 | `test_textrazor_requests.py` | TextRazor parsed-text request construction, credential validation, HTTP execution |
 | `test_sdlc_docs.py` | GOALS/ROADMAP/README/TESTING/ARCHITECTURE guards, manifest pytest commands, and the Slice 7 round-trip regression sweep |

@@ -17,13 +17,17 @@ if str(REPO_SRC) not in sys.path:
     sys.path.insert(0, str(REPO_SRC))
 
 from seo_rank.env import ensure_project_env_loaded
+from seo_rank.bge_reranker import BgeRerankerError, load_bge_reranker, sigmoid
 from seo_rank.gemini_embeddings import (
     GEMINI_EMBEDDING_DIMENSIONALITY,
     GEMINI_EMBEDDING_MODEL,
     cosine_similarity,
+    prepare_document,
+    prepare_query,
     prepare_semantic_input,
     to_vector,
 )
+from seo_rank.similarity import fixture_bge_reranker_score
 
 
 KEYWORD = "best northwest houston realtors"
@@ -85,8 +89,17 @@ def compute_semantic_similarity_scores(
     *,
     api_key: str,
     embed_content: Callable[..., Sequence[float]],
+    reranker=None,
 ) -> list[dict[str, object]]:
-    keyword_vector = to_vector(
+    keyword_document_vector = to_vector(
+        embed_content(
+            prepare_query(keyword),
+            api_key=api_key,
+            model=GEMINI_EMBEDDING_MODEL,
+            output_dimensionality=GEMINI_EMBEDDING_DIMENSIONALITY,
+        )
+    )
+    keyword_semantic_vector = to_vector(
         embed_content(
             prepare_semantic_input(keyword),
             api_key=api_key,
@@ -95,11 +108,44 @@ def compute_semantic_similarity_scores(
         )
     )
 
+    valid_blocks = [
+        block
+        for block in blocks
+        if isinstance(block.get("label"), str) and isinstance(block.get("text"), str)
+    ]
+    if not valid_blocks:
+        return []
+    pairs = [[keyword, block["text"]] for block in valid_blocks]
+    if reranker is None:
+        try:
+            reranker = load_bge_reranker()
+        except BgeRerankerError:
+            class _FixtureBgeReranker:
+                @staticmethod
+                def compute_score(pairs: Sequence[Sequence[str]]) -> list[float]:
+                    return [
+                        fixture_bge_reranker_score(keyword_value, text_value)
+                        for keyword_value, text_value in pairs
+                    ]
+
+            reranker = _FixtureBgeReranker()
+    raw_bge_scores = reranker.compute_score(pairs)
+    if isinstance(raw_bge_scores, (int, float)):
+        raw_bge_scores = [float(raw_bge_scores)]
+
     scores: list[dict[str, object]] = []
-    for block in blocks:
+    for block, raw_bge_score in zip(valid_blocks, raw_bge_scores):
         label = block["label"]
         text = block["text"]
-        block_vector = to_vector(
+        document_vector = to_vector(
+            embed_content(
+                prepare_document(text, title=label),
+                api_key=api_key,
+                model=GEMINI_EMBEDDING_MODEL,
+                output_dimensionality=GEMINI_EMBEDDING_DIMENSIONALITY,
+            )
+        )
+        semantic_vector = to_vector(
             embed_content(
                 prepare_semantic_input(text),
                 api_key=api_key,
@@ -107,10 +153,31 @@ def compute_semantic_similarity_scores(
                 output_dimensionality=GEMINI_EMBEDDING_DIMENSIONALITY,
             )
         )
+        document_similarity = round(
+            cosine_similarity(keyword_document_vector, document_vector),
+            6,
+        )
+        semantic_similarity = round(
+            cosine_similarity(keyword_semantic_vector, semantic_vector),
+            6,
+        )
         scores.append(
             {
                 "label": label,
-                "score": round(cosine_similarity(keyword_vector, block_vector), 6),
+                "page_similarity": {
+                    "bge": {
+                        "raw_score": round(float(raw_bge_score), 6),
+                        "normalized_score": round(sigmoid(float(raw_bge_score)), 6),
+                    },
+                    "gemini_doc_retrieval": {
+                        "raw_score": document_similarity,
+                        "normalized_score": document_similarity,
+                    },
+                    "gemini_semantic_similarity": {
+                        "raw_score": semantic_similarity,
+                        "normalized_score": semantic_similarity,
+                    },
+                },
             }
         )
     return scores
@@ -165,9 +232,25 @@ def main() -> int:
 
     print(f"Keyword: {KEYWORD}")
     for index, row in enumerate(
-        sorted(scores, key=lambda item: item["score"], reverse=True), start=1
+        sorted(
+            scores,
+            key=lambda item: item["page_similarity"]["gemini_semantic_similarity"][
+                "raw_score"
+            ],
+            reverse=True,
+        ),
+        start=1,
     ):
-        print(f"{index}. {row['label']} - {row['score']:.6f}")
+        page_similarity = row["page_similarity"]
+        bge = page_similarity["bge"]
+        document_relevance = page_similarity["gemini_doc_retrieval"]
+        semantic = page_similarity["gemini_semantic_similarity"]
+        print(
+            f"{index}. {row['label']} - "
+            f"BGE: {bge['raw_score']:.6f} (normalized {bge['normalized_score']:.6f}) | "
+            f"Gemini document relevance: {document_relevance['raw_score']:.6f} | "
+            f"Gemini semantic similarity: {semantic['raw_score']:.6f}"
+        )
 
     print()
     print(json.dumps({"keyword": KEYWORD, "scores": scores}, indent=2))
