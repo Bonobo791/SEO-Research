@@ -441,16 +441,7 @@ def replay_stored_run(
     deduped_keywords = dedupe_keywords(
         [keyword for keyword in stored_keywords if isinstance(keyword, str)]
     )
-    if config.keyword_limit <= len(deduped_keywords):
-        materialize_run_tree(
-            stored_run,
-            progress=progress,
-            phase_label="replay",
-            respect_dry_run=False,
-        )
-        return
-
-    if progress is not None:
+    if progress is not None and config.keyword_limit > len(deduped_keywords):
         progress.log(
             f"replay: expanding stored run from {len(deduped_keywords)} "
             f"to {config.keyword_limit} keywords"
@@ -481,21 +472,26 @@ def expand_stored_run(
         output_dir=stored_run,
         keyword_limit=requested_keyword_limit,
     )
-    keyword_expansion = load_stored_keyword_expansion_response(stored_run)
-    expanded_keywords = normalize_keyword_expansion(
-        keyword_expansion,
-        seed=base_config.seed,
-        limit=requested_keyword_limit,
-    )
     current_keywords = dedupe_keywords(
         [keyword for keyword in stored_payload.get("keywords", []) if isinstance(keyword, str)]
     )
-    current_keyword_keys = {keyword.casefold() for keyword in current_keywords}
-    new_keywords = [
-        keyword for keyword in expanded_keywords if keyword.casefold() not in current_keyword_keys
+    target_keywords = current_keywords
+    if requested_keyword_limit > len(current_keywords):
+        keyword_expansion = load_stored_keyword_expansion_response(stored_run)
+        target_keywords = normalize_keyword_expansion(
+            keyword_expansion,
+            seed=base_config.seed,
+            limit=requested_keyword_limit,
+        )
+
+    stored_serp_statuses = load_stored_serp_statuses(stored_run)
+    keywords_to_refresh = [
+        keyword
+        for keyword in target_keywords
+        if not stored_serp_statuses.get(keyword.casefold(), False)
     ]
 
-    if not new_keywords:
+    if not keywords_to_refresh:
         materialize_run_tree(
             stored_run,
             progress=progress,
@@ -515,9 +511,9 @@ def expand_stored_run(
             env=os.environ,
             progress=progress,
         )
-        new_keyword_results: list[dict[str, object]] = []
-        for index, keyword in enumerate(new_keywords, start=1):
-            new_keyword_results.append(
+        refreshed_keyword_results: list[dict[str, object]] = []
+        for index, keyword in enumerate(keywords_to_refresh, start=1):
+            refreshed_keyword_results.append(
                 build_live_keyword_result(
                     base_config,
                     target_keyword=keyword,
@@ -534,11 +530,11 @@ def expand_stored_run(
                 )
             )
             if progress is not None:
-                progress.keyword_step(index, len(new_keywords), keyword, "done")
+                progress.keyword_step(index, len(keywords_to_refresh), keyword, "done")
     else:
-        new_keyword_results = []
-        for index, keyword in enumerate(new_keywords, start=1):
-            new_keyword_results.append(
+        refreshed_keyword_results = []
+        for index, keyword in enumerate(keywords_to_refresh, start=1):
+            refreshed_keyword_results.append(
                 build_offline_keyword_result(
                     base_config,
                     target_keyword=keyword,
@@ -546,33 +542,46 @@ def expand_stored_run(
                 )
             )
             if progress is not None:
-                progress.keyword_step(index, len(new_keywords), keyword, "done")
+                progress.keyword_step(index, len(keywords_to_refresh), keyword, "done")
 
     merged_payload = build_expanded_run_payload(
         stored_payload,
         config=base_config,
-        expanded_keywords=expanded_keywords,
-        new_keyword_results=new_keyword_results,
+        keywords=target_keywords,
+        keyword_results=merge_keyword_results(
+            stored_payload.get("keyword_results", []),
+            refreshed_keyword_results,
+            target_keywords=target_keywords,
+        ),
         network_calls=network_calls,
     )
     existing_raw_response_records = scan_raw_responses(stored_run).collect().to_dicts()
     new_raw_response_records = build_raw_response_records(
         run_id,
         {
-            "keyword_results": new_keyword_results,
+            "keyword_results": refreshed_keyword_results,
         },
     )
+    refreshed_keyword_keys = {keyword.casefold() for keyword in keywords_to_refresh}
+    retained_raw_response_records = [
+        record
+        for record in existing_raw_response_records
+        if not (
+            isinstance(record.get("target_keyword"), str)
+            and record["target_keyword"].casefold() in refreshed_keyword_keys
+        )
+    ]
     if progress is not None:
         progress.log(
             "replay: writing expanded raw responses "
-            f"({len(existing_raw_response_records) + len(new_raw_response_records)} records)"
+            f"({len(retained_raw_response_records) + len(new_raw_response_records)} records)"
         )
     write_artifacts(
         stored_run,
         merged_payload,
         progress=progress,
         raw_response_records=[
-            *existing_raw_response_records,
+            *retained_raw_response_records,
             *new_raw_response_records,
         ],
     )
@@ -612,33 +621,62 @@ def build_expanded_run_payload(
     stored_payload: Mapping[str, object],
     *,
     config: RunConfig,
-    expanded_keywords: list[str],
-    new_keyword_results: Sequence[Mapping[str, object]],
+    keywords: list[str],
+    keyword_results: Sequence[Mapping[str, object]],
     network_calls: list[str],
 ) -> dict[str, object]:
     merged_payload = dict(stored_payload)
     merged_payload["config"] = serialized_config(config)
-    merged_payload["keywords"] = expanded_keywords
-    existing_keyword_results = [
+    merged_payload["keywords"] = keywords
+    merged_payload["keyword_results"] = [
         keyword_result
-        for keyword_result in stored_payload.get("keyword_results", [])
+        for keyword_result in keyword_results
         if isinstance(keyword_result, Mapping)
     ]
-    merged_keyword_results = [*existing_keyword_results, *new_keyword_results]
-    merged_payload["keyword_results"] = merged_keyword_results
-    for key in (
-        "passages",
-        "serp_results",
-        "similarity_features",
-        "page_similarity",
-        "textrazor_entities",
-    ):
-        existing_values = stored_payload.get(key, [])
-        merged_payload[key] = (
-            list(existing_values) if isinstance(existing_values, list) else []
-        ) + flatten_keyword_result_values(new_keyword_results, key)
+    for key in ("passages", "serp_results", "similarity_features", "page_similarity", "textrazor_entities"):
+        merged_payload[key] = flatten_keyword_result_values(merged_payload["keyword_results"], key)
     merged_payload["network_calls"] = network_calls
     return merged_payload
+
+
+def merge_keyword_results(
+    stored_keyword_results: object,
+    refreshed_keyword_results: Sequence[Mapping[str, object]],
+    *,
+    target_keywords: Sequence[str],
+) -> list[dict[str, object]]:
+    stored_by_keyword: dict[str, dict[str, object]] = {}
+    if isinstance(stored_keyword_results, list):
+        for keyword_result in stored_keyword_results:
+            if not isinstance(keyword_result, Mapping):
+                continue
+            target_keyword = keyword_result.get("target_keyword")
+            if isinstance(target_keyword, str):
+                stored_by_keyword[target_keyword.casefold()] = dict(keyword_result)
+
+    refreshed_by_keyword = {
+        keyword_result["target_keyword"].casefold(): dict(keyword_result)
+        for keyword_result in refreshed_keyword_results
+        if isinstance(keyword_result.get("target_keyword"), str)
+    }
+
+    merged: list[dict[str, object]] = []
+    missing_keywords: list[str] = []
+    for keyword in target_keywords:
+        keyword_key = keyword.casefold()
+        keyword_result = refreshed_by_keyword.get(keyword_key) or stored_by_keyword.get(
+            keyword_key
+        )
+        if keyword_result is None:
+            missing_keywords.append(keyword)
+            continue
+        merged.append(keyword_result)
+    if missing_keywords:
+        raise CliCommandError(
+            "Stored run payload is missing keyword results for: "
+            + ", ".join(missing_keywords)
+        )
+    return merged
 
 
 def load_stored_keyword_expansion_response(run_dir: Path) -> dict[str, object]:
@@ -659,6 +697,46 @@ def load_stored_keyword_expansion_response(run_dir: Path) -> dict[str, object]:
             f"Stored keyword_expansion response in {run_dir} does not contain raw bytes"
         )
     return json.loads(bytes(response_body_bytes).decode("utf-8"))
+
+
+def load_stored_serp_statuses(run_dir: Path) -> dict[str, bool]:
+    statuses: dict[str, bool] = {}
+    rows = (
+        scan_raw_responses(run_dir)
+        .filter(pl.col("endpoint") == "serp")
+        .select(["target_keyword", "response_body_bytes"])
+        .collect()
+        .to_dicts()
+    )
+    for row in rows:
+        target_keyword = row.get("target_keyword")
+        response_body_bytes = row.get("response_body_bytes")
+        if not isinstance(target_keyword, str) or not isinstance(
+            response_body_bytes, (bytes, bytearray)
+        ):
+            continue
+        try:
+            response = json.loads(bytes(response_body_bytes).decode("utf-8"))
+        except json.JSONDecodeError:
+            statuses.setdefault(target_keyword.casefold(), False)
+            continue
+        keyword_key = target_keyword.casefold()
+        statuses[keyword_key] = statuses.get(keyword_key, False) or stored_serp_response_is_usable(response)
+    return statuses
+
+
+def stored_serp_response_is_usable(response: Mapping[str, object]) -> bool:
+    tasks = response.get("tasks", [])
+    if not isinstance(tasks, list) or not tasks:
+        return False
+
+    for task in tasks:
+        if not isinstance(task, Mapping):
+            return False
+        status_code = task.get("status_code")
+        if isinstance(status_code, int) and status_code != 20000:
+            return False
+    return bool(normalize_serp_results(response, keyword="stored-serp"))
 
 
 def scan_analysis_mart(run_dir: Path) -> pl.LazyFrame:

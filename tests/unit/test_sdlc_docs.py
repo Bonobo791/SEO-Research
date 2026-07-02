@@ -208,3 +208,19 @@ def test_phase_5_slice_6_ships_pooled_ols_diagnostics() -> None:
     assert "page_similarity" in architecture
     assert "test_stats_diagnostics.py" in testing
     assert "stats_diagnostics.json" in readme
+
+
+def test_phase_6_plans_workflow_integrity_guardrails() -> None:
+    goals = (ROOT / "GOALS.md").read_text(encoding="utf-8")
+    roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
+    architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
+    testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
+
+    assert "Phase 6 — Workflow Integrity Guardrails" in roadmap
+    assert "workflow_contracts.v1.yaml" in roadmap
+    assert "logical run is complete only when every required accounting unit has a permitted terminal disposition" in roadmap
+    assert "Phase 6 is planned future work" in goals
+    assert "workflow_contracts.v1.yaml" in architecture
+    assert "artifact-derived reconciliation" in architecture
+    assert "contract-schema tests" in testing
+    assert "partial-write and commit-failure tests" in testing

@@ -1,7 +1,10 @@
+import hashlib
 import json
 from pathlib import Path
 
+import pyarrow as pa
 import pyarrow.dataset as ds
+import pyarrow.parquet as pq
 
 from seo_rank.dataforseo import DataForSeoClientError
 from seo_rank.dataforseo import fixture_keyword_expansion_response
@@ -327,17 +330,17 @@ def test_run_stored_run_expands_existing_tree_in_place(
     assert (output_dir / "stats" / "stats_summary.json").exists()
 
 
-def test_run_stored_run_live_expansion_reports_serp_task_error(
+def test_run_stored_run_refreshes_only_stale_serps_in_place(
     tmp_path: Path,
     monkeypatch,
-    capsys,
 ) -> None:
     output_dir = tmp_path / "artifacts"
     monkeypatch.setenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", "1")
     monkeypatch.setenv("DATAFORSEO_LOGIN", "analyst@example.com")
     monkeypatch.setenv("DATAFORSEO_PASSWORD", "dataforseo-secret")
 
-    page_text_calls: list[bytes] = []
+    serp_keywords: list[str] = []
+    page_text_urls: list[str] = []
 
     def dataforseo_transport(
         *,
@@ -362,6 +365,7 @@ def test_run_stored_run_live_expansion_reports_serp_task_error(
         if url.endswith("/serp/google/organic/live/advanced"):
             request_body = json.loads(body.decode("utf-8"))
             keyword = request_body[0]["keyword"]
+            serp_keywords.append(keyword)
             if keyword == "technical seo":
                 return {
                     "tasks": [
@@ -372,7 +376,7 @@ def test_run_stored_run_live_expansion_reports_serp_task_error(
                                         {
                                             "type": "organic",
                                             "rank_group": 1,
-                                            "url": "https://example.com/live",
+                                            "url": "https://example.com/live/technical-seo/1",
                                             "title": "Live Result",
                                             "description": "Live provider result.",
                                         }
@@ -386,23 +390,32 @@ def test_run_stored_run_live_expansion_reports_serp_task_error(
                 return {
                     "tasks": [
                         {
-                            "result": None,
-                            "status_code": 40207,
-                            "status_message": (
-                                "Access denied. Your IP is not whitelisted."
-                            ),
+                            "result": [
+                                {
+                                    "items": [
+                                        {
+                                            "type": "organic",
+                                            "rank_group": 1,
+                                            "url": "https://example.com/live/technical-seo-audit/1",
+                                            "title": "Audit Result",
+                                            "description": "Live provider result.",
+                                        }
+                                    ]
+                                }
+                            ],
                         }
                     ],
                 }
             raise AssertionError(f"unexpected keyword: {keyword}")
         if url.endswith("/on_page/content_parsing/live"):
-            page_text_calls.append(body)
+            request_body = json.loads(body.decode("utf-8"))
+            page_text_urls.append(request_body[0]["url"])
             return {
                 "tasks": [
                     {
                         "result": [
                             {
-                                "url": "https://example.com/live",
+                                "url": request_body[0]["url"],
                                 "title": "Parsed Page",
                                 "text": "Technical SEO helps crawlers find pages.",
                             }
@@ -423,10 +436,47 @@ def test_run_stored_run_live_expansion_reports_serp_task_error(
                 "--output-dir",
                 str(output_dir),
                 "--live-providers",
+                "--keyword-limit",
+                "2",
+                "--skip-textrazor",
             ]
         )
         == 0
     )
+
+    serp_path = (
+        output_dir / "parquet" / "raw_responses" / "endpoint=serp" / "part-0.parquet"
+    )
+    serp_table = pq.ParquetFile(serp_path).read()
+    serp_rows = serp_table.to_pylist()
+    stale_keyword = "technical seo audit"
+    failed_response = {
+        "tasks": [
+            {
+                "keyword": stale_keyword,
+                "result": None,
+                "status_code": 40207,
+                "status_message": "Access denied. Your IP is not whitelisted.",
+            }
+        ]
+    }
+    failed_response_body = json.dumps(failed_response, sort_keys=True).encode("utf-8")
+    for row in serp_rows:
+        if row["target_keyword"] != stale_keyword:
+            continue
+        row["response_body_bytes"] = failed_response_body
+        row["sha256"] = hashlib.sha256(failed_response_body).hexdigest()
+        row["response_id"] = hashlib.sha256(
+            (
+                f"{output_dir.name}|serp|{stale_keyword}|"
+                f"{row['sha256']}"
+            ).encode("utf-8")
+        ).hexdigest()[:32]
+        break
+    pq.write_table(pa.Table.from_pylist(serp_rows, schema=serp_table.schema), serp_path)
+
+    serp_keywords.clear()
+    page_text_urls.clear()
 
     exit_code = main(
         [
@@ -440,11 +490,16 @@ def test_run_stored_run_live_expansion_reports_serp_task_error(
         ]
     )
 
-    captured = capsys.readouterr()
-    assert exit_code == 2
-    assert "technical seo audit" in captured.err
-    assert "Access denied. Your IP is not whitelisted." in captured.err
-    assert len(page_text_calls) == 1
+    assert exit_code == 0
+    assert serp_keywords == ["technical seo audit"]
+    assert page_text_urls == ["https://example.com/live/technical-seo-audit/1"]
+
+    payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
+    assert payload["keywords"] == ["technical seo", "technical seo audit"]
+    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 5
+    assert payload["catalog"]["datasets"]["keyword_serp"]["row_count"] == 2
+    assert payload["catalog"]["datasets"]["analysis_mart"]["row_count"] == 2
+    assert (output_dir / "stats" / "stats_summary.json").exists()
 
 
 def test_run_writes_raw_response_parquet_and_catalog_metadata(
