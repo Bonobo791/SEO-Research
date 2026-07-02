@@ -9,6 +9,7 @@ import pyarrow.parquet as pq
 from seo_rank.dataforseo import DataForSeoClientError
 from seo_rank.dataforseo import fixture_keyword_expansion_response
 from seo_rank.cli import main
+from seo_rank.cli import stored_serp_response_is_usable
 
 
 def test_run_without_output_dir_writes_stable_default_run_directory(
@@ -500,6 +501,36 @@ def test_run_stored_run_refreshes_only_stale_serps_in_place(
     assert payload["catalog"]["datasets"]["keyword_serp"]["row_count"] == 2
     assert payload["catalog"]["datasets"]["analysis_mart"]["row_count"] == 2
     assert (output_dir / "stats" / "stats_summary.json").exists()
+
+
+def test_stored_serp_response_is_usable_rejects_empty_result_list() -> None:
+    assert not stored_serp_response_is_usable(
+        {
+            "tasks": [
+                {
+                    "keyword": "technical seo",
+                    "result": [],
+                }
+            ]
+        }
+    )
+
+
+def test_stored_serp_response_is_usable_rejects_empty_organic_items() -> None:
+    assert not stored_serp_response_is_usable(
+        {
+            "tasks": [
+                {
+                    "keyword": "technical seo",
+                    "result": [
+                        {
+                            "items": [],
+                        }
+                    ],
+                }
+            ]
+        }
+    )
 
 
 def test_run_writes_raw_response_parquet_and_catalog_metadata(

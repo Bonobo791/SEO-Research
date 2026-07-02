@@ -12,6 +12,8 @@ guardrail-aware `stats_*` artifacts with explicit limitations (no causal claims)
 
 Full product review and estimand defaults: `PHASE5-STATS-PLAN-REVIEW.md`.
 Implementation slices and acceptance table: `ROADMAP.md` § Phase 5.
+Phase 6 is planned future work for workflow-integrity guardrails and is not
+part of the active Phase 5 delivery contract unless explicitly retargeted.
 
 Prior shipped work (Phase 4.77 adapter schema validation, Phase 4.76 structured
 `content_parsing/live` capture, the run-scoped Parquet lake, page-level
@@ -246,7 +248,7 @@ secondary comparisons in fixed order.
 - Domain-level URL inventory scoring (Phase 5.5).
 - Phase 5.75 BGE hybrid / retrieve-then-rerank pipeline (separate spec v2).
 - Phase 5.1 exploratory extensions (rank-decile segments, keyword holdout).
-- Expanded report sections beyond stats artifacts (Phase 6).
+- Expanded report sections beyond stats artifacts (Phase 6.1).
 - Entity-derived ranking features.
 - Direct page fetching outside DataForSEO.
 - Causal claims about ranking factors.

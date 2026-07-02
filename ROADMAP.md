@@ -326,7 +326,106 @@ their effective defaults.
 - Catalog/provenance test: confirm the saved metadata is sufficient to identify
   prior matching pulls.
 
-### Phase 6 — Reporting
+### Phase 6 — Workflow Integrity Guardrails
+
+Standard:
+
+> A logical run is complete only when every required accounting unit has a permitted terminal disposition at each applicable boundary, proven from committed artifacts with valid provenance.
+
+First-pass scope: enforce the highest-risk path only:
+
+- expansion → SERP collection
+- raw provider responses → curated records
+- stored-run / retry provenance on reused committed artifacts
+
+Later boundaries (`curated → feature marts`, `feature marts → analysis_mart`,
+`analysis_mart → stats artifacts`) must still be registered, but start as
+`deferred` until the control model is implemented there.
+
+#### Dev slices
+
+1. **[ ] Slice 1 — Contract registry and boundary coverage**
+   - Add planned artifact: `workflow_contracts.v1.yaml`.
+   - Register every executable stage transition with:
+     `boundary_id`, `contract_version`, `owner`, `status`,
+     `accounting_unit`, `relation`, `input_selector`, `output_selector`,
+     `terminal_dispositions`, `reconciliation_equation`,
+     `validation_point`, `mode_policies`, `provenance_requirements`,
+     `empty_result_policy`, `failure_policy`, and `compatibility_policy`.
+   - Fail CI when a stage exists without a contract or a contract row maps to
+     no real transition.
+
+2. **[ ] Slice 2 — Run identity, provenance, and reuse semantics**
+   - Treat current `run_id` as the compatibility-era `logical_run_id`.
+   - Add planned provenance fields:
+     `execution_id`, `artifact_id`, `input_snapshot_id`,
+     `source_execution_id`, `contract_version`.
+   - Define fresh-run, stored-run, retry/resume, and dry-run reuse rules by
+     contract mode rather than hard-coded `run_id` equality.
+
+3. **[ ] Slice 3 — Stage state model and atomic commit semantics**
+   - Stage lifecycle: `planned → running → materialized → reconciled → committed`;
+     terminal failure = `failed_final`.
+   - Record stage start before work begins.
+   - Reconcile staged outputs before commit/promote.
+   - Downstream stages read committed artifacts only.
+
+4. **[ ] Slice 4 — Artifact-derived reconciliation engine**
+   - Audit from committed artifacts plus `workflow_contracts.v1.yaml`, not from
+     stage self-reported counts.
+   - Per boundary derive:
+     distinct input count, distinct matched count, duplicate count,
+     unexplained gap count, canonical ID digest, sampled missing/unexpected IDs,
+     provenance compatibility, and contract-version compatibility.
+   - Missing declared boundary entries or open `running` stages fail closed.
+
+5. **[ ] Slice 5 — High-risk boundary enforcement v1**
+   - Enforce `expansion → SERP`, `raw_responses → curated`, and provenance
+     checks for reused committed artifacts on those boundaries.
+   - Register but defer `curated → feature marts`, `feature marts → analysis_mart`,
+     and `analysis_mart → stats artifacts`.
+
+6. **[ ] Slice 6 — Exception policy and terminal disposition rules**
+   - Supported terminal states:
+     `produced`, `skipped`, `deferred`, `failed_final`.
+   - Allowed empty / skip declarations require:
+     `owner`, `reason_code`, `scope`, `max_volume`, `retry_required`,
+     and `review_by`.
+   - Default v1 policy: any required `deferred` unit blocks completion; any
+     required `failed_final` unit fails the run.
+
+7. **[ ] Slice 7 — Verification strategy and regression fixtures**
+   - Planned tests:
+     contract-schema tests, contract-coverage tests, reconciliation tests,
+     provenance tests, partial-write and commit-failure tests,
+     silent-failure regression fixtures, and targeted mutation-style guards.
+   - Required regressions:
+     keyword expanded but SERP never fetched; stage omitted entirely; ledger
+     says success but committed artifact missing; stale artifact reused; partial
+     stored-run expansion leaves unexplained gaps.
+
+8. **[ ] Slice 8 — Operational metrics and alert surfaces**
+   - Emit and surface:
+     reconciliation gap count, zero-output required boundaries,
+     stale-provenance rejection, skip-rate spikes, retry exhaustion,
+     missing committed artifacts, and contract-version mismatch.
+   - A green run with a nonzero unexplained gap must be impossible.
+
+#### Phase 6 acceptance criteria
+
+| Acceptance item | Slice(s) | Status |
+| --------------- | -------- | ------ |
+| `workflow_contracts.v1.yaml` defines every executable boundary | 1 | Open |
+| Contract rows map one-to-one with executable stage transitions | 1 | Open |
+| Provenance compatibility is defined separately from raw `run_id` equality | 2 | Open |
+| Staged outputs reconcile before promotion to committed artifacts | 3, 4 | Open |
+| Reconciliation is artifact-derived, not ledger-derived | 4 | Open |
+| First-pass enforcement covers `expansion → SERP` and `raw_responses → curated` | 5 | Open |
+| Required `deferred` or `failed_final` units prevent green completion | 6 | Open |
+| Silent completeness failures are reproduced by regression fixtures | 7 | Open |
+| Gap, provenance, skip, and commit metrics are visible operationally | 8 | Open |
+
+### Phase 6.1 — Reporting
 
 - Expanded `report.md` sections for observational limits and top-20 censoring
 - Generated `runs/{run_id}/` trees out of source control (layout ships in Phase 4.5)

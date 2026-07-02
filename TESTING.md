@@ -159,6 +159,37 @@ See `GOALS.md` and `ROADMAP.md` § Phase 5 slices 7–14.
 - **Dry-run / fixture skip** — `seo-rank analyze` on documented fixture modes
   does not require full stats output.
 
+## Planned tests (not yet in suite) — Phase 6 workflow integrity
+
+See `ROADMAP.md` § Phase 6.
+
+- **contract-schema tests** — validate `workflow_contracts.v1.yaml`, required
+  fields, owners, boundary status, and contract-version policy.
+- **contract-coverage tests** — every executable stage transition has exactly
+  one registered contract row, and every contract row maps to a real transition.
+- **Reconciliation tests** — audit committed artifacts, not self-reported stage
+  counts; validate distinct input/matched counts, duplicate detection,
+  unexplained gap counts, and canonical ID digests.
+- **Provenance and reuse tests** — verify `logical_run_id`, `execution_id`,
+  `artifact_id`, `input_snapshot_id`, `source_execution_id`, and
+  contract-version compatibility across fresh runs, `--stored-run`, retries,
+  and dry runs.
+- **State-model tests** — assert `planned → running → materialized → reconciled
+  → committed`; fail on open `running` stages or missing committed artifacts.
+- **partial-write and commit-failure tests** — staged outputs must not be
+  treated as valid downstream inputs; reconciliation must occur before commit.
+- **Silent-failure regression fixtures** — keyword expanded but SERP never
+  fetched; stage omitted entirely; ledger says success but committed artifact is
+  missing; stale artifact reused; partial stored-run expansion leaves
+  unexplained gaps.
+- **Exception-policy tests** — undeclared empty outputs fail; allowed skip/empty
+  behavior requires explicit owner, reason code, scope, retry rule, max volume,
+  and review date; required `deferred` or `failed_final` units prevent green
+  completion.
+- **Operational-surface tests** — reconciliation gap count, stale-provenance
+  rejection, missing committed artifacts, skip-rate spikes, retry exhaustion,
+  and contract-version mismatch are emitted in operator-visible outputs.
+
 Keep optional live flags aligned with `.env.example` when adding integration tests.
 
 See phased backlog in `ROADMAP.md` and planned pipeline in `ARCHITECTURE.md`.

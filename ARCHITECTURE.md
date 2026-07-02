@@ -133,7 +133,8 @@ CLI wiring continue in slices 7–10.
   `seo-rank run` defaults to `runs/{run_id}/` when `--output-dir` is omitted
   and still supports explicit overrides. Long runs emit `[seo-rank]` progress on
   stderr (run phase, per-keyword steps, progress bar, artifact writes). Phase 6
-  expands report narrative sections.
+  plans workflow-integrity guardrails across stage boundaries; Phase 6.1 expands
+  report narrative sections.
 - **Storage (planned, Phase 4.5):** run-scoped Parquet lake with three processing
   layers — see [Run-scoped Parquet lake](#run-scoped-parquet-lake-phase-45) and
   [Polars data layer](#polars-data-layer-phase-45).
@@ -164,6 +165,10 @@ Downstream work scans lazily via `pl.scan_parquet()`; `seo-rank normalize`,
 **Planned full pipeline (Phase 5+):** lazy Polars joins on `analysis_mart` →
 guardrails → keyword-level Spearman ρ with BH per backend → pooled OLS with
 clustered SEs and diagnostics → `runs/{run_id}/stats/` artifacts.
+
+**Planned workflow integrity (Phase 6):** every required accounting unit must
+reach a permitted terminal disposition at each applicable boundary, proven from
+committed artifacts with valid provenance rather than from stage self-reporting.
 
 Raw provider responses and generated run trees should stay out of source
 control.
@@ -557,6 +562,117 @@ confirmatory keyword holdout, IV / `PanelOLS`, URL fixed effects.
 Do not skip any page-level scorer or the statistical analysis step on individual
 runs unless the run is an explicit offline fixture or dry-run test mode
 documented in the CLI contract.
+
+## Planned Workflow Integrity Guardrails
+
+Phase 6 introduces a separate control plane for cross-stage workflow integrity.
+The goal is to prevent silent completeness failures such as expanded keywords
+that never produce SERP rows, partial stored-run reuse, or stages that appear
+successful without committed downstream artifacts.
+
+### Contract registry
+
+The planned contract registry is `workflow_contracts.v1.yaml`.
+
+Each executable boundary records:
+
+- `boundary_id`, `contract_version`, `owner`
+- `status` (`enforced` or `deferred`)
+- `accounting_unit` and `relation`
+- `input_selector` and `output_selector`
+- `terminal_dispositions`
+- `reconciliation_equation`
+- `validation_point`
+- `mode_policies`
+- `provenance_requirements`
+- `empty_result_policy`
+- `failure_policy`
+- `compatibility_policy`
+
+This is necessary because stage boundaries do not all preserve the same grain:
+`keyword → SERP rows` is one-to-many, `raw_responses → curated` may reconcile at
+provider-task or row-group grain, and later boundaries can reconcile at run or
+artifact scope rather than per-row scope.
+
+### Provenance model
+
+Current `run_id` remains the compatibility-era logical run identifier. Phase 6
+adds the planned provenance vocabulary:
+
+- `logical_run_id`
+- `execution_id`
+- `artifact_id`
+- `input_snapshot_id`
+- `source_execution_id`
+- `contract_version`
+
+Freshness is therefore provenance compatibility, not simple equality on a
+single `run_id` field. Stored-run, retry, backfill, and dry-run behavior must
+be governed by contract mode policies.
+
+### State and commit semantics
+
+A stage is planned to move through:
+
+```text
+planned → running → materialized → reconciled → committed
+                       ↘ failed_final
+```
+
+The stage start record must be written before work begins. Outputs are written
+to a staging location, reconciled there, and only then promoted to committed
+artifacts. Downstream stages must consume committed artifacts only.
+
+### Artifact-derived reconciliation
+
+The reconciliation engine must be driven by the contract registry and committed
+artifacts, not by stage self-reported ledger counts. Ledger state remains
+diagnostic evidence only.
+
+Per enforced boundary, the planned audit derives:
+
+- distinct input count
+- distinct matched count
+- duplicate count
+- unexplained gap count
+- stable digest of canonicalized IDs
+- capped samples of missing or unexpected IDs
+- provenance compatibility
+- contract-version compatibility
+
+This artifact-derived reconciliation must fail when:
+
+- a declared enforced boundary is absent from the ledger
+- a stage is stuck in `running` without completion
+- committed outputs are missing
+- provenance is stale or incompatible
+- unexplained accounting-unit gaps remain
+
+### First-pass enforcement scope
+
+Phase 6 v1 intentionally starts with the highest-risk path:
+
+- `keyword expansion → SERP collection`
+- `raw provider responses → curated records`
+- provenance checks for reused committed artifacts on those boundaries
+
+Later boundaries (`curated → feature marts`, `feature marts → analysis_mart`,
+`analysis_mart → stats artifacts`) must still be registered in
+`workflow_contracts.v1.yaml`, but begin as `deferred`.
+
+### Terminal dispositions and exceptions
+
+Supported terminal states:
+
+- `produced`
+- `skipped`
+- `deferred`
+- `failed_final`
+
+Allowed empty results and skip paths must carry explicit ownership, reason
+codes, scope, retry rules, volume caps, and review dates. The default v1 policy
+is fail closed: required `deferred` units block completion, and required
+`failed_final` units fail the run.
 
 ## OLS Pre-Analysis Preparation
 

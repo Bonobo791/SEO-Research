@@ -14,7 +14,9 @@ and the Jul 2026 code review of the Slice 5 test diff (code / tests only —
 doc follow-ups stay in S476-38, S476-47, S476-14, etc.), the Jul 2026
 second senior QA diff review (code / tests only), and Phase 4.77 Slice 1
 (DataForSEO schema contracts in `dataforseo.py`), and the Jul 2026 Phase 5
-Slices 3–4 code review (guardrails, Spearman/BH, `analyze` wiring). Each item names
+Slices 3–4 code review (guardrails, Spearman/BH, `analyze` wiring), and the Jul 2026
+code review of stored-run stale SERP replay (`expand_stored_run`, `merge_keyword_results`,
+`load_stored_serp_statuses`). Each item names
 the **phase/slice** where it should land. Nothing here blocks Slice 10 sign-off
 unless marked **required**.
 
@@ -311,6 +313,21 @@ if none of these block deps/docs/round-trip work.
 | S6-07 | Test `run --stored-run` failure path (e.g. missing `run.json`) → exit code `2` without traceback | 4.5 Slice 6 | nice-to-have | open |
 | S6-08 | Replace private `parser._actions` introspection in `test_cli_surfaces.py` with public argv round-trips only | 4.5 Slice 6 | nice-to-have | open |
 | S6-09 | Optional: `replay` re-normalize path — derive curated rows from one `response_id` (beyond printing raw `response_body_bytes`) | 4.5 Slice 6 | planned | open |
+
+### Stored-run stale SERP replay (Jul 2026 code review)
+
+Follow-ups from the code review of `feat: refresh stale stored SERPs on stored-run
+replay` (`load_stored_serp_statuses`, `merge_keyword_results`, raw-response
+replacement). None block the shipped behavior unless marked **required**.
+
+| ID | Fix | Phase | Priority | Status |
+| --- | --- | --- | --- | --- |
+| S6-10 | `load_stored_serp_statuses` OR semantics: if parquet has multiple `endpoint=serp` rows per keyword (failed replay + older success), any usable row skips refresh and failed rows are retained — prefer latest-wins or any-failure-forces-refresh if duplicate SERP rows are possible | 4.5 Slice 6 | nice-to-have | open |
+| S6-11 | Document or extend refresh criteria beyond SERP: keywords with usable SERP but stale/missing `page_text` or `entities` are not re-fetched today (`keywords_to_refresh` is SERP-only) | 4.5 Slice 6 | nice-to-have | open |
+| S6-12 | Deduplicate DataForSEO task-failure semantics: `stored_serp_response_is_usable()` and `raise_for_failed_dataforseo_tasks()` both interpret `status_code != 20000` — extract a shared helper so live validation and stored usability cannot drift | 4.5 Slice 6 | nice-to-have | open |
+| S6-13 | Restore no-op replay fast path or cache: every `--stored-run` replay scans SERP parquet via `load_stored_serp_statuses` even when `keyword_limit` is unchanged and all SERPs are usable (early return removed from `replay_stored_run`) | 4.5 Slice 6 | nice-to-have | open |
+| S6-14 | Add unit tests for `merge_keyword_results()`: refreshed result overrides stored for the same keyword, `CliCommandError` when a `target_keywords` entry has no stored or refreshed result, case-insensitive keyword matching | 4.5 Slice 6 | nice-to-have | open |
+| S6-15 | Restore CLI test that stored-run live replay exits `2` when a stale keyword's SERP refresh hits `raise_for_failed_dataforseo_tasks` (replaces removed `test_run_stored_run_live_expansion_reports_serp_task_error` failure-path coverage) | 4.5 Slice 6 | nice-to-have | open |
 
 ---
 
