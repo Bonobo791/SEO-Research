@@ -97,7 +97,7 @@ confirmatory keyword holdout (Phase 5.4), passage-level Plackett-Luce analysis.
 
 #### Dev slices
 
-**Progress:** 11 of 31 shipped, 20 open.
+**Progress:** 16 of 31 shipped, 2 partial, 13 open.
 
 1. **[x] Slice 1 — Estimand & analysis spec**
    - Add `analysis_spec.v1.yaml`: outcome (`-log(serp_rank)`), predictors,
@@ -175,17 +175,13 @@ confirmatory keyword holdout (Phase 5.4), passage-level Plackett-Luce analysis.
    - Wire `influential_rows_rate` warn guardrail from pooled influence counts
      (spec threshold 5%; deferred from Slice 6).
 
-9. **[ ] Slice 9 — Stats artifacts & CLI**
-   - `stats_summary.json`: estimand version, guardrails, per-backend ρ, BH
-     q-values, pooled coefficients + clustered CIs, effect-size translation,
-     `actionable_association`, **`limitations` per rank depth** (observational,
-     depth-specific truncation, no causal claims, measurement-error
-     conservatism), nested under `rank_depths` with top-20 compat shim.
-   - `stats_diagnostics.json`: diagnostic flags, influence counts, multivariate
-     VIF, influence_sensitivity, optional two-way-cluster CIs.
-   - `stats_report.md`: human summary mirroring JSON limitations.
-   - Wire `seo-rank analyze`; link from `report.md`; exit 1 on hard-fail;
-     `--no-fail-on-guardrails`; respect dry-run / fixture skip contract.
+9. **[~] Slice 9 — Stats artifacts & CLI**
+   - **Done:** `stats_summary.json`, `stats_diagnostics.json`, `stats_report.md`
+     with nested `rank_depths`; `seo-rank analyze` and post-run
+     `materialize_run_tree()` call `run_phase5_stats()`; exit **1** on guardrail
+     hard-fail; dry-run / fixture runs skip stats.
+   - **Remaining:** `--no-fail-on-guardrails`; link from `report.md` to
+     `stats/stats_report.md`.
 
 10. **[ ] Slice 10 — Golden fixtures & tests**
     - Synthetic `analysis_mart` with known ρ and pooled slope per backend.
@@ -291,48 +287,50 @@ any DataForSEO network calls. Works for **existing runs** (`--stored-run`) and
 the existing `raw_responses` lake using `endpoint=entities`, `provider=textrazor`
 (same `RAW_RESPONSE_SCHEMA` as DataForSEO rows; no partition collisions).
 
-21. **[ ] Slice 21 — TextRazor-only flags and gates**
-    - Add `--live-textrazor-only`, `--refresh-textrazor` to `seo-rank run`.
+21. **[x] Slice 21 — TextRazor-only flags and gates**
+    - `--live-textrazor-only`, `--refresh-textrazor` on `seo-rank run`.
     - Validation: mutual exclusion with `--live-providers` and `--skip-textrazor`;
       requires `SEO_RANK_ENABLE_TEXTRAZOR=1` + `TEXTRAZOR_API_KEY` only.
     - `prepare_textrazor_only_context(env)` — no DataForSEO credential check.
     - Persist flags in `run.json` `config`.
-    - Tests: flag combos, env gate, rejection messages.
+    - Tests: flag combos, env gate, rejection messages (`test_cli_run.py`).
 
-22. **[ ] Slice 22 — TextRazor ingest core**
+22. **[x] Slice 22 — TextRazor ingest core**
     - `TEXTRAZOR_ENDPOINTS` registry in `textrazor.py` (`entities` ships first).
     - `fetch_textrazor_entities_for_pages()`, `pages_missing_textrazor()`.
-    - Unit tests with injected transport.
+    - Unit tests with injected transport (`test_textrazor_ingest.py`).
 
-23. **[ ] Slice 23 — Raw lake merge for entities**
-    - `merge_raw_response_records()` + `rewrite_endpoint_partition()`.
-    - Dedupe `(target_keyword, url)` on `endpoint=entities`; refresh replaces
-      latest-wins (align with Phase 5.1 stale-SERP retention).
-    - Other endpoint partitions unchanged.
+23. **[x] Slice 23 — Raw lake merge for entities**
+    - `merge_raw_response_records()` + partition rewrite for `endpoint=entities`.
+    - Dedupe `(target_keyword, url)`; `--refresh-textrazor` latest-wins replace.
+    - Other endpoint partitions unchanged (`test_raw_response_merge.py`).
 
-24. **[ ] Slice 24 — Stored-run TextRazor backfill**
+24. **[x] Slice 24 — Stored-run TextRazor backfill**
     - `load_pages_for_textrazor()` from `raw_responses` `page_text` (authoritative).
     - `backfill_textrazor_run()` — no `build_live_keyword_result` / no DFS HTTP.
     - Update `run.json` entity summaries; `materialize_run_tree` refresh.
+    - Covered by `test_textrazor_backfill.py`.
 
-25. **[ ] Slice 25 — Brand-new TextRazor-only run**
-    - `write_textrazor_only_artifacts()`: fixture expansion/SERP/page_text,
-      live TextRazor, fixture similarity scoring.
-    - Zero `dataforseo.*` in `network_calls`.
+25. **[x] Slice 25 — Brand-new TextRazor-only run**
+    - `write_textrazor_only_artifacts()` / `build_textrazor_only_payload()`:
+      fixture expansion/SERP/page_text, live TextRazor, fixture similarity.
+    - `main()` dispatches when `--live-textrazor-only` without `--stored-run`.
+    - Zero `dataforseo.*` in `network_calls`; covered by `test_cli_run.py`.
 
-26. **[ ] Slice 26 — TextRazor-only tests and docs**
-    - CLI tests: new run, stored backfill, `--live-providers --live-textrazor`
-      regression.
-    - `README.md`, `TESTING.md`, `ARCHITECTURE.md` schema contract.
+26. **[~] Slice 26 — TextRazor-only tests and docs**
+    - **Done:** stored-run backfill (`test_textrazor_backfill.py`); CLI
+      flag/gate and brand-new textrazor-only run tests (`test_cli_run.py`).
+    - **Remaining:** cross-doc schema contract in `README.md`, `TESTING.md`,
+      `ARCHITECTURE.md`.
     - Optional TextRazor connectivity probe in `test_provider_connectivity.py`.
 
-**Example usage (after ship):**
+**Example usage:**
 
 ```bash
-# Brand-new: fixture structure + live TextRazor
+# Brand-new: fixture structure + live TextRazor (shipped)
 seo-rank run --seed "technical seo" --live-textrazor-only --output-dir runs/demo
 
-# Backfill entities on an existing run
+# Backfill entities on an existing run (shipped)
 seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-textrazor-only
 
 # Force re-fetch
@@ -394,14 +392,14 @@ seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-textrazor-on
 | Acceptance item | Slice(s) | Status |
 | --------------- | -------- | ------ |
 | `analysis_spec.v1.yaml` loaded; estimand version in outputs | 1, 2 | Shipped |
-| Guardrail hard-fail skips inference; warn surfaces in JSON | 3, 9 | Open |
-| Spearman + BH per backend when K ≥ 10 | 4 | Shipped |
-| Pooled regression with keyword-clustered SEs only in primary output | 5 | Shipped |
-| Effect-size translation + actionable_association rule | 5, 9 | Open |
-| Pooled diagnostics + influence % in diagnostics JSON | 6, 8 | Open |
+| Guardrail hard-fail skips inference; warn surfaces in JSON | 3, 9, 16–20 | Shipped (per depth) |
+| Spearman + BH per backend when K ≥ 10 | 4, 17 | Shipped |
+| Pooled regression with keyword-clustered SEs only in primary output | 5, 17 | Shipped |
+| Effect-size translation + actionable_association rule | 5, 9, 17 | Shipped (per depth) |
+| Pooled diagnostics + influence % in diagnostics JSON | 6, 8, 17 | Shipped (per depth; influence guardrail Slice 8 open) |
 | Multivariate sensitivity with VIF drop order | 7 | Open |
-| Limitations in JSON and Markdown | 9 | Open |
-| `seo-rank analyze` exit code + dry-run skip | 9 | Open |
+| Limitations in JSON and Markdown | 9, 19 | Shipped (per depth) |
+| `seo-rank analyze` exit code + dry-run skip | 9 | Partial (`--no-fail-on-guardrails` open) |
 | Golden fixture ρ/slope within tolerance | 10 | Open |
 | Within-keyword rank/pct/z columns in `analysis_mart.v2` | 11, 12 | Open |
 | Relative similarity robustness in `stats_diagnostics.json` | 13 | Open |
@@ -409,9 +407,11 @@ seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-textrazor-on
 | Parallel confirmatory rank depths (20/10/5/3) | 16–20 | Shipped |
 | `actionable_association_by_rank_depth` in summary JSON | 19 | Shipped |
 | `rank_depths` nested JSON + four `## Rank depth:` report sections | 19 | Shipped |
-| `--live-textrazor-only` without DataForSEO network | 21, 25 | Open |
-| Stored-run entity backfill merges `endpoint=entities` only | 23, 24 | Open |
-| `parquet/entities/` after textrazor-only ingest + normalize | 24–26 | Open |
+| `--live-textrazor-only` without DataForSEO network (stored-run backfill) | 21, 24 | Shipped |
+| `--live-textrazor-only` brand-new run (fixture structure + live TextRazor) | 25 | Shipped |
+| Stored-run entity backfill merges `endpoint=entities` only | 23, 24 | Shipped |
+| `parquet/entities/` after textrazor-only ingest + normalize | 21–25 | Shipped |
+| TextRazor cross-doc schema contract | 26 | Partial |
 | TextRazor signal registry and page-metrics mart | 27, 28 | Open |
 | Family-aware stats registry and combined artifacts | 29, 30 | Open |
 | Similarity + TextRazor golden fixtures and CLI tests | 31 | Open |
@@ -1048,6 +1048,14 @@ Slice 4. Slice 7 last.
   `## Rank depth:` sections in `stats_report.md`,
   `actionable_association_by_rank_depth`, leave-one-out IIA on `top_20` only;
   covered by `tests/unit/test_stats_rank_depth.py`.
+- **Phase 5 Slices 21–25 shipped (2026-07-02):** TextRazor-only ingestion path —
+  `--live-textrazor-only` / `--refresh-textrazor` CLI flags and gates,
+  `TEXTRAZOR_ENDPOINTS` registry, `fetch_textrazor_entities_for_pages()`,
+  `merge_raw_response_records()` for `endpoint=entities`, stored-run backfill
+  via `backfill_textrazor_run()`, and brand-new runs via
+  `write_textrazor_only_artifacts()` (fixture DataForSEO structure + live
+  TextRazor, zero `dataforseo.*` in `network_calls`). Cross-doc schema contract
+  (slice 26) remains open.
 - **Phase 5.1 planned (2026-07-02):** live provider fail-fast on fatal DataForSEO
   task errors (`40207` IP whitelist, auth failures) — shared classifier, abort on
   all live endpoints, optional preflight, CLI flag override on stored-run replay,

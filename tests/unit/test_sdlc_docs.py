@@ -56,6 +56,8 @@ def test_readme_documents_cli_capabilities() -> None:
     assert "--live-bge" in readme
     assert "--live-gemini" in readme
     assert "--live-textrazor" in readme
+    assert "--live-textrazor-only" in readme
+    assert "--refresh-textrazor" in readme
     assert "Phase 5 stats" in readme
     assert "Fresh data" in readme
     assert "Resume stored run in place" in readme
@@ -71,7 +73,7 @@ def test_stored_run_docs_describe_partial_resume_and_current_suite_status() -> N
     assert "reuses existing raw responses" in readme
     assert "`--stored-run` resumes partial runs in place" in architecture
     assert "refreshes only missing work" in architecture
-    assert "242 tests collected; 241 passing; 1 skipped" in testing
+    assert "253 tests collected; 253 passing" in testing
     assert "resumes from the saved raw lake" in roadmap
 
 
@@ -143,8 +145,8 @@ def test_phase_45_slice_9_regression_sweep_marks_mart_sink_docs_as_shipped() -> 
     assert "Phase 4.5 Slice 9 shipped" in roadmap
     assert "Phase 4.5 Slice 10 shipped" in roadmap
     assert "Phase 4.5 signed off" in roadmap
-    assert "242 tests" in architecture
-    assert "242 tests collected; 241 passing; 1 skipped" in testing
+    assert "253 tests" in architecture
+    assert "253 tests collected; 253 passing" in testing
     assert "sink feature marts lazily with Parquet statistics" in testing
 
 
@@ -263,6 +265,31 @@ def test_phase_5_rank_depth_slices_are_documented() -> None:
     assert "test_stats_rank_depth.py" in testing
     assert "actionable_association_by_rank_depth" in readme
     assert "Rank-depth confirmatory paths" in plan_review
+
+
+def test_textrazor_only_ingestion_docs_cross_link() -> None:
+    goals = (ROOT / "GOALS.md").read_text(encoding="utf-8")
+    roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
+    architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
+    testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "**[x] Slice 21 — TextRazor-only flags and gates**" in goals
+    assert "**[x] Slice 24 — Stored-run TextRazor backfill**" in goals
+    assert "**[x] Slice 25 — Brand-new TextRazor-only run**" in goals
+    assert "Phase 5 Slices 21–25 shipped" in roadmap
+    assert "endpoint=entities" in architecture
+    assert "test_textrazor_backfill.py" in testing
+    assert "Backfill live TextRazor on a stored run" in readme
+    assert "Brand-new run with live TextRazor only" in readme
+
+
+def test_phase_5_progress_counts_are_aligned() -> None:
+    goals = (ROOT / "GOALS.md").read_text(encoding="utf-8")
+    roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
+
+    assert "16 of 31 shipped, 2 partial, 13 open" in goals
+    assert "16 of 31 shipped, 2 partial, 13 open" in roadmap
 
 
 def test_phase_6_plans_workflow_integrity_guardrails() -> None:

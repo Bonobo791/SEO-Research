@@ -5,9 +5,12 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.dataset as ds
 import pyarrow.parquet as pq
+import pytest
 
 from seo_rank.dataforseo import DataForSeoClientError
 from seo_rank.dataforseo import fixture_keyword_expansion_response
+from seo_rank.dataforseo import fixture_page_text_response
+from seo_rank.dataforseo import fixture_serp_response
 from seo_rank.cli import RAW_RESPONSE_SCHEMA
 from seo_rank.cli import build_raw_response_record
 from seo_rank.cli import main
@@ -216,7 +219,13 @@ def test_run_persists_textrazor_only_and_refresh_flags_in_run_json(
     monkeypatch,
 ) -> None:
     output_dir = tmp_path / "artifacts"
+    monkeypatch.setenv("SEO_RANK_ENABLE_TEXTRAZOR", "1")
+    monkeypatch.setenv("TEXTRAZOR_API_KEY", "textrazor-secret")
     monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
+    monkeypatch.setattr(
+        "seo_rank.cli.DEFAULT_TEXTRAZOR_TRANSPORT",
+        lambda **kwargs: {"response": {"entities": []}},
+    )
 
     exit_code = main(
         [
@@ -235,6 +244,182 @@ def test_run_persists_textrazor_only_and_refresh_flags_in_run_json(
     payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
     assert payload["config"]["live_textrazor_only"] is True
     assert payload["config"]["refresh_textrazor"] is True
+
+
+def test_run_live_textrazor_only_dispatches_to_dedicated_writer(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.setenv("SEO_RANK_ENABLE_TEXTRAZOR", "1")
+    monkeypatch.setenv("TEXTRAZOR_API_KEY", "textrazor-secret")
+    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
+
+    called: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def record_writer(*args, **kwargs) -> None:
+        called.append((args, kwargs))
+
+    monkeypatch.setattr("seo_rank.cli.write_textrazor_only_artifacts", record_writer)
+    monkeypatch.setattr(
+        "seo_rank.cli.write_offline_artifacts",
+        lambda *args, **kwargs: pytest.fail("live-textrazor-only should not use offline artifacts"),
+    )
+    monkeypatch.setattr(
+        "seo_rank.cli.write_live_artifacts",
+        lambda *args, **kwargs: pytest.fail("live-textrazor-only should not use live-provider artifacts"),
+    )
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--output-dir",
+            str(output_dir),
+            "--live-textrazor-only",
+        ]
+    )
+
+    assert exit_code == 0
+    assert len(called) == 1
+
+
+def test_run_live_textrazor_only_uses_offline_dataforseo_fixtures_and_live_textrazor(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.setenv("SEO_RANK_ENABLE_TEXTRAZOR", "1")
+    monkeypatch.setenv("TEXTRAZOR_API_KEY", "textrazor-secret")
+    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
+    monkeypatch.delenv("DATAFORSEO_LOGIN", raising=False)
+    monkeypatch.delenv("DATAFORSEO_PASSWORD", raising=False)
+
+    keyword_expansion_calls: list[str] = []
+    serp_calls: list[str] = []
+    page_text_calls: list[str] = []
+    textrazor_requests: list[dict[str, object]] = []
+
+    def record_keyword_expansion(seed: str) -> dict[str, object]:
+        keyword_expansion_calls.append(seed)
+        return fixture_keyword_expansion_response(seed)
+
+    def record_serp(keyword: str) -> dict[str, object]:
+        serp_calls.append(keyword)
+        return fixture_serp_response(keyword)
+
+    def record_page_text(url: str, keyword: str) -> dict[str, object]:
+        page_text_calls.append(url)
+        return fixture_page_text_response(url, keyword)
+
+    def dataforseo_transport(*args, **kwargs) -> dict[str, object]:
+        raise AssertionError("live-textrazor-only should not call DataForSEO transport")
+
+    def textrazor_transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        textrazor_requests.append(
+            {
+                "method": method,
+                "url": url,
+                "headers": headers,
+                "body": body,
+                "timeout": timeout,
+            }
+        )
+        return {
+            "response": {
+                "entities": [
+                    {
+                        "entityId": "technical-seo-live",
+                        "matchedText": "Technical SEO",
+                        "confidenceScore": 9,
+                        "relevanceScore": 0.99,
+                        "type": ["Topic"],
+                    }
+                ]
+            }
+        }
+
+    monkeypatch.setattr("seo_rank.cli.fixture_keyword_expansion_response", record_keyword_expansion)
+    monkeypatch.setattr("seo_rank.cli.fixture_serp_response", record_serp)
+    monkeypatch.setattr("seo_rank.cli.fixture_page_text_response", record_page_text)
+    monkeypatch.setattr("seo_rank.cli.fixture_entity_response", lambda *args, **kwargs: pytest.fail("offline TextRazor fixtures should not be used"))
+    monkeypatch.setattr("seo_rank.cli.DEFAULT_DATAFORSEO_TRANSPORT", dataforseo_transport)
+    monkeypatch.setattr("seo_rank.cli.DEFAULT_TEXTRAZOR_TRANSPORT", textrazor_transport)
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--depth",
+            "3",
+            "--output-dir",
+            str(output_dir),
+            "--live-textrazor-only",
+        ]
+    )
+
+    assert exit_code == 0
+    assert keyword_expansion_calls == ["technical seo"]
+    assert serp_calls == ["technical seo"]
+    assert page_text_calls == [
+        "https://example.com/technical-seo/1",
+        "https://example.com/technical-seo/2",
+        "https://example.com/technical-seo/3",
+    ]
+    assert len(textrazor_requests) == 3
+    assert all(
+        request["body"].startswith(b"extractors=entities&text=")
+        and b"Fixture+Page" in request["body"]
+        for request in textrazor_requests
+    )
+
+    payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
+    assert payload["keywords"] == ["technical seo"]
+    assert payload["network_calls"] == ["textrazor.entities"]
+    assert payload["keyword_results"][0]["textrazor_entities"]
+    assert payload["keyword_results"][0]["textrazor_entities"] == payload["textrazor_entities"]
+    assert all(
+        not call.startswith("dataforseo.")
+        for call in payload["network_calls"]
+    )
+    assert payload["keyword_results"][0]["textrazor_entities"] == [
+        {
+            "url": "https://example.com/technical-seo/1",
+            "entity_id": "technical-seo-live",
+            "matched_text": "Technical SEO",
+            "confidence": 9.0,
+            "relevance": 0.99,
+            "types": ["Topic"],
+            "target_keyword": "technical seo",
+        },
+        {
+            "url": "https://example.com/technical-seo/2",
+            "entity_id": "technical-seo-live",
+            "matched_text": "Technical SEO",
+            "confidence": 9.0,
+            "relevance": 0.99,
+            "types": ["Topic"],
+            "target_keyword": "technical seo",
+        },
+        {
+            "url": "https://example.com/technical-seo/3",
+            "entity_id": "technical-seo-live",
+            "matched_text": "Technical SEO",
+            "confidence": 9.0,
+            "relevance": 0.99,
+            "types": ["Topic"],
+            "target_keyword": "technical seo",
+        },
+    ]
 
 
 def test_run_materializes_feature_marts_analysis_and_stats_for_fresh_runs(

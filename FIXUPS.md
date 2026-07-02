@@ -479,7 +479,7 @@ None block merge unless marked **required**.
 
 | ID | Fix | Phase | Priority | Status |
 | --- | --- | --- | --- | --- |
-| S5-12 | Sync unit baseline in `TESTING.md` and `test_sdlc_docs.py`: suite is **212 collected / 212 passing / 0 skipped** today; docs still assert **211 passing / 1 skipped** (extends S5-01 / S476-22) | 5 docs | nice-to-have | open |
+| S5-12 | Sync unit baseline in `TESTING.md` and `test_sdlc_docs.py`: suite is **253 collected / 253 passing** today (extends S5-01 / S476-22) | 5 docs | nice-to-have | done |
 | S5-13 | Plackett-Luce unstable fits: when `main_model.status == "unstable"` (optimizer non-convergence or Hessian condition number above threshold), promote backend-level `status` to `"unstable"` or document that consumers must check `convergence_confirmed` / `main_model.status`, not only `backends[*].status` | 5 stats | nice-to-have | open |
 | S5-14 | Update `analysis_spec.v1.yaml` `effect_size.note`: regression/PL now use `within_keyword_sd_rms()` (RMS of per-keyword SDs), not pooled panel standard deviation of the score column | 6.1 Slice 1 | nice-to-have | open |
 | S5-15 | `_two_way_cluster_sensitivity()` in `regression.py` assumes `feature_result.model.exog_names[1]` is the similarity column — pass `fit.score_column` from `BackendRegressionFit` instead of positional index | 6.1 Slice 1 | nice-to-have | open |

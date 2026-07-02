@@ -8,7 +8,7 @@ import re
 import sys
 import shutil
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -159,6 +159,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             if args.stored_run is not None:
                 replay_stored_run(Path(args.stored_run), config, progress=progress)
+            elif config.live_textrazor_only:
+                write_textrazor_only_artifacts(
+                    config,
+                    os.environ,
+                    progress=progress,
+                )
             elif config.live_providers:
                 write_live_artifacts(config, os.environ, progress=progress)
             else:
@@ -439,6 +445,25 @@ def write_live_artifacts(
         textrazor_transport=DEFAULT_TEXTRAZOR_TRANSPORT,
         progress=progress,
     )
+    if progress is not None:
+        progress.log("run: writing artifacts")
+    write_artifacts(config.output_dir, payload, progress=progress)
+    materialize_run_tree(
+        config.output_dir,
+        progress=progress,
+        phase_label="run",
+        respect_dry_run=True,
+    )
+
+
+def write_textrazor_only_artifacts(
+    config: RunConfig,
+    env: Mapping[str, str],
+    *,
+    progress: RunProgress | None = None,
+) -> None:
+    config.output_dir.mkdir(parents=True, exist_ok=True)
+    payload = build_textrazor_only_payload(config, env=env, progress=progress)
     if progress is not None:
         progress.log("run: writing artifacts")
     write_artifacts(config.output_dir, payload, progress=progress)
@@ -1445,6 +1470,75 @@ def build_offline_payload(
     )
 
 
+def build_textrazor_only_payload(
+    config: RunConfig,
+    *,
+    env: Mapping[str, str],
+    progress: RunProgress | None = None,
+) -> dict[str, object]:
+    if progress is not None:
+        progress.log("run: starting textrazor-only")
+    credentials = prepare_textrazor_only_context(env)
+    keyword_expansion = fixture_keyword_expansion_response(config.seed)
+    keywords = normalize_keyword_expansion(
+        keyword_expansion,
+        seed=config.seed,
+        limit=config.keyword_limit,
+    )
+    if progress is not None:
+        progress.log(f"run: expanded {len(keywords)} keywords")
+    keyword_results = []
+    live_textonly_config = replace(config, skip_textrazor=True)
+    for index, keyword in enumerate(keywords, start=1):
+        keyword_results.append(
+            build_textrazor_only_keyword_result(
+                live_textonly_config,
+                target_keyword=keyword,
+                credentials=credentials,
+                progress=progress,
+            )
+        )
+        if progress is not None:
+            progress.keyword_step(index, len(keywords), keyword, "done")
+    raw_provider_data: dict[str, object] = {
+        "dataforseo": {
+            "keyword_expansion": keyword_expansion,
+            "page_text": [
+                response
+                for keyword_result in keyword_results
+                for response in keyword_result["raw_provider_data"]["dataforseo"][
+                    "page_text"
+                ]
+            ],
+            "serp": [
+                keyword_result["raw_provider_data"]["dataforseo"]["serp"]
+                for keyword_result in keyword_results
+            ],
+        },
+    }
+    textrazor_responses = [
+        response
+        for keyword_result in keyword_results
+        if "textrazor" in keyword_result["raw_provider_data"]
+        for response in keyword_result["raw_provider_data"]["textrazor"]["entities"]
+    ]
+    if textrazor_responses:
+        raw_provider_data["textrazor"] = {
+            "entities": textrazor_responses,
+        }
+    network_calls = ["textrazor.entities"] if textrazor_responses else []
+    assert all(
+        not call.startswith("dataforseo.") for call in network_calls
+    ), "live-textrazor-only must not record DataForSEO network calls"
+    return build_payload_from_keyword_results(
+        config,
+        keywords=keywords,
+        keyword_results=keyword_results,
+        raw_provider_data=raw_provider_data,
+        network_calls=network_calls,
+    )
+
+
 def prepare_live_run_context(
     config: RunConfig,
     *,
@@ -1482,6 +1576,71 @@ def prepare_live_run_context(
         "textrazor_credentials": textrazor_credentials,
         "location_code": dataforseo_location_code(config.location),
     }
+
+
+def build_textrazor_only_keyword_result(
+    config: RunConfig,
+    *,
+    target_keyword: str,
+    credentials: TextRazorCredentials,
+    progress: RunProgress | None = None,
+) -> dict[str, object]:
+    keyword_result = build_offline_keyword_result(
+        config,
+        target_keyword=target_keyword,
+        progress=progress,
+    )
+    raw_provider_data = keyword_result.get("raw_provider_data", {})
+    dataforseo_data: Mapping[str, object] | None = (
+        raw_provider_data if isinstance(raw_provider_data, Mapping) else None
+    )
+    dataforseo_pages = (
+        dataforseo_data.get("dataforseo", {})
+        if dataforseo_data is not None
+        else {}
+    )
+    page_text_responses: list[Mapping[str, object]] = []
+    if isinstance(dataforseo_pages, Mapping):
+        page_text_responses = [
+            response
+            for response in dataforseo_pages.get("page_text", [])
+            if isinstance(response, Mapping)
+        ]
+    parsed_pages = [
+        page_text
+        for response in page_text_responses
+        for page_text in [parsed_page_text(response)]
+        if page_text
+    ]
+    textrazor_pages = pages_missing_textrazor(
+        [
+            annotate_target_keyword(page_text, target_keyword)
+            for page_text in parsed_pages
+        ]
+    )
+    if progress is not None:
+        progress.keyword_log(
+            target_keyword,
+            f"textrazor entities ({len(textrazor_pages)} pages)",
+        )
+    textrazor_responses = fetch_textrazor_entities_for_pages(
+        textrazor_pages,
+        credentials=credentials,
+        transport=DEFAULT_TEXTRAZOR_TRANSPORT,
+    )
+    textrazor_entities = [
+        annotate_target_keyword(entity, target_keyword)
+        for response in textrazor_responses
+        for entity in normalize_entities(response, url=str(response["url"]))
+    ]
+
+    raw_provider_data = keyword_result.get("raw_provider_data", {})
+    if isinstance(raw_provider_data, dict):
+        raw_provider_data["textrazor"] = {
+            "entities": textrazor_responses,
+        }
+    keyword_result["textrazor_entities"] = textrazor_entities
+    return keyword_result
 
 
 def build_offline_keyword_result(

@@ -14,7 +14,7 @@ Pytest configuration and verification contract for SEO-Research.
   interpreter
 - Lint / type-check / build / coverage: not configured
 - Expected test duration: fast (< 1s)
-- **Current verification status:** 242 tests collected; 241 passing; 1 skipped
+- **Current verification status:** 253 tests collected; 253 passing
 
 ## Active Verification Command
 
@@ -50,7 +50,7 @@ placeholders only.
 
 | Test file | What it verifies |
 |-----------|------------------|
-| `test_cli_run.py` | CLI writes grouped per-keyword artifacts, including BGE, Gemini Doc Retrieval, and Gemini Semantic Similarity rows; run-scoped `raw_responses` Parquet + `run.json` catalog metadata; offline TextRazor include/skip; TextRazor-only config gating and helper validation; explicit live-provider gates; stored-run partial resume/backfill, stale SERP refresh, and no-op replay coverage; opt-in live Gemini, BGE, and TextRazor orchestration |
+| `test_cli_run.py` | CLI writes grouped per-keyword artifacts, including BGE, Gemini Doc Retrieval, and Gemini Semantic Similarity rows; run-scoped `raw_responses` Parquet + `run.json` catalog metadata; offline TextRazor include/skip; TextRazor-only flags (`--live-textrazor-only`, `--refresh-textrazor`), env gates, and mutual-exclusion errors; explicit live-provider gates; stored-run partial resume/backfill, stale SERP refresh, and no-op replay coverage; opt-in live Gemini, BGE, and TextRazor orchestration |
 | `test_run_progress.py` | `seo-rank run` stderr progress: run phases, per-keyword substeps, progress bar, artifact-write logs |
 | `test_cli_surfaces.py` | Phase 4.5 storage CLI: subcommand parser wiring, `normalize` / `build-features` / `analyze` / `replay` dispatch, missing feature-mart backfill on `analyze`, `run --stored-run` routing, exit code `2` on storage errors and unknown keyword/response |
 | `test_run_normalize.py` | Stored `raw_responses` normalize into curated Parquet tables (including `similarity_scores` copied from `run.json` `page_similarity`, `page_content_fields`) via lazy scan + batch UDFs; refresh the run catalog |
@@ -64,6 +64,10 @@ placeholders only.
 | `test_stats_regression.py` | Pooled baseline and per-backend feature regressions with keyword-clustered SEs, effect-size translation, two-way-cluster sensitivity, and regression artifact emission on passing panels |
 | `test_stats_plackett_luce.py` | Page-level Plackett-Luce rank-ordered logit summaries, partial-ranking handling, optimizer / leave-one-out IIA diagnostics, and PL artifact emission on passing panels |
 | `test_stats_rank_depth.py` | Rank-depth confirmatory slices: spec accessors, panel filtering, per-depth Spearman/OLS/PL, monotonic row counts, `rank_depths` JSON + report sections |
+| `test_stats_scale.py` | Within-keyword and global z-score helpers (`stats.scale`) for OLS/PL effect-size contract |
+| `test_textrazor_ingest.py` | TextRazor endpoint registry, page entity fetch, and dedupe helpers with injected transport |
+| `test_textrazor_backfill.py` | Stored-run TextRazor backfill: `load_pages_for_textrazor`, `--stored-run --live-textrazor-only` CLI path, no DataForSEO HTTP |
+| `test_raw_response_merge.py` | `merge_raw_response_records` for `endpoint=entities` dedupe and refresh semantics |
 | `test_round_trip.py` | Dedicated Parquet lake write → normalize → build-features → analyze round-trip regression sweep on real Parquet artifacts; validates `run.json` updates and keyword-filtered `analyze` output |
 | `test_keyword_expansion.py` | 1-keyword default, deduplication, raw provider payload |
 | `test_serp_normalization.py` | Organic-only SERP rows, depth cap |
@@ -139,6 +143,27 @@ exist.
   RESET, Breusch–Pagan with HC3 recommendation, Cook's D and influence flags,
   small-sample Shapiro as informational, skipped-backend diagnostics, and
   `stats_diagnostics.json` / `stats_report.md` emission on passing panels.
+
+## Shipped tests — TextRazor-only ingestion (slices 21–25)
+
+- **CLI flags and gates** — `tests/unit/test_cli_run.py` covers
+  `--live-textrazor-only` / `--refresh-textrazor` persistence, mutual exclusion
+  with `--live-providers` and `--skip-textrazor`, and env-gated credential
+  validation without DataForSEO credentials.
+- **Brand-new textrazor-only run** — `test_cli_run.py` covers
+  `write_textrazor_only_artifacts()` dispatch, fixture DataForSEO
+  expansion/SERP/page_text (no HTTP transport), live TextRazor entity fetch, and
+  `network_calls == ["textrazor.entities"]`.
+- **Ingest core** — `tests/unit/test_textrazor_ingest.py` covers
+  `TEXTRAZOR_ENDPOINTS`, `fetch_textrazor_entities_for_pages()`, and
+  `pages_missing_textrazor()` with injected transport.
+- **Raw lake merge** — `tests/unit/test_raw_response_merge.py` covers
+  `merge_raw_response_records()` dedupe on `(target_keyword, url)` and
+  `--refresh-textrazor` latest-wins replace for `endpoint=entities` only.
+- **Stored-run backfill** — `tests/unit/test_textrazor_backfill.py` covers
+  `load_pages_for_textrazor()` (raw `page_text` authoritative over curated
+  `pages`) and the `--stored-run --live-textrazor-only` CLI path with zero
+  DataForSEO network calls.
 
 ## Planned tests (not yet in suite) — Phase 5 active scope
 

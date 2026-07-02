@@ -33,6 +33,8 @@ Use these commands in order. Each step reads or extends the same run tree under
 | **Analysis mart + stats** | `seo-rank analyze --run runs/RUN_ID` |
 | **Inspect one keyword row** | `seo-rank analyze --run runs/RUN_ID --keyword "technical seo"` |
 | **Resume stored run in place** | `seo-rank run --seed "technical seo" --stored-run runs/RUN_ID` |
+| **Backfill live TextRazor on stored run** | `seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-textrazor-only` |
+| **Brand-new run with live TextRazor only** | `seo-rank run --seed "technical seo" --live-textrazor-only --output-dir runs/demo` |
 | **Expand existing run in place** | `seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --keyword-limit 25` |
 | **Audit one raw HTTP response** | `seo-rank replay --run runs/RUN_ID --response-id RESPONSE_ID` |
 | **Live provider smoke** (DataForSEO; optional Gemini/BGE/TextRazor) | See [Live providers](#live-providers) below |
@@ -58,6 +60,24 @@ to extend the original seed in place.
 
 ```bash
 seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --keyword-limit 25
+```
+
+**Backfill live TextRazor on a stored run** (no DataForSEO network; requires
+`SEO_RANK_ENABLE_TEXTRAZOR=1` and `TEXTRAZOR_API_KEY` in `.env`):
+
+```bash
+seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-textrazor-only
+```
+
+Pass `--refresh-textrazor` to replace existing `endpoint=entities` rows for the
+same `(target_keyword, url)` keys.
+
+**Brand-new run with live TextRazor only** uses offline DataForSEO fixtures for
+keyword expansion, SERP, and page text, then calls live TextRazor for entities.
+No DataForSEO HTTP and no `dataforseo.*` entries in `network_calls`:
+
+```bash
+seo-rank run --seed "technical seo" --live-textrazor-only --output-dir runs/demo
 ```
 
 **Typical offline research path:**
@@ -198,7 +218,7 @@ runs/{run_id}/
   run.json
   report.md
   parquet/
-    raw_responses/endpoint={keyword_expansion|serp|page_text}/part-*.parquet
+    raw_responses/endpoint={keyword_expansion|serp|page_text|entities}/part-*.parquet
     keywords/part-*.parquet
     serp_items/part-*.parquet
     pages/part-*.parquet
@@ -239,6 +259,8 @@ Fetch or fixture provider data, score pages, write `run.json`, `report.md`, and
 | `--live-bge` | off | Live BGE reranking (requires `--live-providers`) |
 | `--live-gemini` | off | Live Gemini embeddings (requires `--live-providers`) |
 | `--live-textrazor` | off | Live TextRazor (requires `--live-providers`) |
+| `--live-textrazor-only` | off | Live TextRazor without DataForSEO HTTP: brand-new runs use fixture expansion/SERP/page_text; with `--stored-run`, backfills entities from stored `page_text`. Requires `SEO_RANK_ENABLE_TEXTRAZOR=1`; mutually exclusive with `--live-providers` and `--skip-textrazor` |
+| `--refresh-textrazor` | off | Replace existing `endpoint=entities` rows when backfilling TextRazor |
 
 ```bash
 # Offline defaults (1 keyword, progress on stderr)
@@ -287,7 +309,7 @@ response.
 |------|---------|
 | `src/seo_rank/` | CLI, provider boundaries, `progress.py` (stderr run logging) |
 | `src/seo_rank/data/` | Polars lake transforms: `scans`, `normalize`, `features`, `marts`, `validate` |
-| `src/seo_rank/stats/` | Phase 5 observational analysis (`spec`, `panel`, `rank_depth`, `spearman`, `regression`, `plackett_luce`, `diagnostics`, `artifacts`) |
+| `src/seo_rank/stats/` | Phase 5 observational analysis (`spec`, `panel`, `rank_depth`, `spearman`, `regression`, `plackett_luce`, `diagnostics`, `scale`, `artifacts`) |
 | `tests/unit/` | pytest unit tests |
 | `ARCHITECTURE.md` | Product architecture, data flow, planned pipeline |
 | `GOALS.md` | Active-scope contract |

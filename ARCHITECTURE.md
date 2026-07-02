@@ -8,9 +8,9 @@
 - Test directory: `tests/`
 - Package manifest: `pyproject.toml`
 - Analysis library: `polars` (lazy Parquet lake, Phase 4.5); `statsmodels` for
-  observational ranking models (planned; not yet a runtime dependency); `numpy`,
-  `scipy`, `patsy`, and `linearmodels` for OLS diagnostics, IV/panel extensions,
-  and supporting tests (planned)
+  observational ranking models (Phase 5 shipped); `numpy`, `scipy`, `patsy`, and
+  `linearmodels` for OLS diagnostics, IV/panel extensions, and supporting tests
+  (planned)
 - Similarity backends: deterministic fixture passage aggregation plus
   offline-testable page-level fixtures for **BGE**, **Gemini Doc Retrieval**, and
   **Gemini Semantic Similarity**. **Live Gemini execution is wired** for the CLI
@@ -89,26 +89,29 @@ The repository contains an **offline-verifiable CLI scaffold** (Phase 1 shipped)
   `build-features`, `analyze`, `replay`, and `run --stored-run`, which resumes
   partial runs in place from the stored lake before re-materializing downstream
   marts
-- **Tests:** 242 tests under `tests/`; gate: `python -m pytest`; Phase 4.5 Slice 7
+- **Tests:** 253 tests under `tests/`; gate: `python -m pytest`; Phase 4.5 Slice 7
   shipped the round-trip regression sweep in `test_sdlc_docs.py`
 - **Product docs:** `ARCHITECTURE.md`, `GOALS.md`, `ROADMAP.md`, `README.md`,
   `TESTING.md`
 - **Not yet:** multivariate sensitivity, influence robustness appendix, golden
-  fixtures, and final CLI stats expansion (Phase 5 slices 7–10, 15)
+  fixtures, and `--no-fail-on-guardrails` (Phase 5 slices 7–8, 10; slice 9 partial;
+  slice 26 partial for TextRazor cross-doc schema)
 
 Module and artifact details are in [Application Surface](#application-surface)
 and [Key Product Components](#key-product-components) below. Phase 5 slices 1–6
 and 16–20 ship the estimand spec, stats package, guardrails, Spearman/BH primary
 path, pooled regression, pooled diagnostics, and parallel confirmatory rank
 depths (top 20 / 10 / 5 / 3); multivariate sensitivity, influence robustness,
-golden fixtures, and final CLI expansion continue in slices 7–10 and 15.
+golden fixtures, and remaining CLI polish continue in slices 7–8, 10, and 9
+(partial).
 
 ## Key Product Components
 
 - **CLI (shipped):** `seo-rank run` — seed keyword, location, language, device,
   depth, `--keyword-limit`, output directory, model name, `--dry-run`,
-  `--skip-textrazor`, stderr progress logging (`progress.py`). The removed
-  `--javascript-parsing` flag is no longer accepted.
+  `--skip-textrazor`, `--live-textrazor-only`, `--refresh-textrazor`, stderr
+  progress logging (`progress.py`). The removed `--javascript-parsing` flag is
+  no longer accepted.
 - **Provider fixtures + normalizers (shipped):** DataForSEO-shaped keyword/SERP/
   page-text fixtures; TextRazor entity fixtures (`dataforseo.py`, `textrazor.py`).
 - **Provider request boundaries (shipped):** DataForSEO keyword expansion,
@@ -134,8 +137,8 @@ golden fixtures, and final CLI expansion continue in slices 7–10 and 15.
   guardrails/panel prep, Spearman + BH, pooled OLS with clustered regression
   summaries, pooled OLS diagnostics, and parallel confirmatory rank-depth bundles
   at top 20 / 10 / 5 / 3. Multivariate sensitivity, influence robustness,
-  golden fixtures, and final CLI stats expansion remain in slices 7–10 —
-  see [Planned Per-Run Statistical Analysis](#planned-per-run-statistical-analysis).
+  golden fixtures, and remaining CLI polish (slice 9 partial) remain in slices
+  7–8 and 10 — see [Planned Per-Run Statistical Analysis](#planned-per-run-statistical-analysis).
   OLS / Plackett-Luce standardization, `analysis_mart.v2` relative ranks, and
   expanded reporting are **Phase 6.1** (`ROADMAP.md`).
 - **Reporters (shipped):** JSON + Markdown under the selected run root;
@@ -145,7 +148,7 @@ golden fixtures, and final CLI expansion continue in slices 7–10 and 15.
   plans workflow-integrity guardrails across stage boundaries; Phase 6.1 covers
   OLS/PL standardization polish, mart v2 relative ranks, robustness sensitivity,
   Plackett-Luce spec runtime wiring, and expanded report narrative sections.
-- **Storage (planned, Phase 4.5):** run-scoped Parquet lake with three processing
+- **Storage (shipped, Phase 4.5):** run-scoped Parquet lake with three processing
   layers — see [Run-scoped Parquet lake](#run-scoped-parquet-lake-phase-45) and
   [Polars data layer](#polars-data-layer-phase-45).
 
@@ -157,6 +160,12 @@ fixture passage aggregation plus page-level **BGE**, **Gemini Doc Retrieval**, a
 **Gemini Semantic Similarity** against the target keyword → optional TextRazor
 entities → grouped `keyword_results` plus `target_keyword`-annotated aggregate
 fields in `run.json` + `report.md`.
+
+**TextRazor-only run (slice 25):** seed keyword → fixture keyword expansion →
+fixture SERP and page text per keyword → live TextRazor entity extraction on
+parsed pages → fixture similarity scoring → `network_calls` contains
+`textrazor.entities` only (no DataForSEO HTTP) → full downstream materialization
+when not `--dry-run`.
 
 **Live run today (Phase 4):** seed keyword → keyword expansion → per-keyword
 top-20 SERP → page text → optional TextRazor entities → page similarity (fixture
@@ -170,15 +179,19 @@ Downstream work scans lazily via `pl.scan_parquet()`; `seo-rank normalize`,
 `run --stored-run` resumes partial runs in place from the saved raw lake and
 current `run.json`, reuses existing raw responses and completed
 measurements, refreshes only missing work, and then re-materializes the
-downstream chain. `analyze` backfills missing feature marts before writing
-`analysis_mart`. `raw_responses` stays out of normal analytical joins
-(replay/re-normalization only). Live DataForSEO payloads are not retained by
-the provider long-term.
+downstream chain. `run --stored-run --live-textrazor-only` backfills live
+TextRazor entities from stored `page_text` without DataForSEO HTTP (slice 24).
+`analyze` backfills missing feature marts before writing `analysis_mart` and
+runs Phase 5 stats unless the run manifest is dry-run. `raw_responses` stays
+out of normal analytical joins (replay/re-normalization only). Live DataForSEO
+payloads are not retained by the provider long-term.
 
-**Planned full pipeline (Phase 5+):** lazy Polars joins on `analysis_mart` →
+**Phase 5 stats today (partial):** lazy Polars joins on `analysis_mart` →
 guardrails → parallel confirmatory rank-depth bundles (top 20 / 10 / 5 / 3) →
 keyword-level Spearman ρ with BH per backend → pooled OLS with clustered SEs and
-diagnostics → page-level Plackett-Luce per depth → `runs/{run_id}/stats/` artifacts.
+diagnostics → page-level Plackett-Luce per depth → `runs/{run_id}/stats/`
+artifacts. Multivariate sensitivity, influence refit, golden fixtures, and
+`--no-fail-on-guardrails` remain open (slices 7–8, 10; slice 9 partial).
 
 **Planned workflow integrity (Phase 6):** every required accounting unit must
 reach a permitted terminal disposition at each applicable boundary, proven from
@@ -204,6 +217,7 @@ runs/{run_id}/
       endpoint=keyword_expansion/part-*.parquet
       endpoint=serp/part-*.parquet
       endpoint=page_text/part-*.parquet
+      endpoint=entities/part-*.parquet
     keywords/part-*.parquet
     serp_items/part-*.parquet
     pages/part-*.parquet
@@ -234,7 +248,8 @@ every downloaded payload.
 | Column (conceptual) | Role |
 |---------------------|------|
 | `response_id` | Stable UUID for this HTTP response within the run |
-| `endpoint` | Low-cardinality partition key: `keyword_expansion`, `serp`, `page_text` |
+| `endpoint` | Low-cardinality partition key: `keyword_expansion`, `serp`, `page_text`, `entities` |
+| `provider` | `dataforseo` or `textrazor` (entities partition may be TextRazor-only) |
 | `task_id` | DataForSEO task identifier when present |
 | `timestamp` | Response receipt time (UTC) |
 | Request metadata | Method, URL, headers/body hash as needed for audit |
@@ -381,6 +396,7 @@ src/seo_rank/stats/   # Phase 5 observational analysis (see ROADMAP.md)
   regression.py   # pooled OLS, clustered SEs, effect size
   plackett_luce.py # page-level rank-ordered logit per depth
   diagnostics.py  # RESET, BP, influence, multivariate VIF
+  scale.py        # within-keyword SD RMS and z-score helpers (effect-size contract)
   bh.py           # Benjamini–Hochberg within backend family
   artifacts.py    # stats_summary.json, stats_diagnostics.json, stats_report.md
 ```
@@ -400,7 +416,9 @@ shipped** — `spec.py` loads `analysis_spec.v1.yaml` (including `rank_depths` a
 `run_phase5_stats()` with nested `rank_depths` JSON, four `## Rank depth:`
 report sections, and a top-20 compat shim. `spearman.py`, `regression.py`,
 `plackett_luce.py`, and `diagnostics.py` each emit per-depth summaries.
-Multivariate sensitivity and influence robustness remain in slices 7–8.
+Multivariate sensitivity and influence robustness remain in slices 7–8; slice 9
+(partial) still needs `--no-fail-on-guardrails` and a `report.md` link to
+`stats/stats_report.md`.
 Dependencies: `statsmodels`, `numpy`, `scipy`, `PyYAML` in `pyproject.toml`.
 Spec: `analysis_spec.v1.yaml`.
 
