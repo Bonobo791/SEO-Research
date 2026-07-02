@@ -14,7 +14,7 @@ Pytest configuration and verification contract for SEO-Research.
   interpreter
 - Lint / type-check / build / coverage: not configured
 - Expected test duration: fast (< 1s)
-- **Current verification status:** 154 tests collected; 153 passing, 1 skipped
+- **Current verification status:** 159 tests collected; 158 passing, 1 skipped
 
 ## Active Verification Command
 
@@ -51,14 +51,15 @@ placeholders only.
 | Test file | What it verifies |
 |-----------|------------------|
 | `test_cli_run.py` | CLI writes grouped per-keyword artifacts, including BGE, Gemini Doc Retrieval, and Gemini Semantic Similarity rows; run-scoped `raw_responses` Parquet + `run.json` catalog metadata; offline TextRazor include/skip; explicit live-provider gates; opt-in live Gemini, BGE, and TextRazor orchestration |
-| `test_cli_surfaces.py` | Phase 4.5 storage CLI: subcommand parser wiring, `normalize` / `build-features` / `analyze` / `replay` dispatch, `run --stored-run` routing, exit code `2` on storage errors and unknown keyword/response |
+| `test_cli_surfaces.py` | Phase 4.5 storage CLI: subcommand parser wiring, `normalize` / `build-features` / `analyze` / `replay` dispatch, missing feature-mart backfill on `analyze`, `run --stored-run` routing, exit code `2` on storage errors and unknown keyword/response |
 | `test_run_normalize.py` | Stored `raw_responses` normalize into curated Parquet tables, including `page_content_fields`, via lazy scan + batch UDFs (no eager `load_raw_response_rows`); refresh the run catalog |
 | `test_data_scans_validate.py` | Raw-response scans use `pl.scan_parquet()`, lazy curated frames are built, schema-only validation rejects missing columns, and materialized row-rule checks stay off the lazy edge |
 | `test_data_marts.py` | Analysis mart lazy join lives in `seo_rank.data.marts` and preserves the feature-mart contract |
 | `test_feature_marts.py` | Feature marts materialize lazy joins, validate before sink, sink feature marts lazily with Parquet statistics, audit the written parquet row rules, and refresh the run catalog |
-| `test_analysis_mart.py` | Feature marts materialize the lazy analysis mart, validate before sink, audit the written parquet row rules, and refresh the run catalog |
+| `test_analysis_mart.py` | Feature marts materialize the lazy analysis mart, preserve unmatched SERP rows with nullable feature columns, validate before sink, audit the written parquet row rules, and refresh the run catalog |
 | `test_stats_panel.py` | Guardrail evaluation, panel grain filtering, hard-fail artifact writing, and minimal stats report output |
 | `test_stats_spearman.py` | Benjamini-Hochberg adjustment, backend Spearman summaries, and Spearman artifact emission on passing panels |
+| `test_stats_regression.py` | Pooled baseline and per-backend feature regressions with keyword-clustered SEs, effect-size translation, two-way-cluster sensitivity, and regression artifact emission on passing panels |
 | `test_round_trip.py` | Dedicated Parquet lake write → normalize → build-features → analyze round-trip regression sweep on real Parquet artifacts; validates `run.json` updates and keyword-filtered `analyze` output |
 | `test_keyword_expansion.py` | 25-keyword cap, deduplication, raw provider payload |
 | `test_serp_normalization.py` | Organic-only SERP rows, depth cap |
@@ -94,7 +95,7 @@ Mock nondeterministic or destructive external effects (network, paid APIs,
 credentials). Prefer integration tests at real boundaries once live clients
 exist.
 
-## Shipped tests — Phase 5 slices 1–4
+## Shipped tests — Phase 5 slices 1–5
 
 - **`analysis_spec.v1.yaml` contract** — `tests/unit/test_sdlc_docs.py::
   test_phase_5_slice_1_defines_analysis_spec_v1` asserts estimand fields
@@ -115,6 +116,11 @@ exist.
 - **Spearman primary path + BH** — `tests/unit/test_stats_spearman.py` covers
   BH adjustment, keyword-level Spearman summaries, underpowered BH skipping,
   and stats artifact emission on passing panels.
+- **Pooled regression secondary path** — `tests/unit/test_stats_regression.py`
+  covers baseline vs feature models, keyword-clustered SEs only in the primary
+  output, the explicit Δ-rank effect-size formula, repeated-URL two-way-cluster
+  sensitivity, and regression sections in `stats_summary.json` /
+  `stats_report.md`.
 
 ## Planned tests (not yet in suite) — Phase 5 active scope
 

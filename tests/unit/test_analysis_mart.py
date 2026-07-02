@@ -123,3 +123,95 @@ def test_build_analysis_mart_validates_the_analysis_frame_before_sinking(
         ),
         ("write", "analysis_mart"),
     ]
+
+
+def test_build_analysis_mart_keeps_serp_rows_without_matching_page_features(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    run_dir = tmp_path / "run-1"
+    run_dir.mkdir()
+    (run_dir / "run.json").write_text(
+        json.dumps({"run_id": "run-1", "catalog": {}}),
+        encoding="utf-8",
+    )
+
+    keyword_serp = pl.DataFrame(
+        [
+            {
+                "run_id": "run-1",
+                "target_keyword_id": "kw-1",
+                "target_keyword": "keyword 1",
+                "keyword_order": 1,
+                "source_response_id": "resp-1",
+                "serp_item_id": "serp-1",
+                "canonical_url_hash": "url-1",
+                "url": "https://example.com/1",
+                "serp_rank": 1,
+                "title": "one",
+                "description": "desc",
+                "schema_version": "feature_marts.v1",
+            },
+            {
+                "run_id": "run-1",
+                "target_keyword_id": "kw-1",
+                "target_keyword": "keyword 1",
+                "keyword_order": 1,
+                "source_response_id": "resp-1",
+                "serp_item_id": "serp-2",
+                "canonical_url_hash": "url-2",
+                "url": "https://example.com/2",
+                "serp_rank": 2,
+                "title": "two",
+                "description": "desc",
+                "schema_version": "feature_marts.v1",
+            },
+        ]
+    )
+    page_features = pl.DataFrame(
+        [
+            {
+                "run_id": "run-1",
+                "target_keyword_id": "kw-1",
+                "target_keyword": "keyword 1",
+                "page_id": "page-1",
+                "response_id": "page-resp-1",
+                "canonical_url_hash": "url-1",
+                "url": "https://example.com/1",
+                "title": "one",
+                "page_text_length": 120,
+                "bge_raw_score": 0.8,
+                "bge_normalized_score": 0.9,
+                "gemini_doc_retrieval_raw_score": 0.7,
+                "gemini_doc_retrieval_normalized_score": 0.85,
+                "gemini_semantic_similarity_raw_score": 0.6,
+                "gemini_semantic_similarity_normalized_score": 0.8,
+                "schema_version": "feature_marts.v1",
+            }
+        ],
+        schema_overrides={"page_text_length": pl.UInt32},
+    )
+
+    def fake_scan_curated_table(run_dir: Path, table_name: str) -> pl.LazyFrame:
+        del run_dir
+        frames = {
+            "keyword_serp": keyword_serp.lazy(),
+            "page_features": page_features.lazy(),
+            "passage_features": pl.DataFrame([{"run_id": "run-1"}]).lazy(),
+            "domain_features": pl.DataFrame([{"run_id": "run-1"}]).lazy(),
+        }
+        return frames[table_name]
+
+    monkeypatch.setattr("seo_rank.data.features.scan_curated_table", fake_scan_curated_table)
+
+    catalog = build_analysis_mart(run_dir)
+
+    assert catalog["datasets"]["analysis_mart"]["row_count"] == 2
+
+    analysis_mart = ds.dataset(
+        run_dir / "parquet" / "analysis_mart",
+        format="parquet",
+    ).to_table().to_pylist()
+
+    assert len(analysis_mart) == 2
+    assert sum(row["page_id"] is None for row in analysis_mart) == 1

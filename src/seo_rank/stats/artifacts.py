@@ -8,6 +8,7 @@ from pathlib import Path
 
 from seo_rank.stats.spec import AnalysisSpec
 from seo_rank.stats.panel import AnalysisPanelResult, load_analysis_panel
+from seo_rank.stats.regression import summarize_regression_backends
 from seo_rank.stats.spearman import summarize_spearman_backends
 
 
@@ -24,6 +25,7 @@ def build_stats_summary(
     result: AnalysisPanelResult,
     *,
     spearman: dict[str, object] | None = None,
+    regression: dict[str, object] | None = None,
 ) -> dict[str, object]:
     summary = {
         "analysis_spec_version": result.analysis_spec_version,
@@ -41,6 +43,8 @@ def build_stats_summary(
     }
     if spearman is not None:
         summary["spearman"] = spearman
+    if regression is not None:
+        summary["regression"] = regression
     return summary
 
 
@@ -48,6 +52,7 @@ def build_stats_report(
     result: AnalysisPanelResult,
     *,
     spearman: dict[str, object] | None = None,
+    regression: dict[str, object] | None = None,
 ) -> str:
     lines = [
         "# Phase 5 Stats",
@@ -91,6 +96,33 @@ def build_stats_report(
                 line += f", bh_skipped_reason={backend_summary['bh_skipped_reason']}"
             lines.append(line)
 
+    if regression is not None:
+        lines.extend(
+            [
+                "",
+                "## Regression",
+            ]
+        )
+        for backend, backend_summary in regression["backends"].items():
+            backend_summary = dict(backend_summary)
+            if backend_summary.get("status") == "skipped":
+                lines.append(
+                    "- "
+                    f"{backend}: status=skipped, "
+                    f"skipped_reason={backend_summary['skipped_reason']}"
+                )
+                continue
+            feature_model = backend_summary["feature_model"]
+            effect_size = backend_summary["effect_size"]
+            two_way_cluster = backend_summary["sensitivity"]["two_way_cluster"]
+            lines.append(
+                "- "
+                f"{backend}: coefficient={feature_model['coefficient']}, "
+                f"clustered_ci={feature_model['clustered_confidence_interval']}, "
+                f"approx_delta_rank_per_1sd={effect_size['approximate_delta_rank_per_1sd']}, "
+                f"two_way_cluster_status={two_way_cluster['status']}"
+            )
+
     lines.extend(
         [
             "",
@@ -110,17 +142,18 @@ def write_stats_artifacts(
     result: AnalysisPanelResult,
     *,
     spearman: dict[str, object] | None = None,
+    regression: dict[str, object] | None = None,
 ) -> dict[str, object]:
     stats_dir = Path(run_dir) / "stats"
     stats_dir.mkdir(parents=True, exist_ok=True)
 
-    summary = build_stats_summary(result, spearman=spearman)
+    summary = build_stats_summary(result, spearman=spearman, regression=regression)
     (stats_dir / "stats_summary.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
     (stats_dir / "stats_report.md").write_text(
-        build_stats_report(result, spearman=spearman),
+        build_stats_report(result, spearman=spearman, regression=regression),
         encoding="utf-8",
     )
     return summary
@@ -135,7 +168,9 @@ def run_phase5_stats(
 
     result = load_analysis_panel(run_dir, spec=spec)
     spearman = None
+    regression = None
     if not result.hard_fail:
         spearman = summarize_spearman_backends(result.analysis_mart, result.backend_order)
-    write_stats_artifacts(run_dir, result, spearman=spearman)
+        regression = summarize_regression_backends(result.analysis_mart, result.backend_order)
+    write_stats_artifacts(run_dir, result, spearman=spearman, regression=regression)
     return result

@@ -178,6 +178,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if args.command == "analyze":
             run_dir = Path(args.run)
+            ensure_feature_marts_for_analysis(run_dir)
             build_analysis_mart(run_dir)
             if run_manifest_is_dry_run(run_dir):
                 if args.keyword:
@@ -453,6 +454,19 @@ def run_manifest_is_dry_run(run_dir: Path) -> bool:
     if isinstance(config, Mapping):
         return bool(config.get("dry_run"))
     return bool(run_payload.get("dry_run"))
+
+
+def ensure_feature_marts_for_analysis(run_dir: Path) -> None:
+    required_feature_marts = (
+        "keyword_serp",
+        "page_features",
+        "passage_features",
+        "domain_features",
+    )
+    parquet_dir = Path(run_dir) / "parquet"
+    if all((parquet_dir / name).exists() for name in required_feature_marts):
+        return
+    build_feature_marts(Path(run_dir))
 
 
 def write_artifacts(output_dir: Path, payload: dict[str, object]) -> None:

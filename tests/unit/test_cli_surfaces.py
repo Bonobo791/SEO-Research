@@ -86,6 +86,10 @@ def test_storage_commands_dispatch_to_data_layer(
             ]
         ).lazy(),
     )
+    monkeypatch.setattr(
+        "seo_rank.cli.ensure_feature_marts_for_analysis",
+        lambda path: None,
+    )
 
     assert main(["normalize", "--run", str(run_dir)]) == 0
     assert main(["build-features", "--run", str(run_dir)]) == 0
@@ -169,6 +173,10 @@ def test_analyze_rejects_unknown_keyword_with_exit_code_2(
         lambda path: SimpleNamespace(hard_fail=False),
     )
     monkeypatch.setattr(
+        "seo_rank.cli.ensure_feature_marts_for_analysis",
+        lambda path: None,
+    )
+    monkeypatch.setattr(
         "seo_rank.cli.scan_analysis_mart",
         lambda path: pl.DataFrame(
             [{"target_keyword": "other keyword", "url": "https://example.com"}]
@@ -199,8 +207,43 @@ def test_analyze_returns_exit_code_1_when_phase5_guardrails_fail(
         "seo_rank.cli.run_phase5_stats",
         lambda path: SimpleNamespace(hard_fail=True),
     )
+    monkeypatch.setattr(
+        "seo_rank.cli.ensure_feature_marts_for_analysis",
+        lambda path: None,
+    )
 
     assert main(["analyze", "--run", str(run_dir)]) == 1
+
+
+def test_analyze_builds_feature_marts_when_missing(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    run_dir = tmp_path / "runs" / "run-1"
+    (run_dir / "parquet").mkdir(parents=True)
+    (run_dir / "run.json").write_text('{"dry_run": false, "catalog": {"datasets": {}}}', encoding="utf-8")
+
+    calls: list[tuple[str, Path]] = []
+
+    monkeypatch.setattr(
+        "seo_rank.cli.build_feature_marts",
+        lambda path: calls.append(("build-features", path)) or {"datasets": {}},
+    )
+    monkeypatch.setattr(
+        "seo_rank.cli.build_analysis_mart",
+        lambda path: calls.append(("analyze", path)) or {"datasets": {}},
+    )
+    monkeypatch.setattr(
+        "seo_rank.cli.run_phase5_stats",
+        lambda path: calls.append(("phase5-stats", path)) or SimpleNamespace(hard_fail=False),
+    )
+
+    assert main(["analyze", "--run", str(run_dir)]) == 0
+    assert calls == [
+        ("build-features", run_dir),
+        ("analyze", run_dir),
+        ("phase5-stats", run_dir),
+    ]
 
 
 def test_storage_commands_return_exit_code_2_on_storage_errors(

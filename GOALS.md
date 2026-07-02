@@ -30,7 +30,7 @@ secondary comparisons in fixed order.
 
 #### Progress
 
-**Slices:** 4 of 14 shipped, 10 open.
+**Slices:** 5 of 14 shipped, 9 open.
 
 | # | Slice | Layer | Status | Primary deliverable |
 | - | ----- | ----- | ------ | ------------------- |
@@ -38,7 +38,7 @@ secondary comparisons in fixed order.
 | 2 | Stats module & dependencies | Stats | Shipped | `src/seo_rank/stats/` + `statsmodels` |
 | 3 | Guardrails & panel prep | Stats | Shipped | Hard-fail / warn gates on `analysis_mart` |
 | 4 | Spearman primary path | Stats | Shipped | Per-keyword ρ + BH per backend |
-| 5 | Pooled regression (secondary) | Stats | Open | Keyword FE + clustered SEs |
+| 5 | Pooled regression (secondary) | Stats | Shipped | Keyword FE + clustered SEs |
 | 6 | Pooled OLS diagnostics | Stats | Open | RESET, BP, Cook's D, influence flags |
 | 7 | Multivariate sensitivity | Stats | Open | Joint model + VIF drop order |
 | 8 | Robustness appendix (influence) | Stats | Open | Refit excluding influential rows |
@@ -49,11 +49,11 @@ secondary comparisons in fixed order.
 | 13 | Relative similarity sensitivity | Stats | Open | Robustness appendix on rank/pct/z |
 | 14 | Relative ranks in CLI & fixtures | CLI | Open | Keyword report + golden invariants |
 
-**Remaining to close Phase 5:** slices 5–14 (see `ROADMAP.md`).
+**Remaining to close Phase 5:** slices 6–14 (see `ROADMAP.md`).
 
 #### Dev slices
 
-**Progress:** 4 of 14 shipped, 10 open.
+**Progress:** 5 of 14 shipped, 9 open.
 
 1. **[x] Slice 1 — Estimand & analysis spec**
    - Add `analysis_spec.v1.yaml`: outcome (`-log(serp_rank)`), predictors,
@@ -89,7 +89,7 @@ secondary comparisons in fixed order.
      `bh_skipped_reason: underpowered`.
    - Do not BH-adjust diagnostics or regression coefficients.
 
-5. **[ ] Slice 5 — Pooled regression (secondary)**
+5. **[x] Slice 5 — Pooled regression (secondary)**
    - Baseline: `-log(serp_rank) ~ log(page_text_length + 1) + C(target_keyword_id)`.
    - Feature: + one `*_normalized_score` at a time (univariate + keyword FE +
      length); separate model per backend.
@@ -245,14 +245,14 @@ secondary comparisons in fixed order.
 
 ## Phase 5 acceptance criteria
 
-**Status:** 2 of 14 slices shipped, 12 open.
+**Status:** 5 of 14 slices shipped, 9 open.
 
 | Acceptance item | Slice(s) | Status |
 | --------------- | -------- | ------ |
 | `analysis_spec.v1.yaml` loaded; estimand version in outputs | 1, 2 | Shipped |
 | Guardrail hard-fail skips inference; warn surfaces in JSON | 3, 9 | Open |
 | Spearman + BH per backend when K ≥ 10 | 4 | Open |
-| Pooled regression with keyword-clustered SEs only in primary output | 5 | Open |
+| Pooled regression with keyword-clustered SEs only in primary output | 5 | Shipped |
 | Effect-size translation + `actionable_association` rule | 5, 9 | Open |
 | Pooled diagnostics + influence % in diagnostics JSON | 6, 8 | Open |
 | Multivariate sensitivity with VIF drop order | 7 | Open |

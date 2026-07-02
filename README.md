@@ -55,11 +55,12 @@ see `ROADMAP.md` (BGE hybrid / retrieve-then-rerank backlog).
 
 ### `seo-rank analyze` today
 
-`analyze` reads feature marts and writes `parquet/analysis_mart/` (SERP rank plus
-the three similarity columns and page text length). It does **not** re-fetch pages,
-re-run embeddings, or run rank–similarity statistics. Spearman ρ, pooled OLS,
-guardrails, and `stats_*` artifacts are specified in `GOALS.md` — **not implemented** in
-the CLI yet.
+`analyze` writes `parquet/analysis_mart/` (SERP rank plus the three similarity
+columns and page text length). If feature marts are missing, it materializes
+them first from the curated tables. It does **not** re-fetch pages or re-run
+embeddings. The current stats path runs guardrails, Spearman summaries, and
+pooled regression summaries into `runs/{run_id}/stats/`; later slices expand
+diagnostics and CLI reporting.
 
 ### Standalone script
 

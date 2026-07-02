@@ -70,7 +70,8 @@ actionable_association:
 
 effect_size:
   translation: approximate_delta_rank_per_1sd_similarity
-  note: use the clustered pooled regression coefficient and the observed backend score standard deviation.
+  formula: median_rank * (exp(-(coefficient * similarity_sd)) - 1)
+  note: use the keyword-clustered pooled regression coefficient, the observed backend score standard deviation, and the panel median rank.
 
 sensitivity:
   multivariate_vif_threshold: 5

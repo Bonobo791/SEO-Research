@@ -83,7 +83,7 @@ confirmatory keyword holdout (Phase 5.1).
 
 #### Dev slices
 
-**Progress:** 4 of 14 shipped, 10 open.
+**Progress:** 5 of 14 shipped, 9 open.
 
 1. **[x] Slice 1 — Estimand & analysis spec**
    - Add `analysis_spec.v1.yaml`: outcome (`-log(serp_rank)`), predictors,
@@ -119,7 +119,7 @@ confirmatory keyword holdout (Phase 5.1).
      `bh_skipped_reason: underpowered`.
    - Do not BH-adjust diagnostics or regression coefficients.
 
-5. **[ ] Slice 5 — Pooled regression (secondary)**
+5. **[x] Slice 5 — Pooled regression (secondary)**
    - Baseline: `-log(serp_rank) ~ log(page_text_length + 1) + C(target_keyword_id)`.
    - Feature: + one `*_normalized_score` at a time (univariate + keyword FE +
      length); separate model per backend.
@@ -228,7 +228,7 @@ confirmatory keyword holdout (Phase 5.1).
 | `analysis_spec.v1.yaml` loaded; estimand version in outputs | 1, 2 | Shipped |
 | Guardrail hard-fail skips inference; warn surfaces in JSON | 3, 9 | Open |
 | Spearman + BH per backend when K ≥ 10 | 4 | Shipped |
-| Pooled regression with keyword-clustered SEs only in primary output | 5 | Open |
+| Pooled regression with keyword-clustered SEs only in primary output | 5 | Shipped |
 | Effect-size translation + actionable_association rule | 5, 9 | Open |
 | Pooled diagnostics + influence % in diagnostics JSON | 6, 8 | Open |
 | Multivariate sensitivity with VIF drop order | 7 | Open |
@@ -438,6 +438,12 @@ their effective defaults.
   and placeholder modules for panel, Spearman, regression, BH, and diagnostics;
   `statsmodels`, `numpy`, `scipy`, and `PyYAML` declared in `pyproject.toml`;
   `tests/unit/test_stats_spec.py` covers spec load and estimand-version metadata.
+- **Phase 5 Slice 5 shipped:** `regression.py` now fits pooled baseline and
+  univariate backend models on `-log(serp_rank)` with keyword fixed effects,
+  keyword-clustered SEs, effect-size translation, and a two-way-cluster
+  sensitivity on repeated URLs; `run_phase5_stats()` writes regression summaries
+  into `stats_summary.json` and `stats_report.md`, covered by
+  `tests/unit/test_stats_regression.py`.
 - **GOALS retargeted to Phase 4.75 (2026-06-29):** page_text curation hardening
   after stored-run normalize failed on live nested `page_content` payloads.
 - **Phase 4.75 Slice 1 shipped:** `parsed_page_text()` decodes nested DataForSEO

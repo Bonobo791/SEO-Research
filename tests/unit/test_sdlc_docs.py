@@ -122,8 +122,8 @@ def test_phase_45_slice_9_regression_sweep_marks_mart_sink_docs_as_shipped() -> 
     assert "Phase 4.5 Slice 9 shipped" in roadmap
     assert "Phase 4.5 Slice 10 shipped" in roadmap
     assert "Phase 4.5 signed off" in roadmap
-    assert "154 tests" in architecture
-    assert "154 tests collected; 153 passing, 1 skipped" in testing
+    assert "159 tests" in architecture
+    assert "159 tests collected; 158 passing, 1 skipped" in testing
     assert "sink feature marts lazily with Parquet statistics" in testing
 
 
@@ -165,3 +165,21 @@ def test_phase_5_slice_2_ships_stats_package_scaffold() -> None:
     assert "test_stats_spec.py" in testing
     assert "statsmodels>=0.14" in pyproject["project"]["dependencies"]
     assert "PyYAML>=6.0" in pyproject["project"]["dependencies"]
+
+
+def test_phase_5_slice_5_ships_pooled_regression_secondary_path() -> None:
+    spec = (ROOT / "analysis_spec.v1.yaml").read_text(encoding="utf-8")
+    goals = (ROOT / "GOALS.md").read_text(encoding="utf-8")
+    roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
+    architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
+    testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
+
+    assert "formula: median_rank * (exp(-(coefficient * similarity_sd)) - 1)" in spec
+    assert "**[x] Slice 5 — Pooled regression (secondary)**" in goals
+    assert "| 5 | Pooled regression (secondary) | Stats | Shipped |" in goals
+    assert "Phase 5 Slice 5 shipped" in roadmap
+    assert "**[x] Slice 5 — Pooled regression (secondary)**" in roadmap
+    assert "slices 1–5 shipped" in architecture
+    assert "pooled regression summaries with" in architecture
+    assert "test_stats_regression.py" in testing
+    assert "Phase 5 slices 1–5" in testing

@@ -84,7 +84,7 @@ The repository contains an **offline-verifiable CLI scaffold** (Phase 1 shipped)
 - **CLI:** `seo-rank run` writes `run.json` and `report.md` from fixtures (no
   network calls) or gated live providers; Phase 4.5 adds `normalize`,
   `build-features`, `analyze`, `replay`, and `run --stored-run` (Slice 6 shipped)
-- **Tests:** 154 tests under `tests/`; gate: `python -m pytest`; Phase 4.5 Slice 7
+- **Tests:** 159 tests under `tests/`; gate: `python -m pytest`; Phase 4.5 Slice 7
   shipped the round-trip regression sweep in `test_sdlc_docs.py`
 - **Product docs:** `ARCHITECTURE.md`, `GOALS.md`, `ROADMAP.md`, `README.md`,
   `TESTING.md`
@@ -121,10 +121,11 @@ primary path; confirmatory inference and CLI wiring continue in slices 5–10.
   `--live-gemini`; local **BGE** (`BAAI/bge-reranker-v2-m3`) behind
   `--live-bge` — see [Live similarity backends (Phase 4)](#live-similarity-backends-phase-4)
   and [Planned Page Similarity Run](#planned-page-similarity-run).
-- **Analysis engine (in progress, Phase 5):** slices 1–4 shipped —
+- **Analysis engine (in progress, Phase 5):** slices 1–5 shipped —
   `analysis_spec.v1.yaml`, `src/seo_rank/stats/` scaffold, guardrails/panel
-  prep, and Spearman + BH. Pooled OLS, diagnostics, and `stats_*` CLI output
-  remain in slices 5–10 — see [Planned Per-Run Statistical Analysis](#planned-per-run-statistical-analysis).
+  prep, Spearman + BH, and pooled OLS with clustered regression summaries.
+  Diagnostics, robustness appendices, and final CLI stats expansion remain in
+  slices 6–10 — see [Planned Per-Run Statistical Analysis](#planned-per-run-statistical-analysis).
 - **Reporters (shipped):** JSON + Markdown under the selected run root;
   `seo-rank run` defaults to `runs/{run_id}/` when `--output-dir` is omitted
   and still supports explicit overrides. Phase 6 expands report narrative
@@ -150,9 +151,11 @@ grouped `keyword_results` in `run.json` + `report.md`.
 **Stored run (Phase 4.5):** completed runs persist under `runs/{run_id}/` with
 authoritative `raw_responses`, curated tables, feature marts, and `analysis_mart`.
 Downstream work scans lazily via `pl.scan_parquet()`; `seo-rank normalize`,
-`build-features`, and `analyze` materialize only the marts they own. `raw_responses`
-stays out of normal analytical joins (replay/re-normalization only). Live
-DataForSEO payloads are not retained by the provider long-term.
+`build-features`, and `analyze` materialize downstream marts in place.
+`analyze` backfills missing feature marts before writing `analysis_mart`.
+`raw_responses`
+  stays out of normal analytical joins (replay/re-normalization only). Live
+  DataForSEO payloads are not retained by the provider long-term.
 
 **Planned full pipeline (Phase 5+):** lazy Polars joins on `analysis_mart` →
 guardrails → keyword-level Spearman ρ with BH per backend → pooled OLS with
@@ -355,12 +358,13 @@ src/seo_rank/stats/   # Phase 5 observational analysis (see ROADMAP.md)
 | `marts.py` | Join feature marts into `analysis_mart` at `target_keyword × SERP URL` grain |
 | `validate.py` | Schema contracts plus row-level uniqueness, null, and range audits; used before every mart write or at the sink edge |
 
-**Phase 5 stats package** (`src/seo_rank/stats/`): **slices 1–4 shipped** —
+**Phase 5 stats package** (`src/seo_rank/stats/`): **slices 1–5 shipped** —
 `spec.py` loads `analysis_spec.v1.yaml`; `artifacts.py` exposes estimand-version
 metadata for future `stats_*` outputs. Placeholder modules (`panel.py`,
 `spearman.py`, `regression.py`, `diagnostics.py`, `bh.py`) now include
-guardrails and the Spearman/BH primary path; later slices add pooled inference
-and diagnostics.
+guardrails, the Spearman/BH primary path, and pooled regression summaries with
+keyword-clustered SEs plus two-way-cluster sensitivity; later slices add
+diagnostics and the remaining robustness paths.
 Dependencies: `statsmodels`, `numpy`, `scipy`, `PyYAML` in `pyproject.toml`.
 Spec: `analysis_spec.v1.yaml`.
 
