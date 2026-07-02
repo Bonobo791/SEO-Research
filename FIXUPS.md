@@ -454,9 +454,18 @@ diagnostics on real DataForSEO crawls. Relates to Phase 4.77 schema contracts
 (`dataforseo.py`); top-level `tasks[].result` type check runs before
 `_validate_content_parsing_response` can skip non-list results.
 
+**S5-11 partial (2026-07):** `DATAFORSEO_RESPONSE_SCHEMAS` allows
+`tasks[].result: null` for `page_text`; `_validate_content_parsing_response`
+and `parsed_page_text_details` skip non-list results;
+`test_validate_dataforseo_response_accepts_page_text_task_with_null_result`
+passes. Remaining gaps: CLI live-run regression and normalize raw-lake path
+(below).
+
 | ID | Fix | Phase | Priority | Status |
 | --- | --- | --- | --- | --- |
-| S5-11 | Accept `page_text` responses where `tasks[].result` is `null` (task-level crawl failure) instead of raising `DataForSEO page_text response schema drift at tasks[0].result: expected list, got NoneType`. Align `DATAFORSEO_RESPONSE_SCHEMAS` `tasks[].result` with `_validate_content_parsing_response` (already `continue`s when `result` is not a list); CLI live path should skip the URL and continue the run. Repro: `seo-rank run --seed "seo company columbus" --live-providers --live-gemini --live-bge`. Add unit test for `result: null` pass-through and CLI regression that run does not abort on one failed page_text task | 5 Slice 6 | required | open |
+| S5-11 | Accept `page_text` responses where `tasks[].result` is `null` (task-level crawl failure) instead of raising `DataForSEO page_text response schema drift at tasks[0].result: expected list, got NoneType`. Align `DATAFORSEO_RESPONSE_SCHEMAS` `tasks[].result` with `_validate_content_parsing_response` (already `continue`s when `result` is not a list); CLI live path should skip the URL and continue the run. Repro: `seo-rank run --seed "seo company columbus" --live-providers --live-gemini --live-bge`. Unit test for `result: null` pass-through is shipped; see S5-11a and S5-11b for remaining acceptance tests | 5 Slice 6 | required | partial |
+| S5-11a | **CLI regression:** `seo-rank run --live-providers` must not abort when one `page_text` task returns `tasks[].result: null` (crawl failure); skip the URL and continue the run. Add test in `tests/unit/test_cli_run.py` (mock provider or fixture raw response with null `result` amid successful tasks). Parent: S5-11 | 5 Slice 6 | required | open |
+| S5-11b | **Normalize path:** `normalize_run` must tolerate `endpoint=page_text` raw rows whose response body has `tasks[].result: null` — no `DataForSeoParseError`, curated tables materialize for surviving URLs. Add test in `tests/unit/test_run_normalize.py` with null-result `page_text` parquet in the raw lake. Parent: S5-11 | 5 Slice 6 | required | open |
 
 ---
 

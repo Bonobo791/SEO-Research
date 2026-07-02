@@ -3,12 +3,27 @@
 import json
 import urllib.parse
 import urllib.request
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 TEXTRAZOR_BASE_URL = "https://api.textrazor.com"
-TEXTRAZOR_ENTITY_PATH = "/"
+
+
+@dataclass(frozen=True)
+class TextRazorEndpoint:
+    extractor: str
+    raw_response_endpoint: str
+    request_path: str
+
+
+TEXTRAZOR_ENDPOINTS = {
+    "entities": TextRazorEndpoint(
+        extractor="entities",
+        raw_response_endpoint="entities",
+        request_path="/",
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -35,15 +50,70 @@ class TextRazorClientError(RuntimeError):
 def build_entity_request(page_text: Mapping[str, str]) -> TextRazorRequest:
     """Build a TextRazor entity extraction request from parsed page text."""
 
+    endpoint = TEXTRAZOR_ENDPOINTS["entities"]
     return TextRazorRequest(
         method="POST",
-        path=TEXTRAZOR_ENTITY_PATH,
+        path=endpoint.request_path,
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         body={
-            "extractors": "entities",
-            "text": page_text["text"],
+            "extractors": endpoint.extractor,
+            "text": str(page_text["text"]),
         },
     )
+
+
+def pages_missing_textrazor(
+    pages: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    """Return first-seen, non-blank pages that should be sent to TextRazor."""
+
+    deduped: list[dict[str, object]] = []
+    seen: set[tuple[str, str]] = set()
+    for page in pages:
+        if not isinstance(page, Mapping):
+            continue
+        target_keyword = page.get("target_keyword")
+        url = page.get("url")
+        text = page.get("text")
+        if not isinstance(target_keyword, str) or not target_keyword.strip():
+            continue
+        if not isinstance(url, str) or not url.strip():
+            continue
+        if not isinstance(text, str) or not text.strip():
+            continue
+        identity = (target_keyword.casefold().strip(), url.strip())
+        if identity in seen:
+            continue
+        seen.add(identity)
+        deduped.append(dict(page))
+    return deduped
+
+
+def fetch_textrazor_entities_for_pages(
+    pages: Sequence[Mapping[str, object]],
+    *,
+    credentials: TextRazorCredentials,
+    transport=None,
+    timeout: float = 30.0,
+) -> list[dict[str, object]]:
+    """Fetch TextRazor entity responses for unique parsed page records."""
+
+    responses: list[dict[str, object]] = []
+    for page_text in pages_missing_textrazor(pages):
+        response = execute_textrazor_request(
+            build_entity_request(page_text),
+            credentials=credentials,
+            transport=transport,
+            timeout=timeout,
+        )
+        responses.append(
+            response
+            | {
+                "url": str(page_text["url"]),
+                "source_text": str(page_text["text"]),
+            }
+        )
+    return responses
 
 
 def validate_textrazor_credentials(

@@ -54,13 +54,14 @@ from seo_rank.similarity import (
 )
 from seo_rank.text import normalize_page_text
 from seo_rank.textrazor import (
+    TEXTRAZOR_ENDPOINTS,
     TextRazorClientError,
     TextRazorCredentialError,
     TextRazorCredentials,
-    build_entity_request,
-    execute_textrazor_request,
+    fetch_textrazor_entities_for_pages,
     fixture_entity_response,
     normalize_entities,
+    pages_missing_textrazor,
     validate_textrazor_credentials,
 )
 
@@ -106,6 +107,8 @@ class RunConfig:
     model_name: str
     dry_run: bool
     skip_textrazor: bool
+    live_textrazor_only: bool = False
+    refresh_textrazor: bool = False
     keyword_limit: int = DEFAULT_KEYWORD_LIMIT
     live_providers: bool = False
     live_bge: bool = False
@@ -226,6 +229,8 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--model-name", default="fixture-similarity-v1")
     run.add_argument("--dry-run", action="store_true")
     run.add_argument("--skip-textrazor", action="store_true")
+    run.add_argument("--live-textrazor-only", action="store_true")
+    run.add_argument("--refresh-textrazor", action="store_true")
     run.add_argument(
         "--stored-run",
         type=Path,
@@ -277,6 +282,14 @@ def positive_int(value: str) -> int:
 
 
 def config_from_args(args: argparse.Namespace) -> RunConfig:
+    if args.live_textrazor_only and args.live_providers:
+        raise LiveProviderGateError(
+            "--live-textrazor-only cannot be combined with --live-providers"
+        )
+    if args.live_textrazor_only and args.skip_textrazor:
+        raise LiveProviderGateError(
+            "--live-textrazor-only cannot be combined with --skip-textrazor"
+        )
     if args.live_bge and not args.live_providers:
         raise LiveProviderGateError("--live-bge requires --live-providers")
     if args.live_gemini and not args.live_providers:
@@ -297,6 +310,8 @@ def config_from_args(args: argparse.Namespace) -> RunConfig:
         model_name=args.model_name,
         dry_run=args.dry_run,
         skip_textrazor=args.skip_textrazor,
+        live_textrazor_only=args.live_textrazor_only,
+        refresh_textrazor=args.refresh_textrazor,
         live_providers=args.live_providers,
         live_bge=args.live_bge,
         live_gemini=args.live_gemini,
@@ -328,6 +343,8 @@ def serialized_run_config_from_args(args: argparse.Namespace) -> dict[str, objec
         "model_name": args.model_name,
         "dry_run": args.dry_run,
         "skip_textrazor": args.skip_textrazor,
+        "live_textrazor_only": args.live_textrazor_only,
+        "refresh_textrazor": args.refresh_textrazor,
     }
     if args.keyword_limit != DEFAULT_KEYWORD_LIMIT:
         serialized["keyword_limit"] = args.keyword_limit
@@ -383,6 +400,10 @@ def validate_live_textrazor_config(env: Mapping[str, str]) -> TextRazorCredentia
         return validate_textrazor_credentials(env)
     except TextRazorCredentialError as error:
         raise LiveProviderGateError(str(error)) from error
+
+
+def prepare_textrazor_only_context(env: Mapping[str, str]) -> TextRazorCredentials:
+    return validate_live_textrazor_config(env)
 
 
 def write_offline_artifacts(
@@ -606,6 +627,8 @@ def run_config_from_payload(
         model_name=str(config.get("model_name", "fixture-similarity-v1")),
         dry_run=bool(config.get("dry_run", False)),
         skip_textrazor=bool(config.get("skip_textrazor", False)),
+        live_textrazor_only=bool(config.get("live_textrazor_only", False)),
+        refresh_textrazor=bool(config.get("refresh_textrazor", False)),
         keyword_limit=keyword_limit,
         live_providers=bool(config.get("live_providers", False)),
         live_bge=bool(config.get("live_bge", False)),
@@ -1221,14 +1244,20 @@ def build_offline_keyword_result(
     textrazor_responses: list[dict[str, object]] = []
     textrazor_entities: list[dict[str, object]] = []
     if not config.skip_textrazor:
+        textrazor_pages = pages_missing_textrazor(
+            [
+                annotate_target_keyword(page_text, target_keyword)
+                for page_text in parsed_pages
+            ]
+        )
         if progress is not None:
             progress.keyword_log(target_keyword, "textrazor entities")
         textrazor_responses = [
             fixture_entity_response(
                 url=str(page_text["url"]),
-                text=page_text["text"],
+                text=str(page_text["text"]),
             )
-            for page_text in parsed_pages
+            for page_text in textrazor_pages
         ]
         textrazor_entities = [
             annotate_target_keyword(entity, target_keyword)
@@ -1453,20 +1482,22 @@ def build_live_keyword_result(
     textrazor_responses: list[dict[str, object]] = []
     textrazor_entities: list[dict[str, object]] = []
     if config.live_textrazor and textrazor_credentials is not None:
+        textrazor_pages = pages_missing_textrazor(
+            [
+                annotate_target_keyword(page_text, target_keyword)
+                for page_text in parsed_pages
+            ]
+        )
         if progress is not None:
             progress.keyword_log(
                 target_keyword,
-                f"textrazor entities ({len(parsed_pages)} pages)",
+                f"textrazor entities ({len(textrazor_pages)} pages)",
             )
-        textrazor_responses = [
-            execute_textrazor_request(
-                build_entity_request(page_text),
-                credentials=textrazor_credentials,
-                transport=textrazor_transport,
-            )
-            | {"url": page_text["url"], "source_text": page_text["text"]}
-            for page_text in parsed_pages
-        ]
+        textrazor_responses = fetch_textrazor_entities_for_pages(
+            textrazor_pages,
+            credentials=textrazor_credentials,
+            transport=textrazor_transport,
+        )
         if textrazor_responses:
             network_calls.append("textrazor.entities")
         textrazor_entities = [
@@ -1911,7 +1942,9 @@ def build_raw_response_records(
                     records.append(
                         build_raw_response_record(
                             run_id,
-                            endpoint="entities",
+                            endpoint=TEXTRAZOR_ENDPOINTS[
+                                "entities"
+                            ].raw_response_endpoint,
                             provider="textrazor",
                             response=response,
                             target_keyword=target_keyword,

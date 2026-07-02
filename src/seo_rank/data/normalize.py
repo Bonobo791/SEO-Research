@@ -24,7 +24,7 @@ from seo_rank.dataforseo import (
     validate_dataforseo_response,
 )
 from seo_rank.text import normalize_page_text
-from seo_rank.textrazor import normalize_entities
+from seo_rank.textrazor import TEXTRAZOR_ENDPOINTS, normalize_entities
 
 CURATED_SCHEMA_VERSION = "curated.v1"
 
@@ -517,9 +517,9 @@ def build_curated_lazyframes_from_raw_responses(
     page_responses = raw_responses.filter(pl.col("endpoint") == "page_text").select(
         ["run_id", "response_id", "target_keyword", "response_body_bytes"]
     )
-    entity_responses = raw_responses.filter(pl.col("endpoint") == "entities").select(
-        ["run_id", "response_id", "target_keyword", "response_body_bytes"]
-    )
+    entity_responses = raw_responses.filter(
+        pl.col("endpoint") == TEXTRAZOR_ENDPOINTS["entities"].raw_response_endpoint
+    ).select(["run_id", "response_id", "target_keyword", "response_body_bytes"])
 
     keywords = keyword_responses.map_batches(
         lambda frame: build_keywords_frame(

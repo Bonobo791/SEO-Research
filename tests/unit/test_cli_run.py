@@ -9,7 +9,9 @@ import pyarrow.parquet as pq
 from seo_rank.dataforseo import DataForSeoClientError
 from seo_rank.dataforseo import fixture_keyword_expansion_response
 from seo_rank.cli import main
+from seo_rank.cli import prepare_textrazor_only_context
 from seo_rank.cli import stored_serp_response_is_usable
+from seo_rank.textrazor import TextRazorCredentials
 
 
 def test_run_without_output_dir_writes_stable_default_run_directory(
@@ -105,10 +107,12 @@ def test_run_writes_offline_json_and_markdown_artifacts(
         "model_name": "fixture-similarity-v1",
         "dry_run": True,
         "skip_textrazor": True,
+        "live_textrazor_only": False,
         "live_providers": False,
         "live_bge": False,
         "live_gemini": False,
         "live_textrazor": False,
+        "refresh_textrazor": False,
     }
     assert payload["keywords"] == ["technical seo"]
     assert payload["run_id"] == "artifacts"
@@ -202,6 +206,32 @@ def test_run_writes_offline_json_and_markdown_artifacts(
     assert "BGE: 0.98 (normalized 0.98)" in report
     assert "Gemini Doc Retrieval:" in report
     assert "Gemini Semantic Similarity:" in report
+
+
+def test_run_persists_textrazor_only_and_refresh_flags_in_run_json(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--output-dir",
+            str(output_dir),
+            "--dry-run",
+            "--live-textrazor-only",
+            "--refresh-textrazor",
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
+    assert payload["config"]["live_textrazor_only"] is True
+    assert payload["config"]["refresh_textrazor"] is True
 
 
 def test_run_materializes_feature_marts_analysis_and_stats_for_fresh_runs(
@@ -1126,6 +1156,52 @@ def test_run_rejects_live_textrazor_without_live_providers(
     assert "--live-textrazor requires --live-providers" in captured.err
 
 
+def test_run_rejects_live_textrazor_only_with_live_providers(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--output-dir",
+            str(output_dir),
+            "--live-providers",
+            "--live-textrazor-only",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "--live-textrazor-only cannot be combined with --live-providers" in captured.err
+
+
+def test_run_rejects_live_textrazor_only_with_skip_textrazor(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--output-dir",
+            str(output_dir),
+            "--live-textrazor-only",
+            "--skip-textrazor",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "--live-textrazor-only cannot be combined with --skip-textrazor" in captured.err
+
+
 def test_run_rejects_live_gemini_without_env_gate_or_key(
     tmp_path: Path,
     capsys,
@@ -1817,3 +1893,12 @@ def test_run_rejects_live_provider_client_failure_without_secret_leaks(
     assert "dataforseo-secret" not in captured.err
     assert "textrazor-secret" not in captured.err
     assert not (output_dir / "run.json").exists()
+
+
+def test_prepare_textrazor_only_context_requires_only_textrazor_credentials() -> None:
+    assert prepare_textrazor_only_context(
+        {
+            "SEO_RANK_ENABLE_TEXTRAZOR": "1",
+            "TEXTRAZOR_API_KEY": "textrazor-secret",
+        }
+    ) == TextRazorCredentials(api_key="textrazor-secret")

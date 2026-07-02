@@ -71,7 +71,7 @@ def test_stored_run_docs_describe_partial_resume_and_current_suite_status() -> N
     assert "reuses existing raw responses" in readme
     assert "`--stored-run` resumes partial runs in place" in architecture
     assert "refreshes only missing work" in architecture
-    assert "234 tests collected; 234 passing" in testing
+    assert "242 tests collected; 241 passing; 1 skipped" in testing
     assert "resumes from the saved raw lake" in roadmap
 
 
@@ -143,8 +143,8 @@ def test_phase_45_slice_9_regression_sweep_marks_mart_sink_docs_as_shipped() -> 
     assert "Phase 4.5 Slice 9 shipped" in roadmap
     assert "Phase 4.5 Slice 10 shipped" in roadmap
     assert "Phase 4.5 signed off" in roadmap
-    assert "234 tests" in architecture
-    assert "234 tests collected; 234 passing" in testing
+    assert "242 tests" in architecture
+    assert "242 tests collected; 241 passing; 1 skipped" in testing
     assert "sink feature marts lazily with Parquet statistics" in testing
 
 

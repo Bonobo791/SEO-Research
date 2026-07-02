@@ -242,14 +242,28 @@ confirmatory keyword holdout (Phase 5.4), passage-level Plackett-Luce analysis.
     - Acceptance: rebuild `analysis_mart` on stored runs derives relative
       columns from stored absolutes without re-scoring.
 
-15. **[ ] Slice 15 — Plackett-Luce estimand runtime wiring**
-    - Load `analysis_spec.estimand.plackett_luce` at runtime and thread the
-      top-20 limit, IIA cutoffs, and convergence thresholds from the spec
-      instead of hardcoding them in `plackett_luce.py`.
-    - Keep page-level PL behavior aligned with the committed estimand block so
-      future spec edits do not silently diverge from code.
-    - Tests: spec-driven threshold loader and regression coverage for the
-      runtime-plumbed estimator settings.
+15. **[~] Slice 15 — Plackett-Luce estimand runtime wiring** (partial)
+    - **Done**
+      - `analysis_spec.v1.yaml` `estimand.plackett_luce` block (outcome,
+        formula, clustered_se, choice_set_scope, `iia_sensitivity`).
+      - `test_load_analysis_spec_includes_plackett_luce_secondary_estimand`
+        validates the committed YAML shape.
+      - `artifacts.py` passes `max_rank=spec.rank_depth_limit(depth_key)` per
+        confirmatory depth (aligned with slices 16–18).
+      - Page-level PL fit, diagnostics, leave-one-out IIA, and artifact
+        emission in `test_stats_plackett_luce.py`.
+    - **Remaining**
+      - Add convergence thresholds and IIA cutoffs to the YAML estimand block
+        (today only `leave_one_out_top_rank: true` is specified).
+      - `AnalysisSpec` accessor / typed loader for `estimand.plackett_luce`
+        settings.
+      - Replace hardcoded constants in `plackett_luce.py` (`FORMULA`,
+        `DEFAULT_MAX_SERP_RANK`, `HESSIAN_CONDITION_NUMBER_THRESHOLD`,
+        `OPTIMIZER_GRADIENT_TOLERANCE`) with spec-driven values.
+      - Drive IIA enablement from `estimand.plackett_luce.iia_sensitivity`
+        instead of `depth_key == spec.primary_rank_depth` in `artifacts.py`.
+      - Tests: spec-driven threshold loader and regression coverage that spec
+        edits change runtime estimator settings.
 
 16. **[x] Slice 16 — Rank-depth spec and panel filtering**
     - `rank_depths` / `limitations_by_depth` in `analysis_spec.v1.yaml`.

@@ -56,7 +56,7 @@ Plackett-Luce is deferred backlog work only and is not wired in code today.
 | 12 | Analysis mart v2 columns | Data | Open | `analysis_mart.v2` + validation |
 | 13 | Relative similarity sensitivity | Stats | Open | Robustness appendix on rank/pct/z |
 | 14 | Relative ranks in CLI & fixtures | CLI | Open | Keyword report + golden invariants |
-| 15 | Plackett-Luce estimand runtime wiring | Stats | Open | Load `analysis_spec.estimand.plackett_luce` at runtime |
+| 15 | Plackett-Luce estimand runtime wiring | Stats | Partial | YAML block + depth `max_rank`; thresholds still hardcoded |
 | 16 | Rank-depth spec and panel filtering | Stats | Shipped | `rank_depth.py` + spec `rank_depths` |
 | 17 | Per-depth Spearman and pooled OLS | Stats | Shipped | Confirmatory bundles at 20/10/5/3 |
 | 18 | Per-depth Plackett-Luce | Stats | Shipped | Primary PL per depth |
@@ -230,14 +230,28 @@ schema drift).
     - Acceptance: rebuild `analysis_mart` on stored runs derives relative
       columns from stored absolutes without re-scoring.
 
-15. **[ ] Slice 15 — Plackett-Luce estimand runtime wiring**
-    - Load `analysis_spec.estimand.plackett_luce` at runtime and thread the
-      top-20 limit, IIA cutoffs, and convergence thresholds from the spec
-      instead of hardcoding them in `plackett_luce.py`.
-    - Keep page-level PL behavior aligned with the committed estimand block so
-      future spec edits do not silently diverge from code.
-    - Tests: spec-driven threshold loader and regression coverage for the
-      runtime-plumbed estimator settings.
+15. **[~] Slice 15 — Plackett-Luce estimand runtime wiring** (partial)
+    - **Done**
+      - `analysis_spec.v1.yaml` `estimand.plackett_luce` block (outcome,
+        formula, clustered_se, choice_set_scope, `iia_sensitivity`).
+      - `test_load_analysis_spec_includes_plackett_luce_secondary_estimand`
+        validates the committed YAML shape.
+      - `artifacts.py` passes `max_rank=spec.rank_depth_limit(depth_key)` per
+        confirmatory depth (aligned with slices 16–18).
+      - Page-level PL fit, diagnostics, leave-one-out IIA, and artifact
+        emission in `test_stats_plackett_luce.py`.
+    - **Remaining**
+      - Add convergence thresholds and IIA cutoffs to the YAML estimand block
+        (today only `leave_one_out_top_rank: true` is specified).
+      - `AnalysisSpec` accessor / typed loader for `estimand.plackett_luce`
+        settings.
+      - Replace hardcoded constants in `plackett_luce.py` (`FORMULA`,
+        `DEFAULT_MAX_SERP_RANK`, `HESSIAN_CONDITION_NUMBER_THRESHOLD`,
+        `OPTIMIZER_GRADIENT_TOLERANCE`) with spec-driven values.
+      - Drive IIA enablement from `estimand.plackett_luce.iia_sensitivity`
+        instead of `depth_key == spec.primary_rank_depth` in `artifacts.py`.
+      - Tests: spec-driven threshold loader and regression coverage that spec
+        edits change runtime estimator settings.
 
 16. **[x] Slice 16 — Rank-depth spec and panel filtering**
     - Add `rank_depths` and `limitations_by_depth` to `analysis_spec.v1.yaml`.
@@ -263,7 +277,7 @@ schema drift).
     - Acceptance: monotonic row counts, per-depth actionable map, PL choice-set
       bounds; see `TESTING.md`.
 
-21. **[ ] Slice 21 — TextRazor-only flags and gates**
+21. **[x] Slice 21 — TextRazor-only flags and gates**
     - Add `--live-textrazor-only` and `--refresh-textrazor` to `seo-rank run`.
     - Mutual exclusion: cannot combine with `--live-providers` or `--skip-textrazor`.
     - Env gate: `SEO_RANK_ENABLE_TEXTRAZOR=1` + `TEXTRAZOR_API_KEY` only (no
@@ -272,7 +286,7 @@ schema drift).
       validating DataForSEO credentials.
     - Persist `live_textrazor_only` and `refresh_textrazor` in `run.json` config.
 
-22. **[ ] Slice 22 — TextRazor ingest core**
+22. **[x] Slice 22 — TextRazor ingest core**
     - Add `TEXTRAZOR_ENDPOINTS` registry in `src/seo_rank/textrazor.py` (`entities`
       now; future extractors get their own `raw_responses` endpoint partitions).
     - `fetch_textrazor_entities_for_pages()` wraps `build_entity_request` +
