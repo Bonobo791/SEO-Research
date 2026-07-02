@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -9,7 +10,11 @@ from typing import Any
 import polars as pl
 
 from seo_rank.data.scans import scan_curated_table
+from seo_rank.stats.rank_depth import filter_panel_by_max_rank
 from seo_rank.stats.spec import AnalysisSpec, load_analysis_spec
+
+
+logger = logging.getLogger(__name__)
 
 SIMILARITY_RATE_COLUMNS = {
     "bge": "bge_normalized_score",
@@ -19,6 +24,9 @@ SIMILARITY_RATE_COLUMNS = {
 LIMITATION_TEXT = {
     "observational_only": "Associations are observational, not causal.",
     "top_20_truncation": "Associations are limited to observed top-20 SERP rows per keyword.",
+    "top_10_truncation": "Associations are limited to observed top-10 SERP rows per keyword.",
+    "top_5_truncation": "Associations are limited to observed top-5 SERP rows per keyword.",
+    "top_3_truncation": "Associations are limited to observed top-3 SERP rows per keyword.",
     "no_causal_claims": "Do not interpret coefficients as causal ranking factors.",
     "measurement_error_conservative": "Similarity scores are model outputs and may attenuate effects.",
 }
@@ -47,9 +55,18 @@ def load_analysis_panel(
 ) -> AnalysisPanelResult:
     """Load the analysis mart, prepare the panel, and evaluate guardrails."""
 
+    logger.info("loading analysis panel run_dir=%s", run_dir)
     analysis_spec = spec or load_analysis_spec()
     analysis_mart = scan_curated_table(run_dir, "analysis_mart").collect()
-    return prepare_analysis_panel(run_dir, analysis_mart, spec=analysis_spec)
+    result = prepare_analysis_panel(run_dir, analysis_mart, spec=analysis_spec)
+    logger.info(
+        "loaded analysis panel run_dir=%s mart_rows=%d panel_rows=%d hard_fail=%s",
+        run_dir,
+        result.analysis_mart.height,
+        result.panel.height,
+        result.hard_fail,
+    )
+    return result
 
 
 def prepare_analysis_panel(
@@ -61,8 +78,9 @@ def prepare_analysis_panel(
     """Prepare the panel from an already materialized analysis mart."""
 
     analysis_spec = spec or load_analysis_spec()
+    max_rank = analysis_spec.rank_depth_limit(analysis_spec.primary_rank_depth)
     prepared_mart = (
-        analysis_mart.filter(pl.col("serp_rank").is_between(1, 20, closed="both"))
+        analysis_mart.filter(pl.col("serp_rank").is_between(1, max_rank, closed="both"))
         .sort(["target_keyword_id", "canonical_url_hash", "serp_rank", "serp_item_id"])
         .unique(
             subset=["run_id", "target_keyword_id", "canonical_url_hash"],
@@ -74,24 +92,84 @@ def prepare_analysis_panel(
     primary_panel = prepared_mart.filter(
         pl.col(f"{analysis_spec.primary_backend}_normalized_score").is_not_null()
     )
-    guardrails = _evaluate_guardrails(prepared_mart, analysis_spec)
+    guardrails = evaluate_guardrails(prepared_mart, analysis_spec)
     hard_fail = any(
         guardrail["status"] == "fail"
         for guardrail in guardrails
         if guardrail["name"] in _hard_fail_guardrail_names(analysis_spec)
+    )
+    logger.info(
+        "prepared analysis panel mart_rows=%d panel_rows=%d hard_fail=%s",
+        prepared_mart.height,
+        primary_panel.height,
+        hard_fail,
     )
     return AnalysisPanelResult(
         run_dir=Path(run_dir),
         analysis_mart=prepared_mart,
         panel=primary_panel,
         guardrails=guardrails,
-        limitations={name: LIMITATION_TEXT[name] for name in analysis_spec.data["limitations"]},
+        limitations=build_limitations_for_rank_depth(analysis_spec, analysis_spec.primary_rank_depth),
         hard_fail=hard_fail,
         analysis_spec_version=analysis_spec.version,
         estimand_version=analysis_spec.estimand_version,
         primary_backend=analysis_spec.primary_backend,
         backend_order=analysis_spec.backend_order,
     )
+
+
+def evaluate_guardrails(
+    analysis_mart: pl.DataFrame,
+    spec: AnalysisSpec,
+) -> list[dict[str, Any]]:
+    return _evaluate_guardrails(analysis_mart, spec)
+
+
+def build_limitations_for_rank_depth(
+    spec: AnalysisSpec,
+    depth_key: str,
+) -> dict[str, str]:
+    depth_truncation_key = spec.limitation_key_for_rank_depth(depth_key)
+    limitation_keys = [*spec.data["limitations"], depth_truncation_key]
+    return {name: LIMITATION_TEXT[name] for name in limitation_keys}
+
+
+def prepare_rank_depth_panel(
+    analysis_mart: pl.DataFrame,
+    *,
+    depth_key: str,
+    spec: AnalysisSpec,
+) -> tuple[pl.DataFrame, pl.DataFrame, list[dict[str, Any]], bool, dict[str, str]]:
+    max_rank = spec.rank_depth_limit(depth_key)
+    depth_mart = filter_panel_by_max_rank(analysis_mart, max_rank=max_rank)
+    depth_mart = (
+        depth_mart.sort(["target_keyword_id", "canonical_url_hash", "serp_rank", "serp_item_id"])
+        .unique(
+            subset=["run_id", "target_keyword_id", "canonical_url_hash"],
+            keep="first",
+            maintain_order=True,
+        )
+        .sort(["target_keyword_id", "canonical_url_hash", "serp_rank", "serp_item_id"])
+    )
+    depth_panel = depth_mart.filter(
+        pl.col(f"{spec.primary_backend}_normalized_score").is_not_null()
+    )
+    guardrails = _evaluate_guardrails(depth_mart, spec)
+    hard_fail = any(
+        guardrail["status"] == "fail"
+        for guardrail in guardrails
+        if guardrail["name"] in _hard_fail_guardrail_names(spec)
+    )
+    limitations = build_limitations_for_rank_depth(spec, depth_key)
+    logger.info(
+        "prepared rank_depth_panel depth=%s max_rank=%d mart_rows=%d panel_rows=%d hard_fail=%s",
+        depth_key,
+        max_rank,
+        depth_mart.height,
+        depth_panel.height,
+        hard_fail,
+    )
+    return depth_mart, depth_panel, guardrails, hard_fail, limitations
 
 
 def _evaluate_guardrails(

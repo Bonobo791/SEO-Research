@@ -71,7 +71,7 @@ def test_stored_run_docs_describe_partial_resume_and_current_suite_status() -> N
     assert "reuses existing raw responses" in readme
     assert "`--stored-run` resumes partial runs in place" in architecture
     assert "refreshes only missing work" in architecture
-    assert "215 tests collected; 214 passing; 1 skipped" in testing
+    assert "234 tests collected; 234 passing" in testing
     assert "resumes from the saved raw lake" in roadmap
 
 
@@ -143,8 +143,8 @@ def test_phase_45_slice_9_regression_sweep_marks_mart_sink_docs_as_shipped() -> 
     assert "Phase 4.5 Slice 9 shipped" in roadmap
     assert "Phase 4.5 Slice 10 shipped" in roadmap
     assert "Phase 4.5 signed off" in roadmap
-    assert "215 tests" in architecture
-    assert "215 tests collected; 214 passing; 1 skipped" in testing
+    assert "234 tests" in architecture
+    assert "234 tests collected; 234 passing" in testing
     assert "sink feature marts lazily with Parquet statistics" in testing
 
 
@@ -202,10 +202,10 @@ def test_phase_5_slice_5_ships_pooled_regression_secondary_path() -> None:
     assert "| 5 | Pooled regression (secondary) | Stats | Shipped |" in goals
     assert "Phase 5 Slice 5 shipped" in roadmap
     assert "**[x] Slice 5 — Pooled regression (secondary)**" in roadmap
-    assert "slices 1–6 shipped" in architecture
-    assert "pooled regression summaries with" in architecture
+    assert "slices 1–6 and 16–20 shipped" in architecture
+    assert "keyword-clustered SEs" in architecture
     assert "test_stats_regression.py" in testing
-    assert "Phase 5 slices 1–6" in testing
+    assert "Phase 5 slices 1–6 and 16–20" in testing
 
 
 def test_phase_5_slice_6_ships_pooled_ols_diagnostics() -> None:
@@ -241,6 +241,28 @@ def test_phase_5_page_level_plackett_luce_secondary_path_is_documented() -> None
     assert "Plackett-Luce (page-level, secondary)" in architecture
     assert "page-level Plackett-Luce summaries" in readme
     assert "test_stats_plackett_luce.py" in testing
+
+
+def test_phase_5_rank_depth_slices_are_documented() -> None:
+    spec = (ROOT / "analysis_spec.v1.yaml").read_text(encoding="utf-8")
+    goals = (ROOT / "GOALS.md").read_text(encoding="utf-8")
+    roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
+    architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
+    testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    plan_review = (ROOT / "PHASE5-STATS-PLAN-REVIEW.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "rank_depths:" in spec
+    assert "limitations_by_depth:" in spec
+    assert "leave_one_out_top_rank: true" in spec
+    assert "**[x] Slice 16 — Rank-depth spec and panel filtering**" in goals
+    assert "Parallel confirmatory rank depths (20/10/5/3)" in roadmap
+    assert "Rank-depth confirmatory paths (shipped)" in architecture
+    assert "test_stats_rank_depth.py" in testing
+    assert "actionable_association_by_rank_depth" in readme
+    assert "Rank-depth confirmatory paths" in plan_review
 
 
 def test_phase_6_plans_workflow_integrity_guardrails() -> None:

@@ -334,12 +334,15 @@ def test_run_phase5_stats_writes_regression_summary_for_passing_panels(
 
     assert result.hard_fail is False
     assert '"regression"' in summary
+    assert '"rank_depths"' in summary
     assert '"clustered_standard_error"' in summary
     assert '"two_way_cluster"' in summary
     assert '"naive_standard_error"' not in summary
     assert diagnostics["analysis_spec_version"]
     assert diagnostics["backends"]["bge"]["backend"] == "bge"
-    assert "## Regression" in report
+    assert diagnostics["rank_depths"]["top_20"]["regression"]["backends"]["bge"]["backend"] == "bge"
+    assert "## Rank depth: top_20" in report
+    assert "### Regression" in report
 
 
 def test_run_phase5_stats_sets_actionable_association_on_passing_panels(
@@ -359,6 +362,7 @@ def test_run_phase5_stats_sets_actionable_association_on_passing_panels(
     summary = json.loads((run_dir / "stats" / "stats_summary.json").read_text(encoding="utf-8"))
 
     assert summary["actionable_association"] is True
+    assert summary["actionable_association_by_rank_depth"]["top_20"] is True
 
 
 def test_run_phase5_stats_fits_regression_once_per_backend(
@@ -386,4 +390,4 @@ def test_run_phase5_stats_fits_regression_once_per_backend(
 
     run_phase5_stats(run_dir)
 
-    assert call_count == 3
+    assert call_count == 12

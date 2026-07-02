@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import json
 from pathlib import Path
 
@@ -7,13 +8,15 @@ import numpy as np
 import polars as pl
 import pytest
 
-from seo_rank.stats.artifacts import run_phase5_stats
+from seo_rank.stats.artifacts import _format_plackett_luce_lines, run_phase5_stats
 import seo_rank.stats.plackett_luce as plackett_luce_module
 from seo_rank.stats.plackett_luce import (
     fit_backend_plackett_luce,
     summarize_backend_plackett_luce,
     summarize_plackett_luce_backends,
 )
+from seo_rank.stats.rank_depth import filter_panel_by_max_rank
+from seo_rank.stats.spec import load_analysis_spec
 
 
 def _sample_plackett_luce_panel(
@@ -148,8 +151,20 @@ def test_summarize_backend_plackett_luce_diagnostics_reports_optimizer_and_iia_r
     assert diagnostics["duplicate_serp_rank_keyword_count"] == 0
     assert diagnostics["hessian_condition_number"] > 0
     assert diagnostics["convergence_confirmed"] is True
-    assert diagnostics["iia_sensitivity"]["top10"]["status"] == "computed"
-    assert diagnostics["iia_sensitivity"]["leave_one_out_top_rank"]["status"] == "computed"
+    assert "iia_sensitivity" not in diagnostics
+
+
+def test_summarize_plackett_luce_diagnostics_includes_leave_one_out_when_requested() -> None:
+    diagnostics = plackett_luce_module.summarize_plackett_luce_diagnostics_backends_from_fits(
+        _sample_plackett_luce_panel(),
+        ["bge"],
+        fits={
+            "bge": fit_backend_plackett_luce(_sample_plackett_luce_panel(), backend="bge"),
+        },
+        include_iia_sensitivity=True,
+    )
+
+    assert diagnostics["backends"]["bge"]["iia_sensitivity"]["leave_one_out_top_rank"]["status"] == "computed"
 
 
 def test_summarize_backend_plackett_luce_uses_backend_specific_non_null_rows() -> None:
@@ -195,6 +210,41 @@ def test_fit_backend_plackett_luce_reports_optimizer_non_convergence() -> None:
     assert "odds_ratio_per_1sd" in summary["main_model"]
 
 
+def test_fit_backend_plackett_luce_treats_precision_loss_with_tiny_gradient_as_converged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    spec = load_analysis_spec()
+    run_frame = pl.read_parquet(
+        Path(__file__).resolve().parents[2]
+        / "runs"
+        / "seo-company-columbus-e26107bade78"
+        / "parquet"
+        / "analysis_mart"
+        / "part-0.parquet"
+    )
+    top_10_frame = filter_panel_by_max_rank(
+        run_frame,
+        max_rank=spec.rank_depth_limit("top_10"),
+    )
+
+    with caplog.at_level(logging.WARNING, logger="seo_rank.stats.plackett_luce"):
+        fit = fit_backend_plackett_luce(top_10_frame, backend="bge")
+
+    assert fit is not None
+    assert fit.optimizer.converged is True
+    assert fit.optimizer.gradient_norm < 1e-6
+    assert not any("optimizer did not converge" in record.getMessage() for record in caplog.records)
+    summary = plackett_luce_module._summarize_backend_plackett_luce_result(
+        top_10_frame,
+        backend="bge",
+        fit=fit,
+        include_diagnostics=True,
+    )
+    assert summary["status"] == "computed"
+    assert summary["convergence_confirmed"] is True
+    assert summary["main_model"]["convergence_confirmed"] is True
+
+
 def test_summarize_backend_plackett_luce_marks_unstable_fit_as_unstable() -> None:
     unstable_summary = plackett_luce_module._summarize_backend_plackett_luce_result(
         _sample_plackett_luce_panel(keyword_count=2, items_per_keyword=4),
@@ -236,6 +286,57 @@ def test_summarize_backend_plackett_luce_logs_fit_and_skip(
     )
 
 
+def test_format_plackett_luce_lines_surfaces_leave_one_out_iia_status() -> None:
+    plackett_luce = {
+        "backends": {
+            "bge": {
+                "status": "computed",
+                "main_model": {"odds_ratio_per_1sd": 1.5},
+            }
+        }
+    }
+    diagnostics = {
+        "backends": {
+            "bge": {
+                "convergence_confirmed": True,
+                "hessian_condition_number": 12.3,
+                "iia_sensitivity": {
+                    "leave_one_out_top_rank": {"status": "computed"},
+                },
+            }
+        }
+    }
+
+    lines = _format_plackett_luce_lines(plackett_luce, diagnostics)
+
+    assert len(lines) == 1
+    assert "leave_one_out_top_rank_status=computed" in lines[0]
+
+
+def test_format_plackett_luce_lines_shows_n_a_without_iia_diagnostics() -> None:
+    plackett_luce = {
+        "backends": {
+            "bge": {
+                "status": "computed",
+                "main_model": {"odds_ratio_per_1sd": 1.5},
+            }
+        }
+    }
+    diagnostics = {
+        "backends": {
+            "bge": {
+                "convergence_confirmed": True,
+                "hessian_condition_number": 12.3,
+            }
+        }
+    }
+
+    lines = _format_plackett_luce_lines(plackett_luce, diagnostics)
+
+    assert len(lines) == 1
+    assert "leave_one_out_top_rank_status=n/a" in lines[0]
+
+
 def test_run_phase5_stats_writes_plackett_luce_sections(tmp_path: Path, monkeypatch) -> None:
     run_dir = tmp_path / "runs" / "run-1"
     (run_dir / "parquet" / "analysis_mart").mkdir(parents=True)
@@ -254,11 +355,18 @@ def test_run_phase5_stats_writes_plackett_luce_sections(tmp_path: Path, monkeypa
     report = (run_dir / "stats" / "stats_report.md").read_text(encoding="utf-8")
 
     assert result.hard_fail is False
-    assert "plackett_luce" in summary
+    assert "rank_depths" in summary
+    assert summary["rank_depths"]["top_20"]["plackett_luce"] is not None
     assert "plackett_luce" in diagnostics
-    assert diagnostics["plackett_luce"]["backends"]["bge"]["iia_sensitivity"]["top10"]["status"] == "computed"
-    assert "## Plackett-Luce" in report
+    assert diagnostics["rank_depths"]["top_20"]["plackett_luce"]["backends"]["bge"][
+        "iia_sensitivity"
+    ]["leave_one_out_top_rank"]["status"] == "computed"
+    assert "## Rank depth: top_20" in report
+    assert "## Rank depth: top_3" in report
+    assert "### Plackett-Luce" in report
     assert "convergence_confirmed=" in report
+    assert "leave_one_out_top_rank_status=computed" in report
+    assert "Plackett-Luce top-10 sensitivity" not in report
 
 
 def test_run_phase5_stats_fits_plackett_luce_once_per_backend(tmp_path: Path, monkeypatch) -> None:
@@ -285,4 +393,4 @@ def test_run_phase5_stats_fits_plackett_luce_once_per_backend(tmp_path: Path, mo
 
     run_phase5_stats(run_dir)
 
-    assert call_count == 1
+    assert call_count == 4

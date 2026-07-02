@@ -1,11 +1,15 @@
 from pathlib import Path
 import json
+import logging
+import warnings
 
 import polars as pl
 import pytest
 
 from seo_rank.stats.artifacts import run_phase5_stats
 from seo_rank.stats.diagnostics import summarize_backend_diagnostics
+from seo_rank.stats.rank_depth import filter_panel_by_max_rank
+from seo_rank.stats.spec import load_analysis_spec
 
 
 def _diagnostics_analysis_mart_frame() -> pl.DataFrame:
@@ -81,6 +85,30 @@ def test_summarize_backend_diagnostics_marks_small_sample_shapiro_as_information
     assert summary["shapiro"]["p_value"] is not None
 
 
+def test_summarize_backend_diagnostics_handles_top_3_without_runtime_warnings() -> None:
+    spec = load_analysis_spec()
+    run_frame = pl.read_parquet(
+        Path(__file__).resolve().parents[2]
+        / "runs"
+        / "seo-company-columbus-e26107bade78"
+        / "parquet"
+        / "analysis_mart"
+        / "part-0.parquet"
+    )
+    top_3_frame = filter_panel_by_max_rank(
+        run_frame,
+        max_rank=spec.rank_depth_limit("top_3"),
+    )
+
+    with warnings.catch_warnings(record=True) as captured_warnings:
+        warnings.simplefilter("always")
+        summary = summarize_backend_diagnostics(top_3_frame, backend="bge")
+
+    assert captured_warnings == []
+    assert summary["status"] == "computed"
+    assert summary["influence"]["influential_count"] > 0
+
+
 def test_run_phase5_stats_writes_stats_diagnostics_json_and_report_section(
     tmp_path: Path,
     monkeypatch,
@@ -112,3 +140,22 @@ def test_summarize_backend_diagnostics_skips_when_backend_has_no_usable_rows() -
 
     assert summary["status"] == "skipped"
     assert summary["skipped_reason"] == "no_usable_rows"
+
+
+def test_summarize_backend_diagnostics_logs_fit_and_skip(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger="seo_rank.stats.diagnostics")
+
+    summarize_backend_diagnostics(_diagnostics_analysis_mart_frame(), backend="bge")
+    summarize_backend_diagnostics(_empty_backend_frame(), backend="bge")
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(
+        "backend=bge" in message and "status=computed" in message and "influential_count=" in message
+        for message in messages
+    )
+    assert any(
+        "backend=bge" in message and "status=skipped" in message and "skipped_reason=no_usable_rows" in message
+        for message in messages
+    )

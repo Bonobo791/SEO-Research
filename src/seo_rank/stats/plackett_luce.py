@@ -10,7 +10,9 @@ from math import isfinite
 import numpy as np
 import pandas as pd
 import polars as pl
+from seo_rank.stats.rank_depth import filter_panel_by_max_rank
 from seo_rank.stats.scale import within_keyword_sd_rms
+from seo_rank.stats.spec import AnalysisSpec
 from scipy import optimize, stats
 from scipy.special import logsumexp
 
@@ -23,9 +25,9 @@ SIMILARITY_SCORE_COLUMNS = {
     "gemini_semantic_similarity": "gemini_semantic_similarity_normalized_score",
 }
 PLACKET_LUCE_REQUIRED_COLUMNS = ("serp_rank", "page_text_length")
-TOP_SERP_RANK_LIMIT = 20
-IIA_TOP10_LIMIT = 10
+DEFAULT_MAX_SERP_RANK = 20
 HESSIAN_CONDITION_NUMBER_THRESHOLD = 30.0
+OPTIMIZER_GRADIENT_TOLERANCE = 1e-6
 FORMULA = "rank_ordered_logit ~ similarity + log(page_text_length + 1)"
 
 
@@ -76,13 +78,14 @@ def fit_backend_plackett_luce(
     analysis_mart: pl.DataFrame,
     *,
     backend: str,
+    max_rank: int = DEFAULT_MAX_SERP_RANK,
     optimizer_options: dict[str, object] | None = None,
 ) -> PlackettLuceFit | None:
     """Fit a PL model for one backend."""
 
-    logger.debug("fitting plackett-luce backend=%s", backend)
+    logger.debug("fitting plackett-luce backend=%s max_rank=%d", backend, max_rank)
     score_column = _score_column_for_backend(backend)
-    prepared = _prepare_plackett_luce_frame(analysis_mart)
+    prepared = _prepare_plackett_luce_frame(analysis_mart, max_rank=max_rank)
     if prepared.is_empty():
         logger.debug("plackett-luce backend=%s skipped: no prepared rows", backend)
         return None
@@ -157,6 +160,7 @@ def fit_plackett_luce_backends(
     analysis_mart: pl.DataFrame,
     backend_order: Sequence[str],
     *,
+    max_rank: int = DEFAULT_MAX_SERP_RANK,
     optimizer_options: dict[str, object] | None = None,
 ) -> dict[str, PlackettLuceFit | None]:
     """Fit the PL model once per backend."""
@@ -165,9 +169,70 @@ def fit_plackett_luce_backends(
         backend: fit_backend_plackett_luce(
             analysis_mart,
             backend=backend,
+            max_rank=max_rank,
             optimizer_options=optimizer_options,
         )
         for backend in backend_order
+    }
+
+
+def fit_plackett_luce_rank_depths(
+    analysis_mart: pl.DataFrame,
+    backend_order: Sequence[str],
+    *,
+    depth_order: Sequence[str],
+    spec: AnalysisSpec,
+    optimizer_options: dict[str, object] | None = None,
+) -> dict[str, dict[str, PlackettLuceFit | None]]:
+    """Fit PL once per backend at each confirmatory rank depth."""
+
+    fits_by_depth: dict[str, dict[str, PlackettLuceFit | None]] = {}
+    for depth_key in depth_order:
+        depth_mart = filter_panel_by_max_rank(
+            analysis_mart,
+            max_rank=spec.rank_depth_limit(depth_key),
+        )
+        fits_by_depth[depth_key] = fit_plackett_luce_backends(
+            depth_mart,
+            backend_order,
+            max_rank=spec.rank_depth_limit(depth_key),
+            optimizer_options=optimizer_options,
+        )
+    return fits_by_depth
+
+
+def summarize_plackett_luce_rank_depths(
+    analysis_mart: pl.DataFrame,
+    backend_order: Sequence[str],
+    *,
+    depth_order: Sequence[str],
+    spec: AnalysisSpec,
+    fits_by_depth: dict[str, dict[str, PlackettLuceFit | None]] | None = None,
+) -> dict[str, object]:
+    """Summarize PL for every confirmatory rank depth."""
+
+    logger.info("summarizing plackett-luce rank_depths=%s", list(depth_order))
+    if fits_by_depth is None:
+        fits_by_depth = fit_plackett_luce_rank_depths(
+            analysis_mart,
+            backend_order,
+            depth_order=depth_order,
+            spec=spec,
+        )
+    depths: dict[str, object] = {}
+    for depth_key in depth_order:
+        depth_mart = filter_panel_by_max_rank(
+            analysis_mart,
+            max_rank=spec.rank_depth_limit(depth_key),
+        )
+        depths[depth_key] = summarize_plackett_luce_backends_from_fits(
+            depth_mart,
+            backend_order,
+            fits=fits_by_depth[depth_key],
+        )
+    return {
+        "depth_order": list(depth_order),
+        "depths": depths,
     }
 
 
@@ -244,6 +309,7 @@ def summarize_plackett_luce_diagnostics_backends_from_fits(
     backend_order: Sequence[str],
     *,
     fits: dict[str, PlackettLuceFit | None],
+    include_iia_sensitivity: bool = False,
 ) -> dict[str, object]:
     """Summarize PL diagnostics from precomputed fits."""
 
@@ -255,6 +321,7 @@ def summarize_plackett_luce_diagnostics_backends_from_fits(
                 backend=backend,
                 fit=fits.get(backend),
                 include_diagnostics=False,
+                include_iia_sensitivity=include_iia_sensitivity,
             )
             for backend in backend_order
         },
@@ -343,10 +410,12 @@ def _summarize_backend_plackett_luce_result(
     backend: str,
     fit: PlackettLuceFit | None,
     include_diagnostics: bool,
+    include_iia_sensitivity: bool = False,
+    max_rank: int = DEFAULT_MAX_SERP_RANK,
 ) -> dict[str, object]:
     if fit is None:
         score_column = _score_column_for_backend(backend)
-        model_frame = _prepare_plackett_luce_frame(analysis_mart)
+        model_frame = _prepare_plackett_luce_frame(analysis_mart, max_rank=max_rank)
         prepared_rows = int(model_frame.height)
         keyword_count = int(model_frame["target_keyword_id"].n_unique()) if prepared_rows else 0
         logger.info(
@@ -381,7 +450,10 @@ def _summarize_backend_plackett_luce_result(
         )
         return summary
 
-    diagnostics = _summarize_fit_diagnostics(fit, include_sensitivity=True)
+    diagnostics = _summarize_fit_diagnostics(
+        fit,
+        include_iia_sensitivity=include_iia_sensitivity,
+    )
     diagnostics["status"] = "computed" if convergence_confirmed else "unstable"
     logger.info(
         "plackett-luce backend=%s status=%s row_count=%d keyword_count=%d converged=%s",
@@ -397,7 +469,7 @@ def _summarize_backend_plackett_luce_result(
 def _summarize_fit_diagnostics(
     fit: PlackettLuceFit,
     *,
-    include_sensitivity: bool,
+    include_iia_sensitivity: bool,
 ) -> dict[str, object]:
     information_condition_number = _condition_number(fit.information)
     convergence_confirmed = _convergence_confirmed(fit, information_condition_number)
@@ -419,27 +491,18 @@ def _summarize_fit_diagnostics(
         "hessian_condition_number": information_condition_number,
         "convergence_confirmed": convergence_confirmed,
     }
-    if include_sensitivity:
+    if include_iia_sensitivity:
         fit_diagnostics["iia_sensitivity"] = _iia_sensitivity(fit)
     return fit_diagnostics
 
 
 def _iia_sensitivity(fit: PlackettLuceFit) -> dict[str, object]:
-    top10_fit = _fit_subset(
-        fit,
-        lambda frame: frame[frame["serp_rank"] <= IIA_TOP10_LIMIT],
-    )
     leave_one_out_fit = _fit_subset(
         fit,
         lambda frame: frame[frame["serp_rank"] > 1],
     )
     main_log_odds_per_1sd = float(fit.params[0]) * float(fit.similarity_within_keyword_sd)
     return {
-        "top10": _subset_refit_summary(
-            top10_fit,
-            main_log_odds_per_1sd,
-            reference_similarity_sd=float(fit.similarity_within_keyword_sd),
-        ),
         "leave_one_out_top_rank": _subset_refit_summary(
             leave_one_out_fit,
             main_log_odds_per_1sd,
@@ -461,11 +524,16 @@ def _subset_refit_summary(
         }
 
     log_odds_per_1sd = float(fit.params[0]) * reference_similarity_sd
+    convergence_confirmed = _convergence_confirmed(fit)
+    hessian_condition_number = _condition_number(fit.information)
     return {
-        "status": "computed",
+        "status": "computed" if convergence_confirmed else "unstable",
         "row_count": int(len(fit.model_data)),
         "keyword_count": int(fit.model_data["target_keyword_id"].nunique()),
         "log_odds_per_1sd": log_odds_per_1sd,
+        "odds_ratio_per_1sd": _safe_exp(log_odds_per_1sd),
+        "convergence_confirmed": convergence_confirmed,
+        "hessian_condition_number": hessian_condition_number,
         "log_odds_per_1sd_drift": float(log_odds_per_1sd - main_log_odds_per_1sd),
         "relative_drift": float((log_odds_per_1sd - main_log_odds_per_1sd) / main_log_odds_per_1sd)
         if main_log_odds_per_1sd != 0
@@ -480,19 +548,23 @@ def _fit_subset(
     subset = row_selector(fit.model_data)
     if subset.empty:
         return None
+    max_rank = int(subset["serp_rank"].max())
     return fit_backend_plackett_luce(
         pl.DataFrame(subset),
         backend=fit.backend,
+        max_rank=max_rank,
     )
 
 
 def _prepare_plackett_luce_frame(
     analysis_mart: pl.DataFrame,
+    *,
+    max_rank: int = DEFAULT_MAX_SERP_RANK,
 ) -> pl.DataFrame:
     return analysis_mart.filter(
         pl.col("serp_rank").is_between(
             1,
-            TOP_SERP_RANK_LIMIT,
+            max_rank,
             closed="both",
         )
     ).drop_nulls(list(PLACKET_LUCE_REQUIRED_COLUMNS))
@@ -580,8 +652,12 @@ def _maximize_log_likelihood(
     else:
         _, grad, _ = _loglik_gradient_hessian(final_params, groups)
         gradient_norm = float(np.linalg.norm(-grad))
+    # Newton-CG can report precision loss even when the gradient is already
+    # at numerical noise. Treat those solves as converged so downstream
+    # reporting does not surface a false warning.
+    converged = bool(result.success or gradient_norm <= OPTIMIZER_GRADIENT_TOLERANCE)
     optimizer_result = PlackettLuceOptimizerResult(
-        converged=bool(result.success),
+        converged=converged,
         message=str(result.message),
         iterations=int(getattr(result, "nit", 0) or 0),
         gradient_norm=gradient_norm,

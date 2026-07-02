@@ -36,7 +36,7 @@ Plackett-Luce is deferred backlog work only and is not wired in code today.
 
 #### Progress
 
-**Slices:** 6 of 15 shipped, 9 open.
+**Slices:** 11 of 20 shipped, 9 open.
 
 | # | Slice | Layer | Status | Primary deliverable |
 | - | ----- | ----- | ------ | ------------------- |
@@ -55,13 +55,18 @@ Plackett-Luce is deferred backlog work only and is not wired in code today.
 | 13 | Relative similarity sensitivity | Stats | Open | Robustness appendix on rank/pct/z |
 | 14 | Relative ranks in CLI & fixtures | CLI | Open | Keyword report + golden invariants |
 | 15 | Plackett-Luce estimand runtime wiring | Stats | Open | Load `analysis_spec.estimand.plackett_luce` at runtime |
+| 16 | Rank-depth spec and panel filtering | Stats | Shipped | `rank_depth.py` + spec `rank_depths` |
+| 17 | Per-depth Spearman and pooled OLS | Stats | Shipped | Confirmatory bundles at 20/10/5/3 |
+| 18 | Per-depth Plackett-Luce | Stats | Shipped | Primary PL per depth |
+| 19 | Rank-depth artifacts and report | Stats | Shipped | `rank_depths` JSON + report sections |
+| 20 | Rank-depth fixtures and tests | Stats | Shipped | `test_stats_rank_depth.py` |
 
 **Remaining to close Phase 5:** slices 7–15 (see `ROADMAP.md`). Slice 6 live E2E:
 **S5-11** in `FIXUPS.md` (`page_text` `tasks[].result: null` schema drift).
 
 #### Dev slices
 
-**Progress:** 6 of 15 shipped, 9 open.
+**Progress:** 11 of 20 shipped, 9 open.
 
 1. **[x] Slice 1 — Estimand & analysis spec**
    - Add `analysis_spec.v1.yaml`: outcome (`-log(serp_rank)`), predictors,
@@ -218,6 +223,30 @@ Plackett-Luce is deferred backlog work only and is not wired in code today.
     - Tests: spec-driven threshold loader and regression coverage for the
       runtime-plumbed estimator settings.
 
+16. **[x] Slice 16 — Rank-depth spec and panel filtering**
+    - Add `rank_depths` and `limitations_by_depth` to `analysis_spec.v1.yaml`.
+    - Add `src/seo_rank/stats/rank_depth.py` with `filter_panel_by_max_rank()`.
+    - Extend `AnalysisSpec` accessors and per-depth limitation text in
+      `panel.py`.
+
+17. **[x] Slice 17 — Per-depth Spearman and pooled OLS**
+    - Run confirmatory Spearman and pooled regression at ranks 1–20, 1–10,
+      1–5, and 1–3 with independent guardrails and `actionable_association`.
+
+18. **[x] Slice 18 — Per-depth Plackett-Luce**
+    - Primary PL fit per depth (not IIA subset refit from top-20).
+    - Retire top-10 IIA report section; keep leave-one-out on `top_20` only.
+
+19. **[x] Slice 19 — Rank-depth artifacts and report**
+    - Nest outputs under `stats_summary.json` → `rank_depths`.
+    - Emit four `## Rank depth:` sections in `stats_report.md`.
+    - Top-level compat shim mirrors `rank_depths.top_20`.
+
+20. **[x] Slice 20 — Rank-depth fixtures and tests**
+    - `tests/unit/test_stats_rank_depth.py` with depth-divergent fixture.
+    - Acceptance: monotonic row counts, per-depth actionable map, PL choice-set
+      bounds; see `TESTING.md`.
+
 #### Phase 5 intent
 
 - **Estimand lock** — ship `analysis_spec.v1.yaml` (outcome `-log(serp_rank)`,
@@ -230,8 +259,9 @@ Plackett-Luce is deferred backlog work only and is not wired in code today.
 - **Pooled regression secondary** — one backend per model; keyword-clustered SEs
   only in primary output; effect-size translation and `actionable_association`
   rule on BGE.
-- **Limitations in JSON** — observational, top-20 truncation, measurement-error
-  conservatism, no causal claims in `stats_summary.json` and `stats_report.md`.
+- **Limitations in JSON** — observational, depth-specific truncation (top 20 / 10 /
+  5 / 3), measurement-error conservatism, no causal claims per rank depth in
+  `stats_summary.json` and `stats_report.md`.
 - **Tests** — golden `analysis_mart`, schema contracts, guardrail skip path,
   BH boundaries, influence refit per `TESTING.md`.
 - **Relative similarity (slices 11–14)** — within-keyword rank, percentile, and
@@ -242,8 +272,11 @@ Plackett-Luce is deferred backlog work only and is not wired in code today.
 ## In Scope (current and near-term)
 
 - `analysis_spec.v1.yaml` and runtime spec loader.
-- `src/seo_rank/stats/` package (`spec`, `panel`, `spearman`, `regression`,
-  `diagnostics`, `bh`, `artifacts`).
+- `src/seo_rank/stats/` package (`spec`, `panel`, `rank_depth`, `spearman`,
+  `regression`, `diagnostics`, `bh`, `artifacts`, `plackett_luce`).
+- Parallel confirmatory rank depths (`top_20`, `top_10`, `top_5`, `top_3`) with
+  per-depth guardrails, Spearman, pooled OLS, Plackett-Luce, and
+  `actionable_association_by_rank_depth` in `stats_summary.json`.
 - `statsmodels` dependency in `pyproject.toml` (plus existing `scipy` / `numpy`).
 - Guardrail evaluation on `runs/{run_id}/parquet/analysis_mart/`.
 - Spearman + BH, pooled OLS, diagnostics, multivariate sensitivity, influence
@@ -274,24 +307,27 @@ Plackett-Luce is deferred backlog work only and is not wired in code today.
 
 ## Phase 5 acceptance criteria
 
-**Status:** 5 of 14 slices shipped, 9 open.
+**Status:** 11 of 20 slices shipped, 9 open.
 
 | Acceptance item | Slice(s) | Status |
 | --------------- | -------- | ------ |
 | `analysis_spec.v1.yaml` loaded; estimand version in outputs | 1, 2 | Shipped |
-| Guardrail hard-fail skips inference; warn surfaces in JSON | 3, 9 | Open |
-| Spearman + BH per backend when K ≥ 10 | 4 | Open |
-| Pooled regression with keyword-clustered SEs only in primary output | 5 | Shipped |
-| Effect-size translation + `actionable_association` rule | 5, 9 | Open |
-| Pooled diagnostics + influence % in diagnostics JSON | 6, 8 | Open |
+| Guardrail hard-fail skips inference; warn surfaces in JSON | 3, 9, 16–20 | Shipped (per depth) |
+| Spearman + BH per backend when K ≥ 10 | 4, 17 | Shipped (per depth) |
+| Pooled regression with keyword-clustered SEs only in primary output | 5, 17 | Shipped (per depth) |
+| Effect-size translation + `actionable_association` rule | 5, 9, 17 | Shipped (per depth) |
+| Pooled diagnostics + influence % in diagnostics JSON | 6, 8, 17 | Shipped (per depth; influence guardrail Slice 8 open) |
 | `page_text` accepts `tasks[].result: null`; live run continues (S5-11) | 6 | Open |
 | Multivariate sensitivity with VIF drop order | 7 | Open |
-| Limitations in JSON and Markdown | 9 | Open |
+| Limitations in JSON and Markdown | 9, 19 | Shipped (per depth) |
 | `seo-rank analyze` exit code + dry-run skip | 9 | Open |
 | Golden fixture ρ/slope within tolerance | 10 | Open |
 | Within-keyword rank/pct/z columns in `analysis_mart.v2` | 11, 12 | Open |
 | Relative similarity robustness in `stats_diagnostics.json` | 13 | Open |
 | CLI keyword report surfaces relative ranks | 14 | Open |
+| Parallel confirmatory rank depths (20/10/5/3) | 16–20 | Shipped |
+| `actionable_association_by_rank_depth` in summary JSON | 19 | Shipped |
+| `rank_depths` nested JSON + four `## Rank depth:` report sections | 19 | Shipped |
 
 ---
 

@@ -87,18 +87,19 @@ The repository contains an **offline-verifiable CLI scaffold** (Phase 1 shipped)
   `build-features`, `analyze`, `replay`, and `run --stored-run`, which resumes
   partial runs in place from the stored lake before re-materializing downstream
   marts
-- **Tests:** 215 tests under `tests/`; gate: `python -m pytest`; Phase 4.5 Slice 7
+- **Tests:** 234 tests under `tests/`; gate: `python -m pytest`; Phase 4.5 Slice 7
   shipped the round-trip regression sweep in `test_sdlc_docs.py`
 - **Product docs:** `ARCHITECTURE.md`, `GOALS.md`, `ROADMAP.md`, `README.md`,
   `TESTING.md`
-- **Not yet:** multivariate sensitivity, influence robustness, and final CLI
-  stats expansion (Phase 5 slices 7–10)
+- **Not yet:** multivariate sensitivity, influence robustness appendix, golden
+  fixtures, and final CLI stats expansion (Phase 5 slices 7–10, 15)
 
 Module and artifact details are in [Application Surface](#application-surface)
 and [Key Product Components](#key-product-components) below. Phase 5 slices 1–6
-ship the estimand spec, stats package scaffold, guardrails, Spearman/BH primary
-path, pooled regression, and pooled diagnostics; confirmatory inference and
-CLI wiring continue in slices 7–10.
+and 16–20 ship the estimand spec, stats package, guardrails, Spearman/BH primary
+path, pooled regression, pooled diagnostics, and parallel confirmatory rank
+depths (top 20 / 10 / 5 / 3); multivariate sensitivity, influence robustness,
+golden fixtures, and final CLI expansion continue in slices 7–10 and 15.
 
 ## Key Product Components
 
@@ -126,12 +127,13 @@ CLI wiring continue in slices 7–10.
   `--live-gemini`; local **BGE** (`BAAI/bge-reranker-v2-m3`) behind
   `--live-bge` — see [Live similarity backends (Phase 4)](#live-similarity-backends-phase-4)
   and [Planned Page Similarity Run](#planned-page-similarity-run).
-- **Analysis engine (in progress, Phase 5):** slices 1–6 shipped —
-  `analysis_spec.v1.yaml`, `src/seo_rank/stats/` scaffold, guardrails/panel
-  prep, Spearman + BH, pooled OLS with clustered regression summaries, and
-  pooled OLS diagnostics. Multivariate sensitivity, robustness appendices, and
-  final CLI stats expansion remain in slices 7–10 — see [Planned Per-Run
-  Statistical Analysis](#planned-per-run-statistical-analysis).
+- **Analysis engine (in progress, Phase 5):** slices 1–6 and 16–20 shipped —
+  `analysis_spec.v1.yaml`, `src/seo_rank/stats/` (including `rank_depth.py`),
+  guardrails/panel prep, Spearman + BH, pooled OLS with clustered regression
+  summaries, pooled OLS diagnostics, and parallel confirmatory rank-depth bundles
+  at top 20 / 10 / 5 / 3. Multivariate sensitivity, influence robustness,
+  golden fixtures, and final CLI stats expansion remain in slices 7–10 and 15 —
+  see [Planned Per-Run Statistical Analysis](#planned-per-run-statistical-analysis).
 - **Reporters (shipped):** JSON + Markdown under the selected run root;
   `seo-rank run` defaults to `runs/{run_id}/` when `--output-dir` is omitted
   and still supports explicit overrides. Long runs emit `[seo-rank]` progress on
@@ -169,8 +171,9 @@ downstream chain. `analyze` backfills missing feature marts before writing
 the provider long-term.
 
 **Planned full pipeline (Phase 5+):** lazy Polars joins on `analysis_mart` →
-guardrails → keyword-level Spearman ρ with BH per backend → pooled OLS with
-clustered SEs and diagnostics → `runs/{run_id}/stats/` artifacts.
+guardrails → parallel confirmatory rank-depth bundles (top 20 / 10 / 5 / 3) →
+keyword-level Spearman ρ with BH per backend → pooled OLS with clustered SEs and
+diagnostics → page-level Plackett-Luce per depth → `runs/{run_id}/stats/` artifacts.
 
 **Planned workflow integrity (Phase 6):** every required accounting unit must
 reach a permitted terminal disposition at each applicable boundary, proven from
@@ -368,8 +371,10 @@ src/seo_rank/data/
 src/seo_rank/stats/   # Phase 5 observational analysis (see ROADMAP.md)
   spec.py         # load analysis_spec.v1.yaml
   panel.py        # mart load, filter, guardrails
+  rank_depth.py   # filter_panel_by_max_rank for confirmatory depths
   spearman.py     # per-keyword ρ + BH
   regression.py   # pooled OLS, clustered SEs, effect size
+  plackett_luce.py # page-level rank-ordered logit per depth
   diagnostics.py  # RESET, BP, influence, multivariate VIF
   bh.py           # Benjamini–Hochberg within backend family
   artifacts.py    # stats_summary.json, stats_diagnostics.json, stats_report.md
@@ -383,14 +388,14 @@ src/seo_rank/stats/   # Phase 5 observational analysis (see ROADMAP.md)
 | `marts.py` | Join feature marts into `analysis_mart` at `target_keyword × SERP URL` grain |
 | `validate.py` | Schema contracts plus row-level uniqueness, null, and range audits; used before every mart write or at the sink edge |
 
-**Phase 5 stats package** (`src/seo_rank/stats/`): **slices 1–6 shipped** —
-`spec.py` loads `analysis_spec.v1.yaml`; `artifacts.py` exposes estimand-version
-metadata for future `stats_*` outputs. Placeholder modules (`panel.py`,
-`spearman.py`, `regression.py`, `diagnostics.py`, `bh.py`) now include
-guardrails, the Spearman/BH primary path, pooled regression summaries with
-keyword-clustered SEs plus two-way-cluster sensitivity, and pooled OLS
-diagnostics; later slices add multivariate sensitivity and the remaining
-robustness paths.
+**Phase 5 stats package** (`src/seo_rank/stats/`): **slices 1–6 and 16–20
+shipped** — `spec.py` loads `analysis_spec.v1.yaml` (including `rank_depths` and
+`limitations_by_depth`); `rank_depth.py` filters panels by max SERP rank;
+`panel.py` prepares per-depth guardrails and limitations; `artifacts.py` runs
+`run_phase5_stats()` with nested `rank_depths` JSON, four `## Rank depth:`
+report sections, and a top-20 compat shim. `spearman.py`, `regression.py`,
+`plackett_luce.py`, and `diagnostics.py` each emit per-depth summaries.
+Multivariate sensitivity and influence robustness remain in slices 7–8.
 Dependencies: `statsmodels`, `numpy`, `scipy`, `PyYAML` in `pyproject.toml`.
 Spec: `analysis_spec.v1.yaml`.
 
@@ -534,10 +539,16 @@ runs full stats:
 | Within-keyword similarity variance | > 0 | warn |
 | Influential rows (Cook's D > 4/n) | report %; warn if > 5% | warn (deferred — influence counts in `stats_diagnostics.json`; guardrail evaluation in Slice 8) |
 
-**Limitations** (required in `stats_summary.json` `limitations` object **and**
-`stats_report.md`): observational only; associations within observed top 20 only
-(incidental truncation; rank-20 ≠ unranked); no causal ranking-factor claims;
-measurement error on similarity scores.
+**Limitations** (required per rank depth in `stats_summary.json` `rank_depths.*.limitations`
+**and** `stats_report.md`): observational only; depth-specific truncation
+(top 20 / 10 / 5 / 3 observed SERP rows only; incidental truncation); no causal
+ranking-factor claims; measurement error on similarity scores.
+
+**Rank-depth confirmatory paths (shipped):** `run_phase5_stats()` runs parallel
+confirmatory bundles at `top_20`, `top_10`, `top_5`, and `top_3`. Each depth
+gets its own guardrails, Spearman, pooled OLS, page-level Plackett-Luce, pooled
+diagnostics, limitations, and `actionable_association`. `primary_rank_depth` stays
+`top_20`; top-level summary fields mirror `rank_depths.top_20` for compat.
 
 **Diagnostics (pooled feature model per backend):** RESET, Breusch–Pagan (→ HC3
 when flagged), Cook's D plus leverage / studentized residuals / DFFITS /
@@ -546,37 +557,47 @@ normality as primary gates; pooled Shapiro is informational when n < 50. Skip
 LOWESS/CCPR file artifacts in v1 unless debug.
 
 **Plackett-Luce (page-level, secondary):** rank-ordered logit on the same
-`analysis_mart` panel, using the observed top-20 page rows per keyword and
-keyword-clustered inference. The implementation reports coefficient scale,
-odds ratios per 1 SD similarity increase, optimizer stability, Hessian
-conditioning, and IIA subset refits. Passage-level Plackett-Luce remains
-deferred backlog work only.
+`analysis_mart` panel at each confirmatory rank depth, using observed page rows
+per keyword with `serp_rank` capped at that depth and keyword-clustered inference.
+The implementation reports odds ratios per 1 SD similarity increase, optimizer
+stability, Hessian conditioning, and leave-one-out-top-rank IIA on `top_20` only.
+Passage-level Plackett-Luce remains deferred backlog work only.
 
 **Module layout:** `src/seo_rank/stats/`; spec in `analysis_spec.v1.yaml`.
 Phase 5.75 features → `analysis_spec.v2.yaml`.
 
 **Outputs:** `runs/{run_id}/stats/stats_summary.json`, `stats_diagnostics.json`,
-`stats_report.md`; link from `report.md`. The stats summary includes the
-Plackett-Luce section alongside Spearman and pooled regression, while the
-diagnostics file includes optimizer and IIA sensitivity details. CLI:
-`seo-rank analyze`; exit 1 on guardrail hard-fail (overridable); skip stats on
-`--dry-run` and documented fixture modes only.
+`stats_report.md`; link from `report.md`. Nested under `rank_depths` at
+`top_20`, `top_10`, `top_5`, and `top_3` with per-depth guardrails, Spearman,
+pooled regression, Plackett-Luce, limitations, and `actionable_association`.
+Top-level summary fields mirror `rank_depths.top_20` for backward compatibility.
+`actionable_association_by_rank_depth` maps each depth to its BGE rule outcome.
+The diagnostics file nests regression and Plackett-Luce diagnostics per depth;
+leave-one-out IIA appears under `top_20` only. CLI: `seo-rank analyze`; exit 1
+on guardrail hard-fail (overridable); skip stats on `--dry-run` and documented
+fixture modes only.
 
 **Deferred (Phase 5.1):** rank-decile segments, keyword heterogeneity deep-dives,
 confirmatory keyword holdout, IV / `PanelOLS`, URL fixed effects.
 
 ### Pipeline steps
 
-1. Load `analysis_spec.v1.yaml`; materialize panel; evaluate guardrails.
-2. On hard-fail: write guardrails + limitations; skip confirmatory inference.
-3. Compute keyword-level Spearman ρ; BH within each backend family when K ≥ 10.
-4. Fit baseline and univariate pooled models with keyword-clustered SEs; effect
-   size translation; optional two-way-cluster sensitivity.
-5. Fit page-level Plackett-Luce rank-ordered logit; report odds ratios per 1 SD,
-   optimizer stability, Hessian conditioning, and IIA refits.
-6. Run pooled diagnostics; multivariate VIF sensitivity; influence refit appendix.
-7. Emit `stats_*` artifacts; link from `report.md`; set `actionable_association`
-   per BGE rule.
+1. Load `analysis_spec.v1.yaml`; materialize panel; evaluate guardrails per
+   confirmatory rank depth (`top_20`, `top_10`, `top_5`, `top_3`).
+2. On hard-fail at a depth: write that depth's guardrails + limitations; skip
+   confirmatory inference for that depth only.
+3. Compute keyword-level Spearman ρ per depth; BH within each backend family
+   when K ≥ 10.
+4. Fit baseline and univariate pooled models per depth with keyword-clustered
+   SEs; effect-size translation; optional two-way-cluster sensitivity.
+5. Fit page-level Plackett-Luce rank-ordered logit per depth; report odds ratios
+   per 1 SD, optimizer stability, Hessian conditioning; leave-one-out IIA on
+   `top_20` only.
+6. Run pooled diagnostics per depth; multivariate VIF sensitivity; influence
+   refit appendix (Slice 8).
+7. Emit nested `stats_*` artifacts; link from `report.md`; set
+   `actionable_association` and `actionable_association_by_rank_depth` per BGE
+   rule.
 
 Do not skip any page-level scorer or the statistical analysis step on individual
 runs unless the run is an explicit offline fixture or dry-run test mode

@@ -14,7 +14,7 @@ Pytest configuration and verification contract for SEO-Research.
   interpreter
 - Lint / type-check / build / coverage: not configured
 - Expected test duration: fast (< 1s)
-- **Current verification status:** 215 tests collected; 214 passing; 1 skipped
+- **Current verification status:** 234 tests collected; 234 passing
 
 ## Active Verification Command
 
@@ -62,7 +62,8 @@ placeholders only.
 | `test_stats_spearman.py` | Benjamini-Hochberg adjustment, backend Spearman summaries, and Spearman artifact emission on passing panels |
 | `test_stats_diagnostics.py` | Pooled OLS diagnostics, small-sample Shapiro handling, diagnostic artifact emission on passing panels, and skipped-backend diagnostics behavior |
 | `test_stats_regression.py` | Pooled baseline and per-backend feature regressions with keyword-clustered SEs, effect-size translation, two-way-cluster sensitivity, and regression artifact emission on passing panels |
-| `test_stats_plackett_luce.py` | Page-level Plackett-Luce rank-ordered logit summaries, partial-ranking handling, optimizer / IIA diagnostics, and PL artifact emission on passing panels |
+| `test_stats_plackett_luce.py` | Page-level Plackett-Luce rank-ordered logit summaries, partial-ranking handling, optimizer / leave-one-out IIA diagnostics, and PL artifact emission on passing panels |
+| `test_stats_rank_depth.py` | Rank-depth confirmatory slices: spec accessors, panel filtering, per-depth Spearman/OLS/PL, monotonic row counts, `rank_depths` JSON + report sections |
 | `test_round_trip.py` | Dedicated Parquet lake write → normalize → build-features → analyze round-trip regression sweep on real Parquet artifacts; validates `run.json` updates and keyword-filtered `analyze` output |
 | `test_keyword_expansion.py` | 1-keyword default, deduplication, raw provider payload |
 | `test_serp_normalization.py` | Organic-only SERP rows, depth cap |
@@ -98,7 +99,7 @@ Mock nondeterministic or destructive external effects (network, paid APIs,
 credentials). Prefer integration tests at real boundaries once live clients
 exist.
 
-## Shipped tests — Phase 5 slices 1–6
+## Shipped tests — Phase 5 slices 1–6 and 16–20
 
 - **`analysis_spec.v1.yaml` contract** — `tests/unit/test_sdlc_docs.py::
   test_phase_5_slice_1_defines_analysis_spec_v1` asserts estimand fields
@@ -111,8 +112,8 @@ exist.
   `analysis_spec_version` / `estimand_version`.
 - **Stats package surface** — `tests/unit/test_stats_spec.py::
   test_stats_package_exports_module_surface` asserts `seo_rank.stats` exports
-  `spec`, `panel`, `spearman`, `regression`, `diagnostics`, `bh`, and
-  `artifacts`.
+  `spec`, `panel`, `rank_depth`, `spearman`, `regression`, `plackett_luce`,
+  `diagnostics`, `bh`, and `artifacts`.
 - **Guardrail evaluation and hard-fail artifacts** —
   `tests/unit/test_stats_panel.py` covers top-20 filtering, primary-backend
   null dropping, SERP-rank variance hard-fail, similarity-variance warn, full
@@ -128,8 +129,12 @@ exist.
 - **Page-level Plackett-Luce secondary path** —
   `tests/unit/test_stats_plackett_luce.py` covers the rank-ordered logit fit,
   partial-ranking row dropping, optimizer convergence / non-convergence,
-  choice-set sizing, IIA sensitivity, and PL sections in `stats_summary.json`
-  / `stats_diagnostics.json` / `stats_report.md`.
+  choice-set sizing, leave-one-out IIA on `top_20`, and per-depth PL sections in
+  `stats_summary.json` / `stats_diagnostics.json` / `stats_report.md`.
+- **Rank-depth confirmatory slices** — `tests/unit/test_stats_rank_depth.py`
+  covers spec accessors, `filter_panel_by_max_rank`, per-depth Spearman/OLS/PL,
+  monotonic row counts, `actionable_association_by_rank_depth`, and four
+  `## Rank depth:` report sections.
 - **Pooled OLS diagnostics** — `tests/unit/test_stats_diagnostics.py` covers
   RESET, Breusch–Pagan with HC3 recommendation, Cook's D and influence flags,
   small-sample Shapiro as informational, skipped-backend diagnostics, and
@@ -137,24 +142,27 @@ exist.
 
 ## Planned tests (not yet in suite) — Phase 5 active scope
 
-See `GOALS.md` and `ROADMAP.md` § Phase 5 slices 7–14.
+See `GOALS.md` and `ROADMAP.md` § Phase 5 slices 7–15.
 
 - Feature marts and `analysis_mart` join keys (`run_id`, `target_keyword_id`,
   `canonical_url_hash`, `response_id`, `passage_id`)
 - Passage / domain similarity scopes (feature marts; Phase 5.5 scoring)
 
-### Phase 5 — statistical analysis (see `ROADMAP.md` slices 7–14)
+### Phase 5 — statistical analysis (see `ROADMAP.md` slices 7–15)
 
 - **Golden `analysis_mart` fixture** — synthetic panel with known Spearman ρ and
   pooled slope per backend; tolerance bands for regression coefficients,
   correlation summaries, and effect-size translation.
-- **`stats_summary.json` schema** — estimand version, `guardrails[]`,
-  `limitations` object, per-backend ρ median/IQR, BH q-values (or
-  `bh_skipped_reason`), pooled coefficients + clustered CIs,
-  `actionable_association`, effect-size fields; assert naive IID SEs absent.
-- **`stats_diagnostics.json` schema** — RESET/BP flags, influence counts and %,
-  leverage/DFFITS/DFBETAs, multivariate VIF + drop log, `influence_sensitivity`
-  block, optional two-way-cluster CIs.
+- **`stats_summary.json` schema** — estimand version, `primary_rank_depth`,
+  `confirmatory_rank_depths`, nested `rank_depths` (guardrails, limitations,
+  per-backend ρ median/IQR, BH q-values or `bh_skipped_reason`, pooled
+  coefficients + clustered CIs, `actionable_association`,
+  `actionable_association_by_rank_depth`); top-level compat shim mirrors
+  `rank_depths.top_20`; assert naive IID SEs absent.
+- **`stats_diagnostics.json` schema** — nested `rank_depths` with RESET/BP
+  flags, influence counts and %, leverage/DFFITS/DFBETAs, multivariate VIF +
+  drop log, `influence_sensitivity` block, optional two-way-cluster CIs;
+  leave-one-out IIA under `rank_depths.top_20.plackett_luce` only.
 - **Guardrail gates** — hard-fail skips BH and actionable flag; warn still emits
   full stats; CLI exit 1 on hard-fail unless `--no-fail-on-guardrails`.
 - **BH policy** — within-backend family only; skipped when K < 10; diagnostics

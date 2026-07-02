@@ -61,16 +61,26 @@ and limitations. On **warn**, run full stats but surface warnings prominently.
 | Within-keyword variance in each similarity column | > 0 per keyword with data | warn |
 | Influential rows (Cook's D > 4/n on pooled BGE model) | report %; warn if > 5% | warn (deferred — counts in `stats_diagnostics.json` today; guardrail evaluation in Slice 8) |
 
-**Outputs:** `runs/{run_id}/stats/stats_summary.json` (includes `limitations`
-object), `stats_diagnostics.json`, `stats_report.md`. Link from existing
-`report.md` to `stats/stats_report.md` when stats run. Limitations also belong
-in JSON, not Markdown-only.
+**Outputs:** `runs/{run_id}/stats/stats_summary.json` (includes per-depth
+`rank_depths.*.limitations`, top-level compat shim mirroring `top_20`),
+`stats_diagnostics.json` (nested `rank_depths`), `stats_report.md` (four
+`## Rank depth:` sections). Link from existing `report.md` to
+`stats/stats_report.md` when stats run. Limitations also belong in JSON, not
+Markdown-only.
+
+**Rank-depth confirmatory paths (shipped, slices 16–20):** `run_phase5_stats()`
+runs parallel bundles at `top_20`, `top_10`, `top_5`, and `top_3`. Each depth
+gets independent guardrails, Spearman, pooled OLS, page-level Plackett-Luce,
+pooled diagnostics, limitations, and `actionable_association`.
+`primary_rank_depth` stays `top_20`; summary metadata exposes
+`actionable_association_by_rank_depth`.
 
 **Plackett-Luce (page-level, secondary):** rank-ordered logit on the same
-`analysis_mart` panel, using the observed top-20 page rows per keyword and
-keyword-clustered inference. It is additive to Spearman and pooled OLS, not a
-replacement. Passage-level Plackett-Luce remains deferred backlog work only and
-is not wired in code today.
+`analysis_mart` panel at each confirmatory rank depth, using observed page rows
+per keyword with `serp_rank` capped at that depth and keyword-clustered
+inference. Leave-one-out-top-rank IIA runs on `top_20` only. It is additive to
+Spearman and pooled OLS, not a replacement. Passage-level Plackett-Luce remains
+deferred backlog work only.
 
 **CLI:** `seo-rank analyze --run RUN_ID` materializes `analysis_mart`, runs
 Phase 5 stats when guardrails allow, writes `stats_*`. Exit **1** on guardrail
@@ -87,7 +97,7 @@ confirmatory keyword holdout (Phase 5.4), passage-level Plackett-Luce analysis.
 
 #### Dev slices
 
-**Progress:** 5 of 15 shipped, 10 open.
+**Progress:** 11 of 20 shipped, 9 open.
 
 1. **[x] Slice 1 — Estimand & analysis spec**
    - Add `analysis_spec.v1.yaml`: outcome (`-log(serp_rank)`), predictors,
@@ -168,8 +178,9 @@ confirmatory keyword holdout (Phase 5.4), passage-level Plackett-Luce analysis.
 9. **[ ] Slice 9 — Stats artifacts & CLI**
    - `stats_summary.json`: estimand version, guardrails, per-backend ρ, BH
      q-values, pooled coefficients + clustered CIs, effect-size translation,
-     `actionable_association`, **`limitations` object** (observational, top-20
-     truncation, no causal claims, measurement-error conservatism).
+     `actionable_association`, **`limitations` per rank depth** (observational,
+     depth-specific truncation, no causal claims, measurement-error
+     conservatism), nested under `rank_depths` with top-20 compat shim.
    - `stats_diagnostics.json`: diagnostic flags, influence counts, multivariate
      VIF, influence_sensitivity, optional two-way-cluster CIs.
    - `stats_report.md`: human summary mirroring JSON limitations.
@@ -240,6 +251,24 @@ confirmatory keyword holdout (Phase 5.4), passage-level Plackett-Luce analysis.
     - Tests: spec-driven threshold loader and regression coverage for the
       runtime-plumbed estimator settings.
 
+16. **[x] Slice 16 — Rank-depth spec and panel filtering**
+    - `rank_depths` / `limitations_by_depth` in `analysis_spec.v1.yaml`.
+    - `rank_depth.py` filter helper; `AnalysisSpec` accessors; per-depth
+      limitation text.
+
+17. **[x] Slice 17 — Per-depth Spearman and pooled OLS**
+    - Confirmatory Spearman + pooled OLS at top 20 / 10 / 5 / 3.
+
+18. **[x] Slice 18 — Per-depth Plackett-Luce**
+    - Primary PL per depth; leave-one-out IIA on `top_20` only.
+
+19. **[x] Slice 19 — Rank-depth artifacts and report**
+    - `rank_depths` in `stats_summary.json` / `stats_diagnostics.json`.
+    - Four `## Rank depth:` sections in `stats_report.md`; top-20 compat shim.
+
+20. **[x] Slice 20 — Rank-depth fixtures and tests**
+    - `test_stats_rank_depth.py`; depth-divergent fixture; acceptance table.
+
 #### Phase 5 acceptance criteria
 
 | Acceptance item | Slice(s) | Status |
@@ -257,6 +286,9 @@ confirmatory keyword holdout (Phase 5.4), passage-level Plackett-Luce analysis.
 | Within-keyword rank/pct/z columns in `analysis_mart.v2` | 11, 12 | Open |
 | Relative similarity robustness in `stats_diagnostics.json` | 13 | Open |
 | CLI keyword report surfaces relative ranks | 14 | Open |
+| Parallel confirmatory rank depths (20/10/5/3) | 16–20 | Shipped |
+| `actionable_association_by_rank_depth` in summary JSON | 19 | Shipped |
+| `rank_depths` nested JSON + four `## Rank depth:` report sections | 19 | Shipped |
 
 ### Phase 5.1 — Live provider fail-fast on DataForSEO denial
 
@@ -776,6 +808,14 @@ Later boundaries (`curated → feature marts`, `feature marts → analysis_mart`
   on passing guardrails, covered by `tests/unit/test_stats_diagnostics.py`.
   `normalize` now materializes `similarity_scores` from `run.json`
   `page_similarity` instead of recomputing scores during curation.
+- **Phase 5 Slices 16–20 shipped (2026-07-02):** parallel confirmatory rank-depth
+  bundles at `top_20`, `top_10`, `top_5`, and `top_3` — `rank_depths` and
+  `limitations_by_depth` in `analysis_spec.v1.yaml`, `rank_depth.py` panel
+  filtering, per-depth Spearman/OLS/Plackett-Luce/diagnostics, nested
+  `rank_depths` in `stats_summary.json` / `stats_diagnostics.json`, four
+  `## Rank depth:` sections in `stats_report.md`,
+  `actionable_association_by_rank_depth`, leave-one-out IIA on `top_20` only;
+  covered by `tests/unit/test_stats_rank_depth.py`.
 - **Phase 5.1 planned (2026-07-02):** live provider fail-fast on fatal DataForSEO
   task errors (`40207` IP whitelist, auth failures) — shared classifier, abort on
   all live endpoints, optional preflight, CLI flag override on stored-run replay,

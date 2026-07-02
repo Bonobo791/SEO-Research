@@ -124,11 +124,14 @@ see `ROADMAP.md` (BGE hybrid / retrieve-then-rerank backlog).
 columns and page text length). If feature marts are missing, it materializes
 them first from the curated tables. It does **not** re-fetch pages or re-run
 embeddings. The current stats path runs guardrails, Spearman summaries,
-pooled regression summaries, and page-level Plackett-Luce summaries into
-`runs/{run_id}/stats/`, including `stats_summary.json`,
-`stats_diagnostics.json`, and `stats_report.md`; later slices expand CLI
-reporting. Passage-level Plackett-Luce remains deferred backlog work and is
-not wired into `analyze` today.
+pooled regression summaries, and page-level Plackett-Luce summaries at four
+confirmatory rank depths (`top_20`, `top_10`, `top_5`, `top_3`) into
+`runs/{run_id}/stats/`, including nested `rank_depths` in
+`stats_summary.json` and `stats_diagnostics.json`, four `## Rank depth:`
+sections in `stats_report.md`, and `actionable_association_by_rank_depth`.
+Top-level summary fields mirror `rank_depths.top_20` for compatibility.
+Passage-level Plackett-Luce remains deferred backlog work and is not wired
+into `analyze` today.
 
 ### Standalone script
 
@@ -284,6 +287,7 @@ response.
 |------|---------|
 | `src/seo_rank/` | CLI, provider boundaries, `progress.py` (stderr run logging) |
 | `src/seo_rank/data/` | Polars lake transforms: `scans`, `normalize`, `features`, `marts`, `validate` |
+| `src/seo_rank/stats/` | Phase 5 observational analysis (`spec`, `panel`, `rank_depth`, `spearman`, `regression`, `plackett_luce`, `diagnostics`, `artifacts`) |
 | `tests/unit/` | pytest unit tests |
 | `ARCHITECTURE.md` | Product architecture, data flow, planned pipeline |
 | `GOALS.md` | Active-scope contract |

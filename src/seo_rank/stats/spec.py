@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -9,6 +10,8 @@ from typing import Any, Mapping
 
 import yaml
 
+
+logger = logging.getLogger(__name__)
 
 ANALYSIS_SPEC_FILENAME = "analysis_spec.v1.yaml"
 
@@ -42,6 +45,23 @@ class AnalysisSpec:
     def estimand(self) -> Mapping[str, Any]:
         return MappingProxyType(dict(self.data["estimand"]))
 
+    @property
+    def primary_rank_depth(self) -> str:
+        return str(self.data["rank_depths"]["primary"])
+
+    @property
+    def confirmatory_rank_depths(self) -> tuple[str, ...]:
+        depth_order = self.data["rank_depths"]["confirmatory_order"]
+        return tuple(str(depth_key) for depth_key in depth_order)
+
+    def rank_depth_limit(self, depth_key: str) -> int:
+        limits = self.data["rank_depths"]["limits"]
+        return int(limits[depth_key])
+
+    def limitation_key_for_rank_depth(self, depth_key: str) -> str:
+        limitations_by_depth = self.data["limitations_by_depth"]
+        return str(limitations_by_depth[depth_key])
+
 
 def load_analysis_spec(path: Path | str | None = None) -> AnalysisSpec:
     """Load the committed analysis spec from disk."""
@@ -52,11 +72,19 @@ def load_analysis_spec(path: Path | str | None = None) -> AnalysisSpec:
         loaded = yaml.safe_load(handle)
     if not isinstance(loaded, dict):
         raise ValueError("analysis spec must load as a mapping")
-    return AnalysisSpec(
+    analysis_spec = AnalysisSpec(
         path=requested_path,
         source_path=source_path,
         data=MappingProxyType(dict(loaded)),
     )
+    logger.info(
+        "loaded analysis spec version=%s source=%s primary_rank_depth=%s depths=%s",
+        analysis_spec.version,
+        source_path,
+        analysis_spec.primary_rank_depth,
+        list(analysis_spec.confirmatory_rank_depths),
+    )
+    return analysis_spec
 
 
 def _resolve_analysis_spec_path(requested_path: Path) -> Path:

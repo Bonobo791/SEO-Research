@@ -1,4 +1,7 @@
+import logging
 from pathlib import Path
+
+import pytest
 
 import seo_rank.stats as stats
 from seo_rank.stats import artifacts
@@ -10,6 +13,7 @@ def test_stats_package_exports_module_surface() -> None:
     assert stats.panel.__name__ == "seo_rank.stats.panel"
     assert stats.spearman.__name__ == "seo_rank.stats.spearman"
     assert stats.plackett_luce.__name__ == "seo_rank.stats.plackett_luce"
+    assert stats.rank_depth.__name__ == "seo_rank.stats.rank_depth"
     assert stats.regression.__name__ == "seo_rank.stats.regression"
     assert stats.diagnostics.__name__ == "seo_rank.stats.diagnostics"
     assert stats.bh.__name__ == "seo_rank.stats.bh"
@@ -40,9 +44,20 @@ def test_load_analysis_spec_includes_plackett_luce_secondary_estimand() -> None:
     assert plackett_luce["clustered_se"] == "target_keyword_id"
     assert plackett_luce["choice_set_scope"] == "observed_top_20_serp_results_per_keyword"
     assert plackett_luce["iia_sensitivity"] == {
-        "top_20_vs_top_10": True,
         "leave_one_out_top_rank": True,
     }
+
+
+def test_load_analysis_spec_logs_version_and_rank_depths(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger="seo_rank.stats.spec")
+
+    load_analysis_spec()
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("loaded analysis spec version=v1" in message for message in messages)
+    assert any("primary_rank_depth=top_20" in message for message in messages)
 
 
 def test_build_stats_output_metadata_exposes_estimand_version() -> None:
@@ -58,4 +73,6 @@ def test_build_stats_output_metadata_exposes_estimand_version() -> None:
             "gemini_doc_retrieval",
             "gemini_semantic_similarity",
         ],
+        "primary_rank_depth": "top_20",
+        "confirmatory_rank_depths": ["top_20", "top_10", "top_5", "top_3"],
     }

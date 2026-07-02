@@ -1,10 +1,14 @@
 import json
+import logging
 from pathlib import Path
+from types import MappingProxyType
 
 import polars as pl
+import pytest
 
 from seo_rank.stats.artifacts import run_phase5_stats
-from seo_rank.stats.panel import load_analysis_panel
+from seo_rank.stats.panel import load_analysis_panel, prepare_analysis_panel, prepare_rank_depth_panel
+from seo_rank.stats.spec import AnalysisSpec, load_analysis_spec
 
 
 def _analysis_mart_frame() -> pl.DataFrame:
@@ -145,6 +149,50 @@ def _zero_serp_variance_frame() -> pl.DataFrame:
     )
 
 
+def _analysis_spec_with_primary_rank_depth(depth_key: str) -> AnalysisSpec:
+    spec = load_analysis_spec()
+    data = dict(spec.data)
+    rank_depths = dict(data["rank_depths"])
+    rank_depths["primary"] = depth_key
+    data["rank_depths"] = rank_depths
+    return AnalysisSpec(
+        path=spec.path,
+        source_path=spec.source_path,
+        data=MappingProxyType(data),
+    )
+
+
+def _analysis_mart_frame_with_depth(max_rank: int) -> pl.DataFrame:
+    rows: list[dict[str, object]] = []
+    for serp_rank in range(1, max_rank + 1):
+        rows.append(
+            {
+                "run_id": "run-1",
+                "target_keyword_id": "kw-1",
+                "target_keyword": "keyword 1",
+                "keyword_order": 1,
+                "source_response_id": "resp-1",
+                "serp_item_id": f"serp-1-{serp_rank}",
+                "page_id": f"page-1-{serp_rank}",
+                "response_id": f"page-resp-1-{serp_rank}",
+                "canonical_url_hash": f"url-1-{serp_rank}",
+                "url": f"https://example.com/1/{serp_rank}",
+                "serp_rank": serp_rank,
+                "title": f"title-1-{serp_rank}",
+                "description": f"description-1-{serp_rank}",
+                "page_text_length": 100 + serp_rank,
+                "bge_raw_score": 1.0 - serp_rank * 0.01,
+                "bge_normalized_score": 1.0 - serp_rank * 0.01,
+                "gemini_doc_retrieval_raw_score": 0.8,
+                "gemini_doc_retrieval_normalized_score": 0.8,
+                "gemini_semantic_similarity_raw_score": 0.7,
+                "gemini_semantic_similarity_normalized_score": 0.7,
+                "schema_version": "analysis_mart.v1",
+            }
+        )
+    return pl.DataFrame(rows)
+
+
 def test_load_analysis_panel_filters_top20_and_evaluates_guardrails(
     tmp_path: Path,
     monkeypatch,
@@ -188,6 +236,57 @@ def test_load_analysis_panel_filters_top20_and_evaluates_guardrails(
         "no_causal_claims": "Do not interpret coefficients as causal ranking factors.",
         "measurement_error_conservative": "Similarity scores are model outputs and may attenuate effects.",
     }
+
+
+def test_prepare_analysis_panel_uses_spec_primary_rank_depth_limit(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "runs" / "run-1"
+    spec = _analysis_spec_with_primary_rank_depth("top_10")
+    analysis_mart = _analysis_mart_frame_with_depth(15)
+
+    result = prepare_analysis_panel(run_dir, analysis_mart, spec=spec)
+
+    assert result.analysis_mart.height == 10
+    assert result.analysis_mart.select(pl.col("serp_rank").max()).item() == 10
+    assert result.panel.height == 10
+
+
+def test_load_analysis_panel_logs_panel_shape(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    run_dir = tmp_path / "runs" / "run-1"
+    (run_dir / "parquet" / "analysis_mart").mkdir(parents=True)
+
+    monkeypatch.setattr(
+        "seo_rank.stats.panel.scan_curated_table",
+        lambda path, table_name: _analysis_mart_frame().lazy(),
+    )
+    caplog.set_level(logging.INFO, logger="seo_rank.stats.panel")
+
+    load_analysis_panel(run_dir)
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("loading analysis panel" in message for message in messages)
+    assert any("loaded analysis panel" in message and "mart_rows=20" in message for message in messages)
+    assert any("prepared analysis panel" in message for message in messages)
+
+
+def test_prepare_rank_depth_panel_logs_depth_shape(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    spec = load_analysis_spec()
+    frame = _analysis_mart_frame()
+    caplog.set_level(logging.INFO, logger="seo_rank.stats.panel")
+
+    prepare_rank_depth_panel(frame, depth_key="top_10", spec=spec)
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(
+        "prepared rank_depth_panel depth=top_10 max_rank=10" in message for message in messages
+    )
 
 
 def test_load_analysis_panel_hard_fails_when_serp_rank_has_no_variance(
@@ -241,7 +340,7 @@ def test_run_phase5_stats_writes_full_artifacts_when_guardrails_pass(
     assert result.hard_fail is False
     assert "regression" in summary
     assert "spearman" in summary
-    assert "## Diagnostics" in report
+    assert "## Rank depth: top_20" in report
     assert "Confirmatory inference skipped" not in report
 
 
@@ -270,4 +369,8 @@ def test_run_phase5_stats_writes_minimal_report_on_hard_fail(
     assert result.hard_fail is True
     assert "regression" not in summary
     assert "spearman" not in summary
-    assert "Confirmatory inference skipped" in report_path.read_text(encoding="utf-8")
+    assert "rank_depths" in summary
+    assert summary["rank_depths"]["top_20"]["hard_fail"] is True
+    report = report_path.read_text(encoding="utf-8")
+    assert "## Rank depth: top_20" in report
+    assert "Confirmatory inference skipped" in report

@@ -11,7 +11,9 @@ import polars as pl
 import pandas as pd
 import statsmodels.formula.api as smf
 from scipy import stats
+from seo_rank.stats.rank_depth import filter_panel_by_max_rank
 from seo_rank.stats.scale import within_keyword_sd_rms
+from seo_rank.stats.spec import AnalysisSpec
 from statsmodels.regression.linear_model import RegressionResultsWrapper
 from statsmodels.stats.sandwich_covariance import cov_cluster_2groups
 
@@ -66,6 +68,53 @@ def fit_regression_backends(
         backend: fit_backend_regression(analysis_mart, backend=backend)
         for backend in backend_order
     }
+
+
+def summarize_regression_rank_depths(
+    analysis_mart: pl.DataFrame,
+    backend_order: Sequence[str],
+    *,
+    depth_order: Sequence[str],
+    spec: AnalysisSpec,
+) -> dict[str, object]:
+    """Summarize pooled regression for every confirmatory rank depth."""
+
+    logger.info("summarizing regression rank_depths=%s", list(depth_order))
+    depths: dict[str, object] = {}
+    for depth_key in depth_order:
+        depth_mart = filter_panel_by_max_rank(
+            analysis_mart,
+            max_rank=spec.rank_depth_limit(depth_key),
+        )
+        fits = fit_regression_backends(depth_mart, backend_order)
+        depths[depth_key] = summarize_regression_backends_from_fits(
+            depth_mart,
+            backend_order,
+            fits=fits,
+        )
+    return {
+        "depth_order": list(depth_order),
+        "depths": depths,
+    }
+
+
+def fit_regression_rank_depths(
+    analysis_mart: pl.DataFrame,
+    backend_order: Sequence[str],
+    *,
+    depth_order: Sequence[str],
+    spec: AnalysisSpec,
+) -> dict[str, dict[str, BackendRegressionFit | None]]:
+    """Fit pooled regression once per backend at each confirmatory rank depth."""
+
+    fits_by_depth: dict[str, dict[str, BackendRegressionFit | None]] = {}
+    for depth_key in depth_order:
+        depth_mart = filter_panel_by_max_rank(
+            analysis_mart,
+            max_rank=spec.rank_depth_limit(depth_key),
+        )
+        fits_by_depth[depth_key] = fit_regression_backends(depth_mart, backend_order)
+    return fits_by_depth
 
 
 def summarize_backend_regression(

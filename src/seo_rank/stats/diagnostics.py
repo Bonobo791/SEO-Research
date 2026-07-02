@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import math
+import warnings
 from collections.abc import Sequence
 
 import numpy as np
@@ -17,6 +19,9 @@ from seo_rank.stats.regression import (
     fit_backend_regression,
 )
 
+
+logger = logging.getLogger(__name__)
+
 SMALL_SAMPLE_SHAPIRO_CUTOFF = 50
 RESET_P_VALUE_THRESHOLD = 0.05
 BREUSCH_PAGAN_P_VALUE_THRESHOLD = 0.05
@@ -29,6 +34,7 @@ def summarize_diagnostics_backends(
 ) -> dict[str, object]:
     """Summarize pooled OLS diagnostics for every configured backend."""
 
+    logger.info("summarizing diagnostics backends=%s", list(backend_order))
     fits = fit_regression_backends(analysis_mart, backend_order)
     return summarize_diagnostics_backends_from_fits(
         analysis_mart,
@@ -85,14 +91,23 @@ def _summarize_backend_diagnostics_result(
             [score_column, "serp_rank", "page_text_length"]
         )
         skipped_reason = _regression_skip_reason(model_frame)
+        row_count = model_frame.height
+        keyword_count = (
+            model_frame["target_keyword_id"].n_unique() if not model_frame.is_empty() else 0
+        )
+        logger.info(
+            "diagnostics backend=%s status=skipped skipped_reason=%s row_count=%d keyword_count=%d",
+            backend,
+            skipped_reason,
+            row_count,
+            keyword_count,
+        )
         return _skipped_backend_summary(
             backend=backend,
             score_column=score_column,
             skipped_reason=skipped_reason,
-            row_count=model_frame.height,
-            keyword_count=model_frame["target_keyword_id"].n_unique()
-            if not model_frame.is_empty()
-            else 0,
+            row_count=row_count,
+            keyword_count=keyword_count,
         )
     return summarize_backend_diagnostics_from_fit(fit)
 
@@ -108,11 +123,8 @@ def summarize_backend_diagnostics_from_fit(
     parameter_count = len(fit.feature_result.model.exog_names)
     influence = fit.feature_result.get_influence()
 
-    cooks_d = np.asarray(influence.cooks_distance[0], dtype=float)
-    leverage = np.asarray(influence.hat_matrix_diag, dtype=float)
-    studentized = np.asarray(influence.resid_studentized_external, dtype=float)
-    dffits = np.asarray(influence.dffits[0], dtype=float)
-    dfbetas = np.asarray(influence.dfbetas, dtype=float)
+    cooks_d, leverage, studentized, dffits, dfbetas = _safe_influence_arrays(influence)
+    leverage = np.clip(leverage, 0.0, 1.0)
 
     cooks_d_threshold = 4.0 / nobs
     leverage_threshold = (2.0 * parameter_count) / nobs
@@ -155,6 +167,15 @@ def summarize_backend_diagnostics_from_fit(
         robust=True,
     )
     shapiro = _shapiro_summary(residuals)
+
+    influential_count = len(influential_rows)
+    logger.info(
+        "diagnostics backend=%s status=computed row_count=%d keyword_count=%d influential_count=%d",
+        fit.backend,
+        nobs,
+        int(fit.model_data["target_keyword_id"].nunique()),
+        influential_count,
+    )
 
     return {
         "backend": fit.backend,
@@ -199,6 +220,21 @@ def summarize_backend_diagnostics_from_fit(
             "rows": influential_rows,
         },
     } | ({"shapiro": shapiro} if shapiro is not None else {})
+
+
+def _safe_influence_arrays(
+    influence,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Extract influence arrays without surfacing statsmodels precision warnings."""
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        cooks_d = np.asarray(influence.cooks_distance[0], dtype=float)
+        leverage = np.asarray(influence.hat_matrix_diag, dtype=float)
+        studentized = np.asarray(influence.resid_studentized_external, dtype=float)
+        dffits = np.asarray(influence.dffits[0], dtype=float)
+        dfbetas = np.asarray(influence.dfbetas, dtype=float)
+    return cooks_d, leverage, studentized, dffits, dfbetas
 
 
 def _residuals_vs_fitted_summary(

@@ -114,7 +114,10 @@ truncation**, not just "censoring" in the survival sense.
   this context.
 
 **Recommendation:** embed a **limitations block** in Phase 5 JSON/Markdown output
-now (stub is fine); expand in Phase 6.
+now (stub is fine); expand in Phase 6. **Shipped (slices 16–20):** limitations
+are depth-specific (`top_20_truncation`, `top_10_truncation`, etc.) under
+`stats_summary.json` → `rank_depths.*.limitations`, with four matching
+`## Rank depth:` sections in `stats_report.md`.
 
 ### 4. Benjamini–Hochberg family
 
@@ -230,6 +233,26 @@ on `*_normalized_score`. Derived at mart build time; absolute columns unchanged.
 **Limitation:** relative ranks are within the observed top-20 only, not vs the
 full index. Not used for actionable flag or BH.
 
+### 12. Rank-depth confirmatory paths (Phase 5 slices 16–20, shipped)
+
+The confirmatory estimand now runs at four SERP depth caps: ranks 1–20, 1–10,
+1–5, and 1–3. Each depth is an independent bundle with its own guardrails,
+Spearman, pooled OLS, page-level Plackett-Luce, pooled diagnostics,
+limitations, and `actionable_association`. `primary_rank_depth` stays
+`top_20`; top-level `stats_summary.json` fields mirror `rank_depths.top_20`
+for backward compatibility. `actionable_association_by_rank_depth` exposes the
+BGE rule outcome per depth.
+
+**Spec:** `analysis_spec.v1.yaml` → `rank_depths` (confirmatory order, limits,
+primary) and `limitations_by_depth`.
+
+**Code:** `src/seo_rank/stats/rank_depth.py` (`filter_panel_by_max_rank`),
+`panel.prepare_rank_depth_panel()`, `artifacts.build_rank_depth_bundles()` /
+`run_phase5_stats()`.
+
+**IIA:** leave-one-out-top-rank sensitivity runs on `top_20` only; the retired
+`top_20_vs_top_10` subset refit is no longer reported.
+
 ---
 
 ## Drawbacks of the current approach
@@ -298,9 +321,9 @@ Run ARCHITECTURE diagnostic loop on the **pooled** feature model per backend:
 
 | Artifact | Contents |
 | -------- | -------- |
-| `stats_summary.json` | Estimand version, guardrail pass/fail, per-backend ρ summary, BH q-values, pooled coefficients + CIs |
-| `stats_diagnostics.json` | Diagnostic flags, influential row counts, VIF (if multivariate) |
-| `stats_report.md` | Human summary + **Limitations** (observational, top-20 only, no causal claims) |
+| `stats_summary.json` | Estimand version, `primary_rank_depth`, nested `rank_depths` (guardrails, limitations, per-backend ρ summary, BH q-values, pooled coefficients + CIs, `actionable_association` per depth), `actionable_association_by_rank_depth`, top-20 compat shim |
+| `stats_diagnostics.json` | Nested `rank_depths` with diagnostic flags, influential row counts, VIF (if multivariate), Plackett-Luce optimizer / leave-one-out IIA on `top_20` |
+| `stats_report.md` | Human summary + four `## Rank depth:` sections with depth-specific **Limitations** (observational, truncation at that depth, no causal claims) |
 
 ### CLI contract
 
@@ -339,6 +362,7 @@ fixtures):
 | `TESTING.md` | Golden `analysis_mart` + expected ρ/slope tolerance | Done |
 | `GOALS.md` | When Phase 5 becomes active scope, move stats items from Out Of Scope | Done |
 | Phase 5 slices 1–2 | `analysis_spec.v1.yaml` + `src/seo_rank/stats/` scaffold | Done (2026-07-01) |
+| Phase 5 slices 16–20 | Rank-depth confirmatory paths (`rank_depths`, nested JSON, report sections) | Done (2026-07-02) |
 
 ---
 

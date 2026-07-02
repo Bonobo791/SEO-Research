@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 
 import numpy as np
 import polars as pl
 from scipy.stats import spearmanr
 
 from seo_rank.stats.bh import adjust_p_values
+from seo_rank.stats.rank_depth import filter_panel_by_max_rank
+from seo_rank.stats.spec import AnalysisSpec
 
 
 logger = logging.getLogger(__name__)
@@ -78,6 +80,31 @@ def summarize_spearman_backends(
         "backends": {
             backend: summarize_backend_spearman(panel, backend=backend)
             for backend in backend_order
+        },
+    }
+
+
+def summarize_spearman_rank_depths(
+    panel: pl.DataFrame,
+    backend_order: Sequence[str],
+    *,
+    depth_order: Sequence[str],
+    spec: AnalysisSpec,
+) -> dict[str, object]:
+    """Summarize Spearman tests for every confirmatory rank depth."""
+
+    logger.info("summarizing spearman rank_depths=%s", list(depth_order))
+    return {
+        "depth_order": list(depth_order),
+        "depths": {
+            depth_key: summarize_spearman_backends(
+                filter_panel_by_max_rank(
+                    panel,
+                    max_rank=spec.rank_depth_limit(depth_key),
+                ),
+                backend_order,
+            )
+            for depth_key in depth_order
         },
     }
 

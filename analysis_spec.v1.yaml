@@ -14,6 +14,25 @@ decision:
     - gemini_semantic_similarity
   versioning_note: Phase 5.75 uses analysis_spec.v2.yaml; do not reinterpret v1 runs with v2 spec.
 
+rank_depths:
+  confirmatory_order:
+    - top_20
+    - top_10
+    - top_5
+    - top_3
+  limits:
+    top_20: 20
+    top_10: 10
+    top_5: 5
+    top_3: 3
+  primary: top_20
+
+limitations_by_depth:
+  top_20: top_20_truncation
+  top_10: top_10_truncation
+  top_5: top_5_truncation
+  top_3: top_3_truncation
+
 panel:
   grain: target_keyword_id x canonical_url_hash
   observation_scope: top_20_serp_results_per_keyword
@@ -35,7 +54,6 @@ estimand:
     clustered_se: target_keyword_id
     choice_set_scope: observed_top_20_serp_results_per_keyword
     iia_sensitivity:
-      top_20_vs_top_10: true
       leave_one_out_top_rank: true
   multivariate_model:
     - bge_normalized_score
@@ -91,6 +109,5 @@ sensitivity:
 
 limitations:
   - observational_only
-  - top_20_truncation
   - no_causal_claims
   - measurement_error_conservative
