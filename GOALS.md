@@ -30,9 +30,13 @@ OLS with keyword fixed effects, length adjustment, and keyword-clustered robust
 standard errors. **Pre-registered primary backend:** BGE; Gemini backends are
 secondary comparisons in fixed order.
 
+Page-level Plackett-Luce / rank-ordered logit is a secondary add-on on the same
+analysis_mart panel. It stays additive to Spearman and pooled OLS. Passage-level
+Plackett-Luce is deferred backlog work only and is not wired in code today.
+
 #### Progress
 
-**Slices:** 6 of 14 shipped, 8 open.
+**Slices:** 6 of 15 shipped, 9 open.
 
 | # | Slice | Layer | Status | Primary deliverable |
 | - | ----- | ----- | ------ | ------------------- |
@@ -50,13 +54,14 @@ secondary comparisons in fixed order.
 | 12 | Analysis mart v2 columns | Data | Open | `analysis_mart.v2` + validation |
 | 13 | Relative similarity sensitivity | Stats | Open | Robustness appendix on rank/pct/z |
 | 14 | Relative ranks in CLI & fixtures | CLI | Open | Keyword report + golden invariants |
+| 15 | Plackett-Luce estimand runtime wiring | Stats | Open | Load `analysis_spec.estimand.plackett_luce` at runtime |
 
-**Remaining to close Phase 5:** slices 7–14 (see `ROADMAP.md`). Slice 6 live E2E:
+**Remaining to close Phase 5:** slices 7–15 (see `ROADMAP.md`). Slice 6 live E2E:
 **S5-11** in `FIXUPS.md` (`page_text` `tasks[].result: null` schema drift).
 
 #### Dev slices
 
-**Progress:** 6 of 14 shipped, 8 open.
+**Progress:** 6 of 15 shipped, 9 open.
 
 1. **[x] Slice 1 — Estimand & analysis spec**
    - Add `analysis_spec.v1.yaml`: outcome (`-log(serp_rank)`), predictors,
@@ -203,6 +208,15 @@ secondary comparisons in fixed order.
       rank invariants (e.g. highest absolute score → rank 1).
     - Acceptance: rebuild `analysis_mart` on stored runs derives relative
       columns from stored absolutes without re-scoring.
+
+15. **[ ] Slice 15 — Plackett-Luce estimand runtime wiring**
+    - Load `analysis_spec.estimand.plackett_luce` at runtime and thread the
+      top-20 limit, IIA cutoffs, and convergence thresholds from the spec
+      instead of hardcoding them in `plackett_luce.py`.
+    - Keep page-level PL behavior aligned with the committed estimand block so
+      future spec edits do not silently diverge from code.
+    - Tests: spec-driven threshold loader and regression coverage for the
+      runtime-plumbed estimator settings.
 
 #### Phase 5 intent
 

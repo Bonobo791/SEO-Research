@@ -1,6 +1,8 @@
+import logging
 from pathlib import Path
 
 import polars as pl
+import pytest
 
 from seo_rank.stats.artifacts import run_phase5_stats
 from seo_rank.stats.bh import adjust_p_values
@@ -126,6 +128,25 @@ def test_summarize_backend_spearman_skips_bh_when_underpowered() -> None:
     assert summary["bh_skipped_reason"] == "underpowered"
     assert "bh_q_values" not in summary
     assert summary["keyword_tests"][0]["p_value"] == 0.0
+
+
+def test_summarize_backend_spearman_logs_summary_and_bh_skip(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger="seo_rank.stats.spearman")
+
+    summarize_backend_spearman(_passing_analysis_mart_frame(), backend="bge")
+    summarize_backend_spearman(_underpowered_analysis_mart_frame(), backend="bge")
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(
+        "backend=bge" in message and "keyword_count=10" in message and "bh=applied" in message
+        for message in messages
+    )
+    assert any(
+        "backend=bge" in message and "keyword_count=9" in message and "bh=skipped" in message
+        for message in messages
+    )
 
 
 def test_summarize_backend_spearman_uses_backend_specific_non_null_rows() -> None:

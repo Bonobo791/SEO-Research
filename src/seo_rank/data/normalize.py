@@ -433,6 +433,11 @@ def normalize_run(run_dir: Path) -> dict[str, object]:
     assert isinstance(dataset_catalog, dict)
 
     raw_responses = scan_raw_responses(run_dir)
+    raw_responses = raw_responses.unique(
+        subset=["response_id"],
+        keep="first",
+        maintain_order=True,
+    )
     validate_raw_response_bodies(raw_responses)
     curated_lazyframes = build_curated_lazyframes_from_raw_responses(
         raw_responses,

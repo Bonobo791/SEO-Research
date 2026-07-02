@@ -1,9 +1,12 @@
 import json
+import logging
 from pathlib import Path
 
 import polars as pl
+import pytest
 
 from seo_rank.stats.artifacts import run_phase5_stats
+import seo_rank.stats.regression as regression_module
 from seo_rank.stats.regression import (
     summarize_backend_regression,
     summarize_regression_backends,
@@ -82,6 +85,42 @@ def _single_keyword_regression_frame() -> pl.DataFrame:
     return pl.DataFrame(rows)
 
 
+def _constant_similarity_keyword_regression_frame() -> pl.DataFrame:
+    rows: list[dict[str, object]] = []
+    for keyword_index in range(1, 4):
+        target_keyword_id = f"kw-{keyword_index}"
+        target_keyword = f"keyword {keyword_index}"
+        keyword_offset = keyword_index * 0.02
+        for serp_rank in range(1, 5):
+            similarity = 0.8 if keyword_index == 3 else 1.2 - (serp_rank * 0.1) + keyword_offset
+            rows.append(
+                {
+                    "run_id": "run-1",
+                    "target_keyword_id": target_keyword_id,
+                    "target_keyword": target_keyword,
+                    "keyword_order": keyword_index,
+                    "source_response_id": f"resp-{keyword_index}",
+                    "serp_item_id": f"serp-{keyword_index}-{serp_rank}",
+                    "page_id": f"page-{keyword_index}-{serp_rank}",
+                    "response_id": f"page-resp-{keyword_index}-{serp_rank}",
+                    "canonical_url_hash": f"url-{keyword_index}-{serp_rank}",
+                    "url": f"https://example.com/{keyword_index}/{serp_rank}",
+                    "serp_rank": serp_rank,
+                    "title": f"title-{keyword_index}-{serp_rank}",
+                    "description": f"description-{keyword_index}-{serp_rank}",
+                    "page_text_length": 220 + (keyword_index * 3) + serp_rank,
+                    "bge_raw_score": similarity,
+                    "bge_normalized_score": similarity,
+                    "gemini_doc_retrieval_raw_score": similarity * 0.8,
+                    "gemini_doc_retrieval_normalized_score": similarity * 0.8,
+                    "gemini_semantic_similarity_raw_score": similarity * 0.6,
+                    "gemini_semantic_similarity_normalized_score": similarity * 0.6,
+                    "schema_version": "analysis_mart.v1",
+                }
+            )
+    return pl.DataFrame(rows)
+
+
 def test_summarize_backend_regression_supports_single_keyword_with_hc3_inference() -> None:
     summary = summarize_backend_regression(
         _single_keyword_regression_frame(),
@@ -94,6 +133,7 @@ def test_summarize_backend_regression_supports_single_keyword_with_hc3_inference
     assert summary["feature_model"]["covariance"]["clusters"] == []
     assert summary["baseline_model"]["formula"] == "outcome ~ np.log(page_text_length + 1)"
     assert "C(target_keyword_id)" not in summary["feature_model"]["formula"]
+    assert summary["feature_model"]["formula"] == "outcome ~ bge_normalized_score + np.log(page_text_length + 1)"
     assert summary["feature_model"]["clustered_standard_error"] > 0
 
 
@@ -106,10 +146,22 @@ def test_summarize_backend_regression_uses_keyword_clustered_inference() -> None
     assert summary["score_column"] == "bge_normalized_score"
     assert summary["feature_model"]["covariance"]["type"] == "cluster"
     assert summary["feature_model"]["covariance"]["clusters"] == ["target_keyword_id"]
+    assert (
+        summary["baseline_model"]["formula"]
+        == "outcome ~ np.log(page_text_length + 1) + C(target_keyword_id)"
+    )
+    assert (
+        summary["feature_model"]["formula"]
+        == "outcome ~ bge_normalized_score + np.log(page_text_length + 1) + C(target_keyword_id)"
+    )
     assert summary["feature_model"]["coefficient"] > 0
     assert summary["feature_model"]["clustered_standard_error"] > 0
-    assert summary["feature_model"]["clustered_confidence_interval"][0] < summary["feature_model"]["coefficient"]
-    assert summary["feature_model"]["clustered_confidence_interval"][1] > summary["feature_model"]["coefficient"]
+    assert summary["feature_model"]["clustered_confidence_interval"][0] < summary["feature_model"][
+        "coefficient"
+    ]
+    assert summary["feature_model"]["clustered_confidence_interval"][1] > summary["feature_model"][
+        "coefficient"
+    ]
     assert "naive_standard_error" not in summary["feature_model"]
     assert summary["descriptive_fit_delta"]["adjusted_r_squared"] >= 0
     assert summary["effect_size"]["similarity_sd"] > 0
@@ -118,11 +170,36 @@ def test_summarize_backend_regression_uses_keyword_clustered_inference() -> None
         summary["effect_size"]["formula"]
         == "median_rank * (exp(-(coefficient * similarity_sd)) - 1)"
     )
+    assert "bge_normalized_score" in summary["feature_model"]["formula"]
     assert summary["sensitivity"]["two_way_cluster"]["status"] == "computed"
     assert summary["sensitivity"]["two_way_cluster"]["clusters"] == [
         "target_keyword_id",
         "canonical_url_hash",
     ]
+    assert summary["sensitivity"]["two_way_cluster"]["coefficient"] != 0
+
+
+def test_summarize_backend_regression_reports_raw_model_coefficient() -> None:
+    fit = regression_module.fit_backend_regression(_regression_analysis_mart_frame(), backend="bge")
+    assert fit is not None
+
+    summary = summarize_backend_regression(_regression_analysis_mart_frame(), backend="bge")
+    raw_coefficient = regression_module._parameter_value(fit.clustered_result, fit.score_column)
+
+    assert summary["feature_model"]["coefficient"] == pytest.approx(raw_coefficient)
+
+
+def test_summarize_backend_regression_keeps_zero_variance_keyword_in_raw_model() -> None:
+    summary = summarize_backend_regression(
+        _constant_similarity_keyword_regression_frame(),
+        backend="bge",
+    )
+
+    assert summary["row_count"] == 12
+    assert summary["keyword_count"] == 3
+    assert summary["feature_model"]["formula"] == (
+        "outcome ~ bge_normalized_score + np.log(page_text_length + 1) + C(target_keyword_id)"
+    )
 
 
 def test_summarize_backend_regression_skips_when_backend_has_no_usable_rows() -> None:
@@ -137,6 +214,25 @@ def test_summarize_backend_regression_skips_when_backend_has_no_usable_rows() ->
     assert summary["skipped_reason"] == "no_usable_rows"
     assert summary["row_count"] == 0
     assert "feature_model" not in summary
+
+
+def test_summarize_backend_regression_logs_fit_and_skip(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger="seo_rank.stats.regression")
+
+    summarize_backend_regression(_regression_analysis_mart_frame(), backend="bge")
+    frame = _regression_analysis_mart_frame().with_columns(
+        pl.lit(None, dtype=pl.Float64).alias("gemini_doc_retrieval_normalized_score")
+    )
+    summarize_backend_regression(frame, backend="gemini_doc_retrieval")
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("backend=bge" in message and "status=computed" in message for message in messages)
+    assert any(
+        "backend=gemini_doc_retrieval" in message and "skipped_reason=no_usable_rows" in message
+        for message in messages
+    )
 
 
 def test_summarize_backend_regression_excludes_rows_with_incomplete_covariates() -> None:
@@ -244,3 +340,50 @@ def test_run_phase5_stats_writes_regression_summary_for_passing_panels(
     assert diagnostics["analysis_spec_version"]
     assert diagnostics["backends"]["bge"]["backend"] == "bge"
     assert "## Regression" in report
+
+
+def test_run_phase5_stats_sets_actionable_association_on_passing_panels(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    run_dir = tmp_path / "runs" / "run-1"
+    (run_dir / "parquet" / "analysis_mart").mkdir(parents=True)
+
+    monkeypatch.setattr(
+        "seo_rank.stats.panel.scan_curated_table",
+        lambda path, table_name: _regression_analysis_mart_frame().lazy(),
+    )
+
+    run_phase5_stats(run_dir)
+
+    summary = json.loads((run_dir / "stats" / "stats_summary.json").read_text(encoding="utf-8"))
+
+    assert summary["actionable_association"] is True
+
+
+def test_run_phase5_stats_fits_regression_once_per_backend(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    run_dir = tmp_path / "runs" / "run-1"
+    (run_dir / "parquet" / "analysis_mart").mkdir(parents=True)
+
+    monkeypatch.setattr(
+        "seo_rank.stats.panel.scan_curated_table",
+        lambda path, table_name: _regression_analysis_mart_frame().lazy(),
+    )
+
+    call_count = 0
+    original_fit = regression_module.fit_backend_regression
+
+    def wrapped_fit(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        return original_fit(*args, **kwargs)
+
+    monkeypatch.setattr("seo_rank.stats.regression.fit_backend_regression", wrapped_fit)
+    monkeypatch.setattr("seo_rank.stats.diagnostics.fit_backend_regression", wrapped_fit)
+
+    run_phase5_stats(run_dir)
+
+    assert call_count == 3

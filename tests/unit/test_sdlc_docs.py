@@ -71,7 +71,7 @@ def test_stored_run_docs_describe_partial_resume_and_current_suite_status() -> N
     assert "reuses existing raw responses" in readme
     assert "`--stored-run` resumes partial runs in place" in architecture
     assert "refreshes only missing work" in architecture
-    assert "191 tests collected; 190 passing; 1 skipped" in testing
+    assert "215 tests collected; 214 passing; 1 skipped" in testing
     assert "resumes from the saved raw lake" in roadmap
 
 
@@ -143,8 +143,8 @@ def test_phase_45_slice_9_regression_sweep_marks_mart_sink_docs_as_shipped() -> 
     assert "Phase 4.5 Slice 9 shipped" in roadmap
     assert "Phase 4.5 Slice 10 shipped" in roadmap
     assert "Phase 4.5 signed off" in roadmap
-    assert "191 tests" in architecture
-    assert "191 tests collected; 190 passing; 1 skipped" in testing
+    assert "215 tests" in architecture
+    assert "215 tests collected; 214 passing; 1 skipped" in testing
     assert "sink feature marts lazily with Parquet statistics" in testing
 
 
@@ -159,6 +159,8 @@ def test_phase_5_slice_1_defines_analysis_spec_v1() -> None:
 
     assert "version: v1" in spec
     assert "outcome: -log(serp_rank)" in spec
+    assert "plackett_luce:" in spec
+    assert "rank_ordered_logit" in spec
     assert "primary_backend: bge" in spec
     assert "backend_order:" in spec
     assert "keyword_clustered_se: target_keyword_id" in spec
@@ -222,6 +224,23 @@ def test_phase_5_slice_6_ships_pooled_ols_diagnostics() -> None:
     assert "page_similarity" in architecture
     assert "test_stats_diagnostics.py" in testing
     assert "stats_diagnostics.json" in readme
+
+
+def test_phase_5_page_level_plackett_luce_secondary_path_is_documented() -> None:
+    goals = (ROOT / "GOALS.md").read_text(encoding="utf-8")
+    roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
+    architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
+    testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "Page-level Plackett-Luce / rank-ordered logit" in goals
+    assert "Plackett-Luce (page-level, secondary)" in roadmap
+    assert "passage-level Plackett-Luce analysis" in roadmap
+    assert "Slice 15 — Plackett-Luce estimand runtime wiring" in goals
+    assert "Slice 15 — Plackett-Luce estimand runtime wiring" in roadmap
+    assert "Plackett-Luce (page-level, secondary)" in architecture
+    assert "page-level Plackett-Luce summaries" in readme
+    assert "test_stats_plackett_luce.py" in testing
 
 
 def test_phase_6_plans_workflow_integrity_guardrails() -> None:

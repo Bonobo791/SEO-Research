@@ -1,3 +1,4 @@
+import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -10,6 +11,7 @@ from seo_rank.cli import main
 from seo_rank.dataforseo import (
     DataForSeoParseError,
     fixture_keyword_expansion_response,
+    fixture_serp_response,
 )
 from seo_rank.data.normalize import (
     CURATED_SCHEMAS,
@@ -292,6 +294,204 @@ def test_normalize_run_stores_raw_html_when_present(
         row["page_id"] == structured_field["page_id"] and row["text"] == ""
         for row in page_rows
     )
+
+
+def test_normalize_run_deduplicates_repeated_page_text_raw_responses(
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    raw_responses_root = output_dir / "parquet" / "raw_responses"
+    keyword_responses_dir = raw_responses_root / "endpoint=keyword_expansion"
+    serp_responses_dir = raw_responses_root / "endpoint=serp"
+    page_text_responses_dir = raw_responses_root / "endpoint=page_text"
+    keyword_responses_dir.mkdir(parents=True)
+    serp_responses_dir.mkdir(parents=True)
+    page_text_responses_dir.mkdir(parents=True)
+
+    response_body = {
+        "tasks": [
+            {
+                "data": {"url": "https://example.com/product"},
+                "result": [
+                    {
+                        "items": [
+                            {
+                                "url": "https://example.com/product",
+                                "status_code": 200,
+                                "page_content": {
+                                    "header": {
+                                        "primary_content": [
+                                            {"text": "Header intro with enough words."}
+                                        ]
+                                    },
+                                    "ratings": [
+                                        {
+                                            "rating_value": 4,
+                                            "max_rating_value": 5,
+                                            "rating_count": 12,
+                                            "relative_rating": 0.8,
+                                        }
+                                    ],
+                                    "offers": [
+                                        {
+                                            "price": 129,
+                                            "price_currency": "USD",
+                                        }
+                                    ],
+                                },
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+    response_body_bytes = json.dumps(response_body).encode("utf-8")
+    response_sha256 = hashlib.sha256(response_body_bytes).hexdigest()
+    response_id = "page-text-duplicate-1"
+
+    raw_rows = [
+        {
+            "run_id": "artifacts",
+            "response_id": "keyword-expansion-1",
+            "endpoint": "keyword_expansion",
+            "provider": "dataforseo",
+            "target_keyword": "",
+            "task_id": "keyword-task-1",
+            "timestamp": "2026-07-02T00:00:00+00:00",
+            "request_metadata_json": json.dumps(
+                {"seed": "technical seo"},
+                sort_keys=True,
+            ),
+            "content_type": "application/json",
+            "status": 200,
+            "response_body_bytes": json.dumps(
+                fixture_keyword_expansion_response("technical seo"),
+                sort_keys=True,
+            ).encode("utf-8"),
+            "sha256": hashlib.sha256(
+                json.dumps(
+                    fixture_keyword_expansion_response("technical seo"),
+                    sort_keys=True,
+                ).encode("utf-8")
+            ).hexdigest(),
+            "schema_version": "raw_responses.v1",
+        },
+        {
+            "run_id": "artifacts",
+            "response_id": "serp-1",
+            "endpoint": "serp",
+            "provider": "dataforseo",
+            "target_keyword": "technical seo",
+            "task_id": "serp-task-1",
+            "timestamp": "2026-07-02T00:00:00+00:00",
+            "request_metadata_json": json.dumps(
+                {"target_keyword": "technical seo"},
+                sort_keys=True,
+            ),
+            "content_type": "application/json",
+            "status": 200,
+            "response_body_bytes": json.dumps(
+                fixture_serp_response("technical seo"),
+                sort_keys=True,
+            ).encode("utf-8"),
+            "sha256": hashlib.sha256(
+                json.dumps(
+                    fixture_serp_response("technical seo"),
+                    sort_keys=True,
+                ).encode("utf-8")
+            ).hexdigest(),
+            "schema_version": "raw_responses.v1",
+        },
+        {
+            "run_id": "artifacts",
+            "response_id": response_id,
+            "endpoint": "page_text",
+            "provider": "dataforseo",
+            "target_keyword": "technical seo",
+            "task_id": "page-task-1",
+            "timestamp": "2026-07-02T00:00:00+00:00",
+            "request_metadata_json": json.dumps(
+                {
+                    "target_keyword": "technical seo",
+                    "url": "https://example.com/product",
+                },
+                sort_keys=True,
+            ),
+            "content_type": "application/json",
+            "status": 200,
+            "response_body_bytes": response_body_bytes,
+            "sha256": response_sha256,
+            "schema_version": "raw_responses.v1",
+        },
+        {
+            "run_id": "artifacts",
+            "response_id": response_id,
+            "endpoint": "page_text",
+            "provider": "dataforseo",
+            "target_keyword": "technical seo",
+            "task_id": "page-task-1",
+            "timestamp": "2026-07-02T00:00:00+00:00",
+            "request_metadata_json": json.dumps(
+                {
+                    "target_keyword": "technical seo",
+                    "url": "https://example.com/product",
+                },
+                sort_keys=True,
+            ),
+            "content_type": "application/json",
+            "status": 200,
+            "response_body_bytes": response_body_bytes,
+            "sha256": response_sha256,
+            "schema_version": "raw_responses.v1",
+        },
+    ]
+    pl.DataFrame([raw_rows[0]]).write_parquet(keyword_responses_dir / "part-0.parquet")
+    pl.DataFrame([raw_rows[1]]).write_parquet(serp_responses_dir / "part-0.parquet")
+    pl.DataFrame(raw_rows[2:]).write_parquet(page_text_responses_dir / "part-0.parquet")
+
+    run_payload = {
+        "run_id": "artifacts",
+        "config": {
+            "seed": "technical seo",
+            "depth": 1,
+            "dry_run": True,
+        },
+        "catalog": {},
+        "page_similarity": [
+            {
+                "target_keyword": "technical seo",
+                "url": "https://example.com/product",
+                "page_similarity": {
+                    "bge": {"raw_score": 0.9, "normalized_score": 0.9},
+                    "gemini_doc_retrieval": {
+                        "raw_score": 0.9,
+                        "normalized_score": 0.9,
+                    },
+                    "gemini_semantic_similarity": {
+                        "raw_score": 0.9,
+                        "normalized_score": 0.9,
+                    },
+                },
+            }
+        ],
+    }
+    (output_dir / "run.json").write_text(
+        json.dumps(run_payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    catalog = normalize_run(output_dir)
+
+    field_rows = ds.dataset(
+        output_dir / "parquet" / "page_content_fields",
+        format="parquet",
+    ).to_table().to_pylist()
+
+    assert catalog["datasets"]["page_content_fields"]["row_count"] == len(field_rows)
+    assert len(field_rows) > 0
+    assert len({row["field_row_id"] for row in field_rows}) == len(field_rows)
+    assert catalog["datasets"]["page_html"]["row_count"] == 0
 
 
 def test_normalize_run_deduplicates_repeated_page_text_urls(

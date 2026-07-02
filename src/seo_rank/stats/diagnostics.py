@@ -13,6 +13,7 @@ from statsmodels.stats.diagnostic import het_breuschpagan, linear_reset
 from seo_rank.stats.regression import (
     BackendRegressionFit,
     _regression_skip_reason,
+    fit_regression_backends,
     fit_backend_regression,
 )
 
@@ -28,10 +29,30 @@ def summarize_diagnostics_backends(
 ) -> dict[str, object]:
     """Summarize pooled OLS diagnostics for every configured backend."""
 
+    fits = fit_regression_backends(analysis_mart, backend_order)
+    return summarize_diagnostics_backends_from_fits(
+        analysis_mart,
+        backend_order,
+        fits=fits,
+    )
+
+
+def summarize_diagnostics_backends_from_fits(
+    analysis_mart: pl.DataFrame,
+    backend_order: Sequence[str],
+    *,
+    fits: dict[str, BackendRegressionFit | None],
+) -> dict[str, object]:
+    """Summarize pooled OLS diagnostics from precomputed backend fits."""
+
     return {
         "backend_order": list(backend_order),
         "backends": {
-            backend: summarize_backend_diagnostics(analysis_mart, backend=backend)
+            backend: _summarize_backend_diagnostics_result(
+                analysis_mart,
+                backend=backend,
+                fit=fits.get(backend),
+            )
             for backend in backend_order
         },
     }
@@ -45,6 +66,19 @@ def summarize_backend_diagnostics(
     """Summarize pooled diagnostics for one backend."""
 
     fit = fit_backend_regression(analysis_mart, backend=backend)
+    return _summarize_backend_diagnostics_result(
+        analysis_mart,
+        backend=backend,
+        fit=fit,
+    )
+
+
+def _summarize_backend_diagnostics_result(
+    analysis_mart: pl.DataFrame,
+    *,
+    backend: str,
+    fit: BackendRegressionFit | None,
+) -> dict[str, object]:
     if fit is None:
         score_column = _score_column_for_backend(backend)
         model_frame = analysis_mart.filter(pl.col(score_column).is_not_null()).drop_nulls(

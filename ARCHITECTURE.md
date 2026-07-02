@@ -87,7 +87,7 @@ The repository contains an **offline-verifiable CLI scaffold** (Phase 1 shipped)
   `build-features`, `analyze`, `replay`, and `run --stored-run`, which resumes
   partial runs in place from the stored lake before re-materializing downstream
   marts
-- **Tests:** 191 tests under `tests/`; gate: `python -m pytest`; Phase 4.5 Slice 7
+- **Tests:** 215 tests under `tests/`; gate: `python -m pytest`; Phase 4.5 Slice 7
   shipped the round-trip regression sweep in `test_sdlc_docs.py`
 - **Product docs:** `ARCHITECTURE.md`, `GOALS.md`, `ROADMAP.md`, `README.md`,
   `TESTING.md`
@@ -545,13 +545,22 @@ DFBETAs in `stats_diagnostics.json` (Slice 6 shipped). Skip per-keyword
 normality as primary gates; pooled Shapiro is informational when n < 50. Skip
 LOWESS/CCPR file artifacts in v1 unless debug.
 
+**Plackett-Luce (page-level, secondary):** rank-ordered logit on the same
+`analysis_mart` panel, using the observed top-20 page rows per keyword and
+keyword-clustered inference. The implementation reports coefficient scale,
+odds ratios per 1 SD similarity increase, optimizer stability, Hessian
+conditioning, and IIA subset refits. Passage-level Plackett-Luce remains
+deferred backlog work only.
+
 **Module layout:** `src/seo_rank/stats/`; spec in `analysis_spec.v1.yaml`.
 Phase 5.75 features → `analysis_spec.v2.yaml`.
 
 **Outputs:** `runs/{run_id}/stats/stats_summary.json`, `stats_diagnostics.json`,
-`stats_report.md`; link from `report.md`. CLI: `seo-rank analyze`; exit 1 on
-guardrail hard-fail (overridable); skip stats on `--dry-run` and documented
-fixture modes only.
+`stats_report.md`; link from `report.md`. The stats summary includes the
+Plackett-Luce section alongside Spearman and pooled regression, while the
+diagnostics file includes optimizer and IIA sensitivity details. CLI:
+`seo-rank analyze`; exit 1 on guardrail hard-fail (overridable); skip stats on
+`--dry-run` and documented fixture modes only.
 
 **Deferred (Phase 5.1):** rank-decile segments, keyword heterogeneity deep-dives,
 confirmatory keyword holdout, IV / `PanelOLS`, URL fixed effects.
@@ -563,8 +572,10 @@ confirmatory keyword holdout, IV / `PanelOLS`, URL fixed effects.
 3. Compute keyword-level Spearman ρ; BH within each backend family when K ≥ 10.
 4. Fit baseline and univariate pooled models with keyword-clustered SEs; effect
    size translation; optional two-way-cluster sensitivity.
-5. Run pooled diagnostics; multivariate VIF sensitivity; influence refit appendix.
-6. Emit `stats_*` artifacts; link from `report.md`; set `actionable_association`
+5. Fit page-level Plackett-Luce rank-ordered logit; report odds ratios per 1 SD,
+   optimizer stability, Hessian conditioning, and IIA refits.
+6. Run pooled diagnostics; multivariate VIF sensitivity; influence refit appendix.
+7. Emit `stats_*` artifacts; link from `report.md`; set `actionable_association`
    per BGE rule.
 
 Do not skip any page-level scorer or the statistical analysis step on individual

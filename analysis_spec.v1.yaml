@@ -29,6 +29,14 @@ estimand:
   primary_metric: keyword_level_spearman_rho
   baseline_model: log(page_text_length + 1) + C(target_keyword_id)
   feature_model: normalized_similarity + log(page_text_length + 1) + C(target_keyword_id)
+  plackett_luce:
+    outcome: rank_ordered_logit
+    formula: similarity + log(page_text_length + 1)
+    clustered_se: target_keyword_id
+    choice_set_scope: observed_top_20_serp_results_per_keyword
+    iia_sensitivity:
+      top_20_vs_top_10: true
+      leave_one_out_top_rank: true
   multivariate_model:
     - bge_normalized_score
     - gemini_doc_retrieval_normalized_score

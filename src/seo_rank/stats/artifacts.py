@@ -6,10 +6,22 @@ import json
 from collections.abc import Mapping
 from pathlib import Path
 
-from seo_rank.stats.diagnostics import summarize_diagnostics_backends
+import numpy as np
+
+from seo_rank.stats.diagnostics import (
+    summarize_diagnostics_backends_from_fits,
+)
+from seo_rank.stats.plackett_luce import (
+    fit_plackett_luce_backends,
+    summarize_plackett_luce_backends_from_fits,
+    summarize_plackett_luce_diagnostics_backends_from_fits,
+)
 from seo_rank.stats.spec import AnalysisSpec
 from seo_rank.stats.panel import AnalysisPanelResult, load_analysis_panel
-from seo_rank.stats.regression import summarize_regression_backends
+from seo_rank.stats.regression import (
+    fit_regression_backends,
+    summarize_regression_backends_from_fits,
+)
 from seo_rank.stats.spearman import summarize_spearman_backends
 
 
@@ -27,6 +39,7 @@ def build_stats_summary(
     *,
     spearman: dict[str, object] | None = None,
     regression: dict[str, object] | None = None,
+    plackett_luce: dict[str, object] | None = None,
 ) -> dict[str, object]:
     summary = {
         "analysis_spec_version": result.analysis_spec_version,
@@ -41,11 +54,18 @@ def build_stats_summary(
         "guardrails": result.guardrails,
         "limitations": result.limitations,
         "hard_fail": result.hard_fail,
+        "actionable_association": _compute_actionable_association(
+            result,
+            spearman=spearman,
+            regression=regression,
+        ),
     }
     if spearman is not None:
         summary["spearman"] = spearman
     if regression is not None:
         summary["regression"] = regression
+    if plackett_luce is not None:
+        summary["plackett_luce"] = plackett_luce
     return summary
 
 
@@ -53,14 +73,18 @@ def build_stats_diagnostics(
     result: AnalysisPanelResult,
     *,
     diagnostics: dict[str, object],
+    plackett_luce: dict[str, object] | None = None,
 ) -> dict[str, object]:
-    return {
+    output = {
         "analysis_spec_version": result.analysis_spec_version,
         "estimand_version": result.estimand_version,
         "primary_backend": result.primary_backend,
         "backend_order": list(result.backend_order),
         "backends": diagnostics["backends"],
     }
+    if plackett_luce is not None:
+        output["plackett_luce"] = plackett_luce
+    return output
 
 
 def build_stats_report(
@@ -68,6 +92,8 @@ def build_stats_report(
     *,
     spearman: dict[str, object] | None = None,
     regression: dict[str, object] | None = None,
+    plackett_luce: dict[str, object] | None = None,
+    plackett_luce_diagnostics: dict[str, object] | None = None,
     diagnostics: dict[str, object] | None = None,
 ) -> str:
     lines = [
@@ -139,6 +165,36 @@ def build_stats_report(
                 f"two_way_cluster_status={two_way_cluster['status']}"
             )
 
+    if plackett_luce is not None:
+        lines.extend(
+            [
+                "",
+                "## Plackett-Luce",
+            ]
+        )
+        for backend, backend_summary in plackett_luce["backends"].items():
+            backend_summary = dict(backend_summary)
+            if backend_summary.get("status") == "skipped":
+                lines.append(
+                    "- "
+                    f"{backend}: status=skipped, "
+                    f"skipped_reason={backend_summary['skipped_reason']}"
+                )
+                continue
+            main_model = backend_summary["main_model"]
+            status = backend_summary.get("status", "computed")
+            diagnostics_summary = None
+            if plackett_luce_diagnostics is not None:
+                diagnostics_summary = dict(plackett_luce_diagnostics["backends"][backend])
+            lines.append(
+                "- "
+                f"{backend}: status={status}, "
+                f"odds_ratio_per_1sd={main_model.get('odds_ratio_per_1sd', 'n/a')}, "
+                f"convergence_confirmed={diagnostics_summary['convergence_confirmed'] if diagnostics_summary else 'n/a'}, "
+                f"hessian_condition_number={diagnostics_summary['hessian_condition_number'] if diagnostics_summary else 'n/a'}, "
+                f"top10_status={diagnostics_summary['iia_sensitivity']['top10']['status'] if diagnostics_summary else 'n/a'}"
+            )
+
     if diagnostics is not None:
         lines.extend(
             [
@@ -194,6 +250,38 @@ def build_stats_report(
     return "\n".join(lines) + "\n"
 
 
+def _compute_actionable_association(
+    result: AnalysisPanelResult,
+    *,
+    spearman: dict[str, object] | None,
+    regression: dict[str, object] | None,
+) -> bool:
+    if result.hard_fail or spearman is None or regression is None:
+        return False
+
+    backend = result.primary_backend
+    spearman_summary = spearman["backends"].get(backend)
+    regression_summary = regression["backends"].get(backend)
+    if not spearman_summary or not regression_summary:
+        return False
+    if spearman_summary.get("status") == "skipped" or regression_summary.get("status") == "skipped":
+        return False
+
+    median_abs_rho = float(
+        np.median([abs(float(test["rho"])) for test in spearman_summary["keyword_tests"]])
+    )
+    if median_abs_rho < 0.25:
+        return False
+    if float(spearman_summary["fraction_same_sign"]) < 0.60:
+        return False
+
+    confidence_interval = regression_summary["feature_model"]["clustered_confidence_interval"]
+    if len(confidence_interval) != 2:
+        return False
+    lower, upper = float(confidence_interval[0]), float(confidence_interval[1])
+    return bool(lower > 0 or upper < 0)
+
+
 def write_stats_artifacts(
     run_dir: Path,
     result: AnalysisPanelResult,
@@ -201,17 +289,28 @@ def write_stats_artifacts(
     spearman: dict[str, object] | None = None,
     regression: dict[str, object] | None = None,
     diagnostics: dict[str, object] | None = None,
+    plackett_luce: dict[str, object] | None = None,
+    plackett_luce_diagnostics: dict[str, object] | None = None,
 ) -> dict[str, object]:
     stats_dir = Path(run_dir) / "stats"
     stats_dir.mkdir(parents=True, exist_ok=True)
 
-    summary = build_stats_summary(result, spearman=spearman, regression=regression)
+    summary = build_stats_summary(
+        result,
+        spearman=spearman,
+        regression=regression,
+        plackett_luce=plackett_luce,
+    )
     (stats_dir / "stats_summary.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
     if diagnostics is not None:
-        diagnostics_summary = build_stats_diagnostics(result, diagnostics=diagnostics)
+        diagnostics_summary = build_stats_diagnostics(
+            result,
+            diagnostics=diagnostics,
+            plackett_luce=plackett_luce_diagnostics,
+        )
         (stats_dir / "stats_diagnostics.json").write_text(
             json.dumps(diagnostics_summary, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
@@ -221,6 +320,8 @@ def write_stats_artifacts(
             result,
             spearman=spearman,
             regression=regression,
+            plackett_luce=plackett_luce,
+            plackett_luce_diagnostics=plackett_luce_diagnostics,
             diagnostics=diagnostics,
         ),
         encoding="utf-8",
@@ -239,12 +340,34 @@ def run_phase5_stats(
     spearman = None
     regression = None
     diagnostics = None
+    plackett_luce = None
+    plackett_luce_diagnostics = None
     if not result.hard_fail:
         spearman = summarize_spearman_backends(result.analysis_mart, result.backend_order)
-        regression = summarize_regression_backends(result.analysis_mart, result.backend_order)
-        diagnostics = summarize_diagnostics_backends(
+        regression_fits = fit_regression_backends(result.analysis_mart, result.backend_order)
+        regression = summarize_regression_backends_from_fits(
             result.analysis_mart,
             result.backend_order,
+            fits=regression_fits,
+        )
+        diagnostics = summarize_diagnostics_backends_from_fits(
+            result.analysis_mart,
+            result.backend_order,
+            fits=regression_fits,
+        )
+        plackett_luce_fits = fit_plackett_luce_backends(
+            result.analysis_mart,
+            result.backend_order,
+        )
+        plackett_luce = summarize_plackett_luce_backends_from_fits(
+            result.analysis_mart,
+            result.backend_order,
+            fits=plackett_luce_fits,
+        )
+        plackett_luce_diagnostics = summarize_plackett_luce_diagnostics_backends_from_fits(
+            result.analysis_mart,
+            result.backend_order,
+            fits=plackett_luce_fits,
         )
     write_stats_artifacts(
         run_dir,
@@ -252,5 +375,7 @@ def run_phase5_stats(
         spearman=spearman,
         regression=regression,
         diagnostics=diagnostics,
+        plackett_luce=plackett_luce,
+        plackett_luce_diagnostics=plackett_luce_diagnostics,
     )
     return result

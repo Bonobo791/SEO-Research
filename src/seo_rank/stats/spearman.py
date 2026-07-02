@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 from collections.abc import Mapping, Sequence
 
@@ -10,6 +11,9 @@ import polars as pl
 from scipy.stats import spearmanr
 
 from seo_rank.stats.bh import adjust_p_values
+
+
+logger = logging.getLogger(__name__)
 
 BACKEND_SCORE_COLUMNS = {
     "bge": "bge_normalized_score",
@@ -48,8 +52,17 @@ def summarize_backend_spearman(
         for test, q_value in zip(keyword_tests, q_values, strict=True):
             test["bh_q_value"] = q_value
         summary["bh_q_values"] = q_values
+        bh_status = "applied"
     else:
         summary["bh_skipped_reason"] = "underpowered"
+        bh_status = "skipped"
+    logger.info(
+        "spearman backend=%s keyword_count=%d median_rho=%.4f bh=%s",
+        backend,
+        len(keyword_tests),
+        summary["median_rho"],
+        bh_status,
+    )
     return summary
 
 
@@ -59,6 +72,7 @@ def summarize_spearman_backends(
 ) -> dict[str, object]:
     """Summarize Spearman tests for every backend in order."""
 
+    logger.info("summarizing spearman backends=%s", list(backend_order))
     return {
         "backend_order": list(backend_order),
         "backends": {

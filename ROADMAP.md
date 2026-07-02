@@ -66,6 +66,12 @@ object), `stats_diagnostics.json`, `stats_report.md`. Link from existing
 `report.md` to `stats/stats_report.md` when stats run. Limitations also belong
 in JSON, not Markdown-only.
 
+**Plackett-Luce (page-level, secondary):** rank-ordered logit on the same
+`analysis_mart` panel, using the observed top-20 page rows per keyword and
+keyword-clustered inference. It is additive to Spearman and pooled OLS, not a
+replacement. Passage-level Plackett-Luce remains deferred backlog work only and
+is not wired in code today.
+
 **CLI:** `seo-rank analyze --run RUN_ID` materializes `analysis_mart`, runs
 Phase 5 stats when guardrails allow, writes `stats_*`. Exit **1** on guardrail
 hard-fail (optional `--no-fail-on-guardrails` for CI/fixtures). Skip full stats
@@ -77,11 +83,11 @@ reinterpret v1 runs with v2 spec.
 
 **Not in v1:** per-keyword OLS as primary inference, IV / `PanelOLS`, URL fixed
 effects, rank-decile segments, keyword-heterogeneity deep-dives (Phase 5.4),
-confirmatory keyword holdout (Phase 5.4).
+confirmatory keyword holdout (Phase 5.4), passage-level Plackett-Luce analysis.
 
 #### Dev slices
 
-**Progress:** 5 of 14 shipped, 9 open.
+**Progress:** 5 of 15 shipped, 10 open.
 
 1. **[x] Slice 1 — Estimand & analysis spec**
    - Add `analysis_spec.v1.yaml`: outcome (`-log(serp_rank)`), predictors,
@@ -224,6 +230,15 @@ confirmatory keyword holdout (Phase 5.4).
       rank invariants (e.g. highest absolute score → rank 1).
     - Acceptance: rebuild `analysis_mart` on stored runs derives relative
       columns from stored absolutes without re-scoring.
+
+15. **[ ] Slice 15 — Plackett-Luce estimand runtime wiring**
+    - Load `analysis_spec.estimand.plackett_luce` at runtime and thread the
+      top-20 limit, IIA cutoffs, and convergence thresholds from the spec
+      instead of hardcoding them in `plackett_luce.py`.
+    - Keep page-level PL behavior aligned with the committed estimand block so
+      future spec edits do not silently diverge from code.
+    - Tests: spec-driven threshold loader and regression coverage for the
+      runtime-plumbed estimator settings.
 
 #### Phase 5 acceptance criteria
 

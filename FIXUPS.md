@@ -16,7 +16,9 @@ second senior QA diff review (code / tests only), and Phase 4.77 Slice 1
 (DataForSEO schema contracts in `dataforseo.py`), and the Jul 2026 Phase 5
 Slices 3–4 code review (guardrails, Spearman/BH, `analyze` wiring), and the Jul 2026
 code review of stored-run stale SERP replay (`expand_stored_run`, `merge_keyword_results`,
-`load_stored_serp_statuses`). Each item names
+`load_stored_serp_statuses`), and the Jul 2026 code review of Phase 5 page-level
+Plackett-Luce, regression coefficient scaling (`within_keyword_sd_rms`), fit-once
+artifact wiring, and `normalize_run` `response_id` deduplication. Each item names
 the **phase/slice** where it should land. Nothing here blocks Slice 10 sign-off
 unless marked **required**.
 
@@ -455,6 +457,26 @@ diagnostics on real DataForSEO crawls. Relates to Phase 4.77 schema contracts
 | ID | Fix | Phase | Priority | Status |
 | --- | --- | --- | --- | --- |
 | S5-11 | Accept `page_text` responses where `tasks[].result` is `null` (task-level crawl failure) instead of raising `DataForSEO page_text response schema drift at tasks[0].result: expected list, got NoneType`. Align `DATAFORSEO_RESPONSE_SCHEMAS` `tasks[].result` with `_validate_content_parsing_response` (already `continue`s when `result` is not a list); CLI live path should skip the URL and continue the run. Repro: `seo-rank run --seed "seo company columbus" --live-providers --live-gemini --live-bge`. Add unit test for `result: null` pass-through and CLI regression that run does not abort on one failed page_text task | 5 Slice 6 | required | open |
+
+---
+
+## Phase 5 — Plackett-Luce + regression scaling (post-ship polish)
+
+Follow-ups from the Jul 2026 code review of page-level Plackett-Luce
+(`plackett_luce.py`), shared scaling (`scale.py`), regression per–within-keyword-RMS-SD
+reporting, fit-once wiring in `artifacts.run_phase5_stats`, and `normalize_run`
+`response_id` deduplication. None block merge unless marked **required**.
+
+| ID | Fix | Phase | Priority | Status |
+| --- | --- | --- | --- | --- |
+| S5-12 | Sync unit baseline in `TESTING.md` and `test_sdlc_docs.py`: suite is **212 collected / 212 passing / 0 skipped** today; docs still assert **211 passing / 1 skipped** (extends S5-01 / S476-22) | 5 docs | nice-to-have | open |
+| S5-13 | Plackett-Luce unstable fits: when `main_model.status == "unstable"` (optimizer non-convergence or Hessian condition number above threshold), promote backend-level `status` to `"unstable"` or document that consumers must check `convergence_confirmed` / `main_model.status`, not only `backends[*].status` | 5 stats | nice-to-have | open |
+| S5-14 | Update `analysis_spec.v1.yaml` `effect_size.note`: regression/PL now use `within_keyword_sd_rms()` (RMS of per-keyword SDs), not pooled panel standard deviation of the score column | 5 docs | nice-to-have | open |
+| S5-15 | `_two_way_cluster_sensitivity()` in `regression.py` assumes `feature_result.model.exog_names[1]` is the similarity column — pass `fit.score_column` from `BackendRegressionFit` instead of positional index | 5 Slice 5 | nice-to-have | open |
+| S5-16 | Document IIA subset refit scaling in `plackett_luce.py`: `_subset_refit_summary()` multiplies subset coefficients by the **main** fit's `similarity_within_keyword_sd` for drift comparison, not the subset's own within-keyword spread — add a code comment or diagnostics field so readers do not misread `log_odds_per_1sd` on refits | 5 stats | nice-to-have | open |
+| S5-17 | `scale.py`: add module docstring that `within_keyword_zscore` / `global_zscore` are prep for slices 11–13 (rank transform / analysis_mart v2); only `within_keyword_sd_rms` is wired in production paths today | 5 Slice 11 | nice-to-have | open |
+| S5-18 | Add `stats.scale` to `test_stats_package_exports_module_surface` (parity with `plackett_luce` export assertion) | 5 stats | nice-to-have | open |
+| S5-19 | Wire `analysis_spec.estimand.plackett_luce` into runtime (`plackett_luce.py` constants like `FORMULA`, `TOP_SERP_RANK_LIMIT`, IIA flags are hardcoded today; YAML block is validated in tests only) | 5 stats | nice-to-have | open |
 
 ---
 

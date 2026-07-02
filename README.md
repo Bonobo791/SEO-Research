@@ -123,10 +123,12 @@ see `ROADMAP.md` (BGE hybrid / retrieve-then-rerank backlog).
 `analyze` writes `parquet/analysis_mart/` (SERP rank plus the three similarity
 columns and page text length). If feature marts are missing, it materializes
 them first from the curated tables. It does **not** re-fetch pages or re-run
-embeddings. The current stats path runs guardrails, Spearman summaries, and
-pooled regression summaries into `runs/{run_id}/stats/`, including
-`stats_summary.json`, `stats_diagnostics.json`, and `stats_report.md`; later
-slices expand CLI reporting.
+embeddings. The current stats path runs guardrails, Spearman summaries,
+pooled regression summaries, and page-level Plackett-Luce summaries into
+`runs/{run_id}/stats/`, including `stats_summary.json`,
+`stats_diagnostics.json`, and `stats_report.md`; later slices expand CLI
+reporting. Passage-level Plackett-Luce remains deferred backlog work and is
+not wired into `analyze` today.
 
 ### Standalone script
 
