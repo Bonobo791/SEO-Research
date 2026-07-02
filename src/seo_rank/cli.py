@@ -485,36 +485,37 @@ def expand_stored_run(
         )
 
     stored_serp_statuses = load_stored_serp_statuses(stored_run)
+    stored_keyword_results = load_stored_keyword_results_by_keyword(stored_payload)
+    raw_response_records = load_raw_response_records(stored_run)
+    raw_response_index = group_raw_response_records_by_keyword(raw_response_records)
+    network_calls = list(
+        stored_payload.get("network_calls", [])
+        if isinstance(stored_payload.get("network_calls", []), list)
+        else []
+    )
+
     keywords_to_refresh = [
         keyword
         for keyword in target_keywords
         if not stored_serp_statuses.get(keyword.casefold(), False)
     ]
 
-    if not keywords_to_refresh:
-        materialize_run_tree(
-            stored_run,
-            progress=progress,
-            phase_label="replay",
-            respect_dry_run=False,
-        )
-        return
-
-    network_calls = list(
-        stored_payload.get("network_calls", [])
-        if isinstance(stored_payload.get("network_calls", []), list)
-        else []
-    )
+    live_context: Mapping[str, object] | None = None
     if base_config.live_providers:
         live_context = prepare_live_run_context(
             base_config,
             env=os.environ,
             progress=progress,
         )
-        refreshed_keyword_results: list[dict[str, object]] = []
-        for index, keyword in enumerate(keywords_to_refresh, start=1):
-            refreshed_keyword_results.append(
-                build_live_keyword_result(
+    resolved_keyword_results: list[dict[str, object]] = []
+    for index, keyword in enumerate(target_keywords, start=1):
+        keyword_key = keyword.casefold()
+        raw_keyword_records = raw_response_index.get(keyword_key, {})
+        stored_keyword_result = stored_keyword_results.get(keyword_key)
+        if keyword in keywords_to_refresh:
+            if base_config.live_providers:
+                assert live_context is not None
+                keyword_result = build_live_keyword_result(
                     base_config,
                     target_keyword=keyword,
                     credentials=live_context["credentials"],
@@ -528,62 +529,58 @@ def expand_stored_run(
                     network_calls=network_calls,
                     progress=progress,
                 )
-            )
-            if progress is not None:
-                progress.keyword_step(index, len(keywords_to_refresh), keyword, "done")
-    else:
-        refreshed_keyword_results = []
-        for index, keyword in enumerate(keywords_to_refresh, start=1):
-            refreshed_keyword_results.append(
-                build_offline_keyword_result(
+            else:
+                keyword_result = build_offline_keyword_result(
                     base_config,
                     target_keyword=keyword,
                     progress=progress,
                 )
-            )
+            resolved_keyword_results.append(keyword_result)
             if progress is not None:
-                progress.keyword_step(index, len(keywords_to_refresh), keyword, "done")
+                progress.keyword_step(index, len(target_keywords), keyword, "done")
+            continue
+
+        keyword_result = build_resumed_keyword_result(
+            base_config,
+            target_keyword=keyword,
+            stored_keyword_result=stored_keyword_result,
+            raw_keyword_records=raw_keyword_records,
+            live_context=live_context,
+            network_calls=network_calls,
+            progress=progress,
+        )
+        resolved_keyword_results.append(keyword_result)
+        if progress is not None:
+            progress.keyword_step(index, len(target_keywords), keyword, "done")
 
     merged_payload = build_expanded_run_payload(
         stored_payload,
         config=base_config,
         keywords=target_keywords,
-        keyword_results=merge_keyword_results(
-            stored_payload.get("keyword_results", []),
-            refreshed_keyword_results,
-            target_keywords=target_keywords,
-        ),
+        keyword_results=resolved_keyword_results,
         network_calls=network_calls,
     )
-    existing_raw_response_records = scan_raw_responses(stored_run).collect().to_dicts()
-    new_raw_response_records = build_raw_response_records(
-        run_id,
-        {
-            "keyword_results": refreshed_keyword_results,
-        },
+    merged_raw_provider_data = dict(merged_payload.get("raw_provider_data", {}))
+    if not isinstance(merged_raw_provider_data, dict):
+        merged_raw_provider_data = {}
+    merged_dataforseo = merged_raw_provider_data.get("dataforseo", {})
+    if not isinstance(merged_dataforseo, dict):
+        merged_dataforseo = {}
+    merged_dataforseo["keyword_expansion"] = load_stored_keyword_expansion_response(
+        stored_run
     )
-    refreshed_keyword_keys = {keyword.casefold() for keyword in keywords_to_refresh}
-    retained_raw_response_records = [
-        record
-        for record in existing_raw_response_records
-        if not (
-            isinstance(record.get("target_keyword"), str)
-            and record["target_keyword"].casefold() in refreshed_keyword_keys
-        )
-    ]
+    merged_raw_provider_data["dataforseo"] = merged_dataforseo
+    merged_payload["raw_provider_data"] = merged_raw_provider_data
+    raw_response_records = build_raw_response_records(run_id, merged_payload)
     if progress is not None:
         progress.log(
-            "replay: writing expanded raw responses "
-            f"({len(retained_raw_response_records) + len(new_raw_response_records)} records)"
+            f"replay: writing expanded raw responses ({len(raw_response_records)} records)"
         )
     write_artifacts(
         stored_run,
         merged_payload,
         progress=progress,
-        raw_response_records=[
-            *retained_raw_response_records,
-            *new_raw_response_records,
-        ],
+        raw_response_records=raw_response_records,
     )
     materialize_run_tree(
         stored_run,
@@ -639,46 +636,6 @@ def build_expanded_run_payload(
     return merged_payload
 
 
-def merge_keyword_results(
-    stored_keyword_results: object,
-    refreshed_keyword_results: Sequence[Mapping[str, object]],
-    *,
-    target_keywords: Sequence[str],
-) -> list[dict[str, object]]:
-    stored_by_keyword: dict[str, dict[str, object]] = {}
-    if isinstance(stored_keyword_results, list):
-        for keyword_result in stored_keyword_results:
-            if not isinstance(keyword_result, Mapping):
-                continue
-            target_keyword = keyword_result.get("target_keyword")
-            if isinstance(target_keyword, str):
-                stored_by_keyword[target_keyword.casefold()] = dict(keyword_result)
-
-    refreshed_by_keyword = {
-        keyword_result["target_keyword"].casefold(): dict(keyword_result)
-        for keyword_result in refreshed_keyword_results
-        if isinstance(keyword_result.get("target_keyword"), str)
-    }
-
-    merged: list[dict[str, object]] = []
-    missing_keywords: list[str] = []
-    for keyword in target_keywords:
-        keyword_key = keyword.casefold()
-        keyword_result = refreshed_by_keyword.get(keyword_key) or stored_by_keyword.get(
-            keyword_key
-        )
-        if keyword_result is None:
-            missing_keywords.append(keyword)
-            continue
-        merged.append(keyword_result)
-    if missing_keywords:
-        raise CliCommandError(
-            "Stored run payload is missing keyword results for: "
-            + ", ".join(missing_keywords)
-        )
-    return merged
-
-
 def load_stored_keyword_expansion_response(run_dir: Path) -> dict[str, object]:
     rows = (
         scan_raw_responses(run_dir)
@@ -697,6 +654,221 @@ def load_stored_keyword_expansion_response(run_dir: Path) -> dict[str, object]:
             f"Stored keyword_expansion response in {run_dir} does not contain raw bytes"
         )
     return json.loads(bytes(response_body_bytes).decode("utf-8"))
+
+
+def load_raw_response_records(run_dir: Path) -> list[dict[str, object]]:
+    try:
+        return scan_raw_responses(run_dir).collect().to_dicts()
+    except STORAGE_COMMAND_EXCEPTIONS as error:
+        raise CliCommandError(str(error)) from error
+
+
+def group_raw_response_records_by_keyword(
+    raw_response_records: Sequence[Mapping[str, object]],
+) -> dict[str, dict[str, list[dict[str, object]]]]:
+    grouped: dict[str, dict[str, list[dict[str, object]]]] = {}
+    for record in raw_response_records:
+        target_keyword = record.get("target_keyword")
+        endpoint = record.get("endpoint")
+        if not isinstance(target_keyword, str) or not isinstance(endpoint, str):
+            continue
+        grouped.setdefault(target_keyword.casefold(), {}).setdefault(endpoint, []).append(
+            dict(record)
+        )
+    return grouped
+
+
+def load_stored_keyword_results_by_keyword(
+    stored_payload: Mapping[str, object],
+) -> dict[str, dict[str, object]]:
+    keyword_results = stored_payload.get("keyword_results", [])
+    if not isinstance(keyword_results, list):
+        return {}
+    results: dict[str, dict[str, object]] = {}
+    for keyword_result in keyword_results:
+        if not isinstance(keyword_result, Mapping):
+            continue
+        target_keyword = keyword_result.get("target_keyword")
+        if not isinstance(target_keyword, str):
+            continue
+        results[target_keyword.casefold()] = dict(keyword_result)
+    return results
+
+
+def build_resumed_keyword_result(
+    config: RunConfig,
+    *,
+    target_keyword: str,
+    stored_keyword_result: Mapping[str, object] | None,
+    raw_keyword_records: Mapping[str, Sequence[Mapping[str, object]]],
+    live_context: Mapping[str, object] | None,
+    network_calls: list[str],
+    progress: RunProgress | None = None,
+) -> dict[str, object]:
+    serp_records = raw_keyword_records.get("serp", [])
+    serp_response: Mapping[str, object] | None = None
+    for record in serp_records:
+        response_body_bytes = record.get("response_body_bytes")
+        if isinstance(response_body_bytes, (bytes, bytearray)):
+            candidate = json.loads(bytes(response_body_bytes).decode("utf-8"))
+            if stored_serp_response_is_usable(candidate):
+                serp_response = candidate
+                break
+    if serp_response is None:
+        if config.live_providers and live_context is not None:
+            return build_live_keyword_result(
+                config,
+                target_keyword=target_keyword,
+                credentials=live_context["credentials"],
+                live_bge_enabled=bool(live_context["live_bge_enabled"]),
+                bge_reranker=live_context["bge_reranker"],
+                gemini_api_key=live_context["gemini_api_key"],
+                textrazor_credentials=live_context["textrazor_credentials"],
+                location_code=int(live_context["location_code"]),
+                dataforseo_transport=DEFAULT_DATAFORSEO_TRANSPORT,
+                textrazor_transport=DEFAULT_TEXTRAZOR_TRANSPORT,
+                network_calls=network_calls,
+                progress=progress,
+            )
+        return build_offline_keyword_result(
+            config,
+            target_keyword=target_keyword,
+            progress=progress,
+        )
+
+    serp_results = normalize_serp_results(
+        serp_response,
+        keyword=target_keyword,
+        depth=config.depth,
+    )
+    existing_page_text_by_url: dict[str, dict[str, object]] = {}
+    for record in raw_keyword_records.get("page_text", []):
+        response_body_bytes = record.get("response_body_bytes")
+        if not isinstance(response_body_bytes, (bytes, bytearray)):
+            continue
+        response = json.loads(bytes(response_body_bytes).decode("utf-8"))
+        url = extract_response_url(response)
+        if isinstance(url, str):
+            existing_page_text_by_url[url] = response
+
+    missing_urls = [
+        str(result["url"])
+        for result in serp_results
+        if str(result["url"]) not in existing_page_text_by_url
+    ]
+    if missing_urls and progress is not None:
+        progress.keyword_log(
+            target_keyword,
+            f"page text ({len(serp_results)} urls)",
+        )
+    for result in serp_results:
+        url = str(result["url"])
+        if url in existing_page_text_by_url:
+            continue
+        if config.live_providers and live_context is not None:
+            response = execute_validated_dataforseo_request(
+                "page_text",
+                build_page_text_request(url),
+                credentials=live_context["credentials"].dataforseo,
+                transport=DEFAULT_DATAFORSEO_TRANSPORT,
+            )
+            network_calls.append("dataforseo.page_text")
+        else:
+            response = fixture_page_text_response(url, target_keyword)
+        existing_page_text_by_url[url] = response
+
+    page_text_responses = [
+        existing_page_text_by_url[str(result["url"])]
+        for result in serp_results
+        if str(result["url"]) in existing_page_text_by_url
+    ]
+
+    parsed_pages = [
+        page_text
+        for response in page_text_responses
+        for page_text in [parsed_page_text(response)]
+        if page_text
+    ]
+    passages = [
+        annotate_target_keyword(passage, target_keyword)
+        for page_text in parsed_pages
+        for passage in normalize_page_text(page_text)
+    ]
+    textrazor_responses: list[dict[str, object]] = []
+    textrazor_entities: list[dict[str, object]] = []
+    for record in raw_keyword_records.get("entities", []):
+        response_body_bytes = record.get("response_body_bytes")
+        if not isinstance(response_body_bytes, (bytes, bytearray)):
+            continue
+        response = json.loads(bytes(response_body_bytes).decode("utf-8"))
+        textrazor_responses.append(response)
+        textrazor_entities.extend(
+            annotate_target_keyword(entity, target_keyword)
+            for entity in normalize_entities(response, url=str(response["url"]))
+        )
+
+    stored_page_similarity = []
+    if stored_keyword_result is not None:
+        stored_page_similarity_value = stored_keyword_result.get("page_similarity", [])
+        if isinstance(stored_page_similarity_value, list):
+            stored_page_similarity = [
+                score
+                for score in stored_page_similarity_value
+                if isinstance(score, Mapping)
+            ]
+
+    if (
+        stored_keyword_result is not None
+        and page_similarity_is_complete(stored_page_similarity, serp_results)
+        and len(page_text_responses) == len(serp_results)
+    ):
+        return build_keyword_result_from_responses(
+            target_keyword,
+            serp_response=serp_response,
+            page_text_responses=page_text_responses,
+            similarity_scores=stored_page_similarity,
+            passages=passages,
+            serp_results=serp_results,
+            similarity_features=[
+                feature
+                for feature in stored_keyword_result.get("similarity_features", [])
+                if isinstance(feature, Mapping)
+            ]
+                if isinstance(stored_keyword_result.get("similarity_features", []), list)
+            else None,
+            textrazor_responses=textrazor_responses,
+            textrazor_entities=textrazor_entities,
+        )
+
+    complete_scores = complete_page_similarity_scores(
+        target_keyword,
+        parsed_pages,
+        config=config,
+        live_context=live_context,
+    )
+    if stored_page_similarity:
+        complete_scores = merge_page_similarity_scores(
+            complete_scores,
+            stored_page_similarity,
+        )
+
+    return build_keyword_result_from_responses(
+        target_keyword,
+        serp_response=serp_response,
+        page_text_responses=page_text_responses,
+        similarity_scores=complete_scores,
+        passages=passages,
+        serp_results=serp_results,
+        similarity_features=[
+            annotate_target_keyword(feature, target_keyword)
+            for feature in compute_page_similarity_features(
+                target_keyword,
+                passages,
+            )
+        ],
+        textrazor_responses=textrazor_responses,
+        textrazor_entities=textrazor_entities,
+    )
 
 
 def load_stored_serp_statuses(run_dir: Path) -> dict[str, bool]:
@@ -1045,10 +1217,7 @@ def build_offline_keyword_result(
         annotate_target_keyword(feature, target_keyword)
         for feature in compute_page_similarity_features(target_keyword, passages)
     ]
-    page_similarity = [
-        annotate_target_keyword(score, target_keyword)
-        for score in compute_page_similarity_scores(target_keyword, parsed_pages)
-    ]
+    page_similarity = compute_page_similarity_scores(target_keyword, parsed_pages)
     textrazor_responses: list[dict[str, object]] = []
     textrazor_entities: list[dict[str, object]] = []
     if not config.skip_textrazor:
@@ -1066,25 +1235,17 @@ def build_offline_keyword_result(
             for response in textrazor_responses
             for entity in normalize_entities(response, url=str(response["url"]))
         ]
-    raw_provider_data = {
-        "dataforseo": {
-            "page_text": page_text_responses,
-            "serp": serp_response,
-        },
-    }
-    if textrazor_responses:
-        raw_provider_data["textrazor"] = {
-            "entities": textrazor_responses,
-        }
-    return {
-        "target_keyword": target_keyword,
-        "raw_provider_data": raw_provider_data,
-        "passages": passages,
-        "serp_results": serp_results,
-        "similarity_features": similarity_features,
-        "page_similarity": page_similarity,
-        "textrazor_entities": textrazor_entities,
-    }
+    return build_keyword_result_from_responses(
+        target_keyword,
+        serp_response=serp_response,
+        page_text_responses=page_text_responses,
+        similarity_scores=page_similarity,
+        passages=passages,
+        serp_results=serp_results,
+        similarity_features=similarity_features,
+        textrazor_responses=textrazor_responses,
+        textrazor_entities=textrazor_entities,
+    )
 
 
 def build_live_payload(
@@ -1280,7 +1441,7 @@ def build_live_keyword_result(
     if live_bge_enabled:
         if progress is not None:
             progress.keyword_log(target_keyword, "bge scoring")
-        similarity_scores = merge_bge_page_similarity_scores(
+        similarity_scores = merge_page_similarity_scores(
             similarity_scores,
             compute_bge_page_similarity_scores(
                 target_keyword,
@@ -1288,9 +1449,6 @@ def build_live_keyword_result(
                 reranker=bge_reranker,
             ),
         )
-    page_similarity = [
-        annotate_target_keyword(score, target_keyword) for score in similarity_scores
-    ]
 
     textrazor_responses: list[dict[str, object]] = []
     textrazor_entities: list[dict[str, object]] = []
@@ -1317,31 +1475,23 @@ def build_live_keyword_result(
             for entity in normalize_entities(response, url=str(response["url"]))
         ]
 
-    raw_provider_data = {
-        "dataforseo": {
-            "page_text": page_text_responses,
-            "serp": serp_response,
-        },
-    }
-    if textrazor_responses:
-        raw_provider_data["textrazor"] = {
-            "entities": textrazor_responses,
-        }
-    return {
-        "target_keyword": target_keyword,
-        "raw_provider_data": raw_provider_data,
-        "passages": passages,
-        "serp_results": serp_results,
-        "page_similarity": page_similarity,
-        "similarity_features": [
+    return build_keyword_result_from_responses(
+        target_keyword,
+        serp_response=serp_response,
+        page_text_responses=page_text_responses,
+        similarity_scores=similarity_scores,
+        passages=passages,
+        serp_results=serp_results,
+        similarity_features=[
             annotate_target_keyword(feature, target_keyword)
             for feature in compute_page_similarity_features(
                 target_keyword,
                 passages,
             )
         ],
-        "textrazor_entities": textrazor_entities,
-    }
+        textrazor_responses=textrazor_responses,
+        textrazor_entities=textrazor_entities,
+    )
 
 
 def raise_for_failed_dataforseo_tasks(
@@ -1404,38 +1554,157 @@ def annotate_target_keyword(
     return {**row, "target_keyword": target_keyword}
 
 
-def merge_bge_page_similarity_scores(
-    base_scores: list[dict[str, object]],
-    bge_scores: list[dict[str, object]],
+def merge_page_similarity_scores(
+    base_scores: Sequence[Mapping[str, object]],
+    *score_sets: Sequence[Mapping[str, object]],
 ) -> list[dict[str, object]]:
-    bge_by_url = {
-        str(score["url"]): score["page_similarity"]["bge"]
-        for score in bge_scores
-        if isinstance(score.get("url"), str)
-        and isinstance(score.get("page_similarity"), dict)
-        and isinstance(score["page_similarity"].get("bge"), dict)
-    }
-    merged: list[dict[str, object]] = []
+    merged: dict[str, dict[str, object]] = {}
+    order: list[str] = []
     for score in base_scores:
+        if not isinstance(score, Mapping):
+            continue
         url = score.get("url")
         page_similarity = score.get("page_similarity")
-        if (
-            not isinstance(url, str)
-            or not isinstance(page_similarity, dict)
-            or url not in bge_by_url
-        ):
-            merged.append(score)
+        if not isinstance(url, str) or not isinstance(page_similarity, Mapping):
             continue
-        merged.append(
-            {
-                **score,
-                "page_similarity": {
-                    **page_similarity,
-                    "bge": bge_by_url[url],
-                },
-            }
-        )
-    return merged
+        merged[url] = {"url": url, "page_similarity": dict(page_similarity)}
+        order.append(url)
+
+    for score_set in score_sets:
+        if not isinstance(score_set, Sequence) or isinstance(
+            score_set, (str, bytes, bytearray)
+        ):
+            continue
+        for score in score_set:
+            if not isinstance(score, Mapping):
+                continue
+            url = score.get("url")
+            page_similarity = score.get("page_similarity")
+            if not isinstance(url, str) or not isinstance(page_similarity, Mapping):
+                continue
+            if url not in merged:
+                merged[url] = {"url": url, "page_similarity": {}}
+                order.append(url)
+            merged[url]["page_similarity"].update(dict(page_similarity))
+
+    return [merged[url] for url in order if url in merged]
+
+
+def page_similarity_is_complete(
+    page_similarity: Sequence[Mapping[str, object]],
+    serp_results: Sequence[Mapping[str, object]],
+) -> bool:
+    score_by_url = {}
+    for score in page_similarity:
+        if not isinstance(score, Mapping):
+            continue
+        url = score.get("url")
+        page_scores = score.get("page_similarity")
+        if not isinstance(url, str) or not isinstance(page_scores, Mapping):
+            continue
+        score_by_url[url] = page_scores
+
+    required_backends = {
+        "bge",
+        "gemini_doc_retrieval",
+        "gemini_semantic_similarity",
+    }
+    for result in serp_results:
+        url = result.get("url")
+        if not isinstance(url, str):
+            return False
+        page_scores = score_by_url.get(url)
+        if page_scores is None:
+            return False
+        if not required_backends.issubset(page_scores.keys()):
+            return False
+    return True
+
+
+def complete_page_similarity_scores(
+    keyword: str,
+    parsed_pages: Sequence[Mapping[str, object]],
+    *,
+    config: RunConfig,
+    live_context: Mapping[str, object] | None = None,
+) -> list[dict[str, object]]:
+    computed_scores = compute_page_similarity_scores(keyword, parsed_pages)
+    if config.live_providers and live_context is not None:
+        if config.live_gemini and live_context.get("gemini_api_key"):
+            computed_scores = merge_page_similarity_scores(
+                computed_scores,
+                compute_gemini_page_similarity_scores(
+                    keyword,
+                    parsed_pages,
+                    api_key=str(live_context["gemini_api_key"]),
+                ),
+            )
+        if config.live_bge and live_context.get("bge_reranker") is not None:
+            computed_scores = merge_page_similarity_scores(
+                computed_scores,
+                compute_bge_page_similarity_scores(
+                    keyword,
+                    parsed_pages,
+                    reranker=live_context["bge_reranker"],
+                ),
+            )
+    return computed_scores
+
+
+def build_keyword_result_from_responses(
+    target_keyword: str,
+    *,
+    serp_response: Mapping[str, object],
+    page_text_responses: Sequence[Mapping[str, object]],
+    similarity_scores: Sequence[Mapping[str, object]],
+    passages: Sequence[Mapping[str, object]] | None = None,
+    serp_results: Sequence[Mapping[str, object]] | None = None,
+    similarity_features: Sequence[Mapping[str, object]] | None = None,
+    textrazor_responses: Sequence[Mapping[str, object]] | None = None,
+    textrazor_entities: Sequence[Mapping[str, object]] | None = None,
+) -> dict[str, object]:
+    if serp_results is None:
+        serp_results = normalize_serp_results(serp_response, keyword=target_keyword)
+    if passages is None:
+        parsed_pages = [
+            page_text
+            for response in page_text_responses
+            for page_text in [parsed_page_text(response)]
+            if page_text
+        ]
+        passages = [
+            annotate_target_keyword(passage, target_keyword)
+            for page_text in parsed_pages
+            for passage in normalize_page_text(page_text)
+        ]
+    if similarity_features is None:
+        similarity_features = [
+            annotate_target_keyword(feature, target_keyword)
+            for feature in compute_page_similarity_features(target_keyword, passages)
+        ]
+    page_similarity = [
+        annotate_target_keyword(score, target_keyword)
+        for score in similarity_scores
+    ]
+    raw_provider_data = {
+        "dataforseo": {
+            "page_text": list(page_text_responses),
+            "serp": serp_response,
+        },
+    }
+    if textrazor_responses:
+        raw_provider_data["textrazor"] = {
+            "entities": list(textrazor_responses),
+        }
+    return {
+        "target_keyword": target_keyword,
+        "raw_provider_data": raw_provider_data,
+        "passages": list(passages),
+        "serp_results": list(serp_results),
+        "similarity_features": list(similarity_features),
+        "page_similarity": page_similarity,
+        "textrazor_entities": list(textrazor_entities or []),
+    }
 
 
 def build_payload_from_keyword_results(
@@ -1733,7 +2002,11 @@ def extract_response_url(response: Mapping[str, object]) -> str | None:
     if not isinstance(task, Mapping):
         return None
     task_url = task.get("url")
-    return task_url if isinstance(task_url, str) else None
+    if isinstance(task_url, str):
+        return task_url
+    parsed_page = parsed_page_text(response)
+    parsed_url = parsed_page.get("url")
+    return parsed_url if isinstance(parsed_url, str) else None
 
 
 def write_raw_response_catalog(

@@ -331,6 +331,233 @@ def test_run_stored_run_expands_existing_tree_in_place(
     assert (output_dir / "stats" / "stats_summary.json").exists()
 
 
+def test_run_stored_run_resumes_missing_page_text_in_place(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
+
+    assert (
+        main(
+            [
+                "run",
+                "--seed",
+                "technical seo",
+                "--depth",
+                "3",
+                "--output-dir",
+                str(output_dir),
+                "--dry-run",
+                "--skip-textrazor",
+                "--keyword-limit",
+                "3",
+            ]
+        )
+        == 0
+    )
+
+    run_json_path = output_dir / "run.json"
+    raw_response_path = (
+        output_dir / "parquet" / "raw_responses" / "endpoint=page_text" / "part-0.parquet"
+    )
+    original_payload = json.loads(run_json_path.read_text(encoding="utf-8"))
+    page_text_table = pq.ParquetFile(raw_response_path).read()
+    page_text_rows = [
+        row
+        for row in page_text_table.to_pylist()
+        if row["target_keyword"] == "technical seo"
+    ]
+    pq.write_table(
+        pa.Table.from_pylist(page_text_rows, schema=page_text_table.schema),
+        raw_response_path,
+    )
+
+    partial_keyword_results = []
+    for keyword_result in original_payload["keyword_results"]:
+        if keyword_result["target_keyword"] == "technical seo":
+            partial_keyword_results.append(keyword_result)
+        else:
+            partial_keyword_results.append(
+                {
+                    "target_keyword": keyword_result["target_keyword"],
+                    "serp_results": [],
+                    "passages": [],
+                    "similarity_features": [],
+                    "page_similarity": [],
+                    "textrazor_entities": [],
+                }
+            )
+    original_payload["keyword_results"] = partial_keyword_results
+    original_payload["passages"] = [
+        passage
+        for keyword_result in partial_keyword_results
+        for passage in keyword_result["passages"]
+    ]
+    original_payload["serp_results"] = [
+        result
+        for keyword_result in partial_keyword_results
+        for result in keyword_result["serp_results"]
+    ]
+    original_payload["similarity_features"] = [
+        feature
+        for keyword_result in partial_keyword_results
+        for feature in keyword_result["similarity_features"]
+    ]
+    original_payload["page_similarity"] = [
+        score
+        for keyword_result in partial_keyword_results
+        for score in keyword_result["page_similarity"]
+    ]
+    original_payload["textrazor_entities"] = []
+    original_payload["catalog"]["datasets"]["raw_responses"]["row_count"] = 1 + 3 + 3
+    run_json_path.write_text(
+        json.dumps(original_payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    def _fail_if_keyword_refresh_requested(*args, **kwargs) -> None:
+        raise AssertionError("stored-run should resume from existing SERP rows")
+
+    monkeypatch.setattr("seo_rank.cli.build_offline_keyword_result", _fail_if_keyword_refresh_requested)
+    monkeypatch.setattr("seo_rank.cli.build_live_keyword_result", _fail_if_keyword_refresh_requested)
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--stored-run",
+            str(output_dir),
+            "--keyword-limit",
+            "3",
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(run_json_path.read_text(encoding="utf-8"))
+    assert payload["keywords"] == [
+        "technical seo",
+        "technical seo audit",
+        "technical seo checklist",
+    ]
+    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 13
+    assert payload["catalog"]["datasets"]["keyword_serp"]["row_count"] == 9
+    assert payload["catalog"]["datasets"]["analysis_mart"]["row_count"] == 9
+    assert len(payload["keyword_results"]) == 3
+    assert all(len(keyword_result["page_similarity"]) == 3 for keyword_result in payload["keyword_results"])
+    assert (output_dir / "stats" / "stats_summary.json").exists()
+
+
+def test_run_stored_run_fills_missing_backend_scores_without_overwriting_existing_gemini_scores(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
+
+    assert (
+        main(
+            [
+                "run",
+                "--seed",
+                "technical seo",
+                "--depth",
+                "3",
+                "--output-dir",
+                str(output_dir),
+                "--dry-run",
+                "--skip-textrazor",
+            ]
+        )
+        == 0
+    )
+
+    run_json_path = output_dir / "run.json"
+    payload = json.loads(run_json_path.read_text(encoding="utf-8"))
+    original_gemini = payload["page_similarity"][0]["page_similarity"]["gemini_doc_retrieval"][
+        "normalized_score"
+    ]
+    payload["page_similarity"][0]["page_similarity"].pop("bge")
+    payload["keyword_results"][0]["page_similarity"][0]["page_similarity"].pop("bge")
+    run_json_path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    def _fail_if_keyword_refresh_requested(*args, **kwargs) -> None:
+        raise AssertionError("stored-run should not rebuild the whole keyword result")
+
+    monkeypatch.setattr("seo_rank.cli.build_offline_keyword_result", _fail_if_keyword_refresh_requested)
+    monkeypatch.setattr("seo_rank.cli.build_live_keyword_result", _fail_if_keyword_refresh_requested)
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--stored-run",
+            str(output_dir),
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(run_json_path.read_text(encoding="utf-8"))
+    repaired_score = payload["page_similarity"][0]["page_similarity"]
+    assert repaired_score["bge"]["normalized_score"] == 0.98
+    assert repaired_score["gemini_doc_retrieval"]["normalized_score"] == original_gemini
+    assert repaired_score["gemini_semantic_similarity"]["normalized_score"] == 1.0
+    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 5
+    assert payload["catalog"]["datasets"]["analysis_mart"]["row_count"] == 3
+
+
+def test_run_stored_run_on_complete_tree_only_rematerializes_downstream_artifacts(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
+
+    assert (
+        main(
+            [
+                "run",
+                "--seed",
+                "technical seo",
+                "--depth",
+                "3",
+                "--output-dir",
+                str(output_dir),
+                "--dry-run",
+                "--skip-textrazor",
+            ]
+        )
+        == 0
+    )
+
+    def _fail_if_keyword_refresh_requested(*args, **kwargs) -> None:
+        raise AssertionError("complete stored runs should not refresh keywords")
+
+    monkeypatch.setattr("seo_rank.cli.build_offline_keyword_result", _fail_if_keyword_refresh_requested)
+    monkeypatch.setattr("seo_rank.cli.build_live_keyword_result", _fail_if_keyword_refresh_requested)
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--stored-run",
+            str(output_dir),
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
+    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 5
+    assert payload["catalog"]["datasets"]["analysis_mart"]["row_count"] == 3
+    assert (output_dir / "stats" / "stats_summary.json").exists()
+
+
 def test_run_stored_run_refreshes_only_stale_serps_in_place(
     tmp_path: Path,
     monkeypatch,

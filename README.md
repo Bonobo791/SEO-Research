@@ -32,7 +32,7 @@ Use these commands in order. Each step reads or extends the same run tree under
 | **Build feature marts** | `seo-rank build-features --run runs/RUN_ID` |
 | **Analysis mart + stats** | `seo-rank analyze --run runs/RUN_ID` |
 | **Inspect one keyword row** | `seo-rank analyze --run runs/RUN_ID --keyword "technical seo"` |
-| **Finish stored run** (no provider calls) | `seo-rank run --seed "technical seo" --stored-run runs/RUN_ID` |
+| **Resume stored run in place** | `seo-rank run --seed "technical seo" --stored-run runs/RUN_ID` |
 | **Expand existing run in place** | `seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --keyword-limit 25` |
 | **Audit one raw HTTP response** | `seo-rank replay --run runs/RUN_ID --response-id RESPONSE_ID` |
 | **Live provider smoke** (DataForSEO; optional Gemini/BGE/TextRazor) | See [Live providers](#live-providers) below |
@@ -43,11 +43,16 @@ Use these commands in order. Each step reads or extends the same run tree under
 seo-rank run --seed "technical seo" --dry-run --output-dir artifacts
 ```
 
-**Finish existing run**
+**Resume stored run in place**
 
 ```bash
 seo-rank run --seed "technical seo" --stored-run runs/RUN_ID
 ```
+
+This resumes stored runs in place, reuses existing raw responses and completed
+measurements, and only backfills missing keywords or backend scores before the
+downstream chain is re-materialized. Pair it with a higher `--keyword-limit`
+to extend the original seed in place.
 
 **Expand existing run**
 
@@ -84,9 +89,10 @@ On every `run` (offline or live), per expanded cluster keyword:
    feature marts, `analysis_mart`, and Phase 5 stats unless `--dry-run` is set
 
 `seo-rank run` now performs the full postprocessing chain after writing raw
-artifacts. Use `--stored-run runs/RUN_ID` to finish an existing run tree
-without provider calls, or pair it with a higher `--keyword-limit` to expand
-the original seed in place. `--dry-run` still skips Phase 5 stats.
+artifacts. Use `--stored-run runs/RUN_ID` to resume stored runs in place,
+reusing existing raw responses and completed measurements while backfilling
+missing keywords or backend scores before the downstream chain is
+re-materialized. `--dry-run` still skips Phase 5 stats.
 
 By default, keyword expansion keeps **one** cluster keyword (the seed). Pass
 `--keyword-limit 25` for the full fixture expansion set used in lake round-trip
@@ -223,7 +229,7 @@ Fetch or fixture provider data, score pages, write `run.json`, `report.md`, and
 | `--model-name` | `fixture-similarity-v1` | Recorded in `run.json` |
 | `--dry-run` | off | Mark run as fixture/offline in config |
 | `--skip-textrazor` | off | Skip TextRazor entities (offline and live) |
-| `--stored-run` | — | Finish or expand the chain on an existing run tree |
+| `--stored-run` | — | Resume or expand the chain on an existing run tree in place |
 | `--live-providers` | off | Live DataForSEO (requires env gate) |
 | `--live-bge` | off | Live BGE reranking (requires `--live-providers`) |
 | `--live-gemini` | off | Live Gemini embeddings (requires `--live-providers`) |

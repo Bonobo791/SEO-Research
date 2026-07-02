@@ -20,7 +20,8 @@
   runtime dependency — see [Live similarity backends (Phase 4)](#live-similarity-backends-phase-4).
 - Deployment: none
 - Databases: none (file-based Parquet lake in Phase 4.5)
-- Cache layer: none (`--stored-run` reloads prior runs; not a live API cache)
+- Cache layer: none (`--stored-run` resumes prior runs from the on-disk lake;
+  not a live API cache)
 - CI: none configured
 
 ## Overview
@@ -83,8 +84,10 @@ The repository contains an **offline-verifiable CLI scaffold** (Phase 1 shipped)
   `marts`, `validate`)
 - **CLI:** `seo-rank run` writes `run.json` and `report.md` from fixtures (no
   network calls) or gated live providers; Phase 4.5 adds `normalize`,
-  `build-features`, `analyze`, `replay`, and `run --stored-run` (Slice 6 shipped)
-- **Tests:** 175 tests under `tests/`; gate: `python -m pytest`; Phase 4.5 Slice 7
+  `build-features`, `analyze`, `replay`, and `run --stored-run`, which resumes
+  partial runs in place from the stored lake before re-materializing downstream
+  marts
+- **Tests:** 191 tests under `tests/`; gate: `python -m pytest`; Phase 4.5 Slice 7
   shipped the round-trip regression sweep in `test_sdlc_docs.py`
 - **Product docs:** `ARCHITECTURE.md`, `GOALS.md`, `ROADMAP.md`, `README.md`,
   `TESTING.md`
@@ -157,10 +160,13 @@ grouped `keyword_results` in `run.json` + `report.md`.
 authoritative `raw_responses`, curated tables, feature marts, and `analysis_mart`.
 Downstream work scans lazily via `pl.scan_parquet()`; `seo-rank normalize`,
 `build-features`, and `analyze` materialize downstream marts in place.
-`analyze` backfills missing feature marts before writing `analysis_mart`.
-`raw_responses`
-  stays out of normal analytical joins (replay/re-normalization only). Live
-  DataForSEO payloads are not retained by the provider long-term.
+`run --stored-run` resumes partial runs in place from the saved raw lake and
+current `run.json`, reuses existing raw responses and completed
+measurements, refreshes only missing work, and then re-materializes the
+downstream chain. `analyze` backfills missing feature marts before writing
+`analysis_mart`. `raw_responses` stays out of normal analytical joins
+(replay/re-normalization only). Live DataForSEO payloads are not retained by
+the provider long-term.
 
 **Planned full pipeline (Phase 5+):** lazy Polars joins on `analysis_mart` →
 guardrails → keyword-level Spearman ρ with BH per backend → pooled OLS with
@@ -317,8 +323,10 @@ Built by `marts.py` when Phase 5 analysis needs a single panel. One row per
 - Materialize reusable marts with `sink_parquet`; use
   `collect(engine="streaming")` only at CLI/report boundaries or when a
   DataFrame is actually needed.
-- CLI: `seo-rank run --stored-run runs/{run_id}` re-materializes curated tables,
-  feature marts, and `analysis_mart` from the stored lake without provider calls.
+- CLI: `seo-rank run --stored-run runs/{run_id}` resumes partial runs in place
+  from the saved raw lake and current `run.json`, reuses existing raw responses
+  and completed measurements, refreshes only missing work, and then
+  re-materializes curated tables, feature marts, and `analysis_mart`.
   `--seed` is still required by argparse but ignored on this path.
 
 ### CLI commands (Phase 4.5)
@@ -333,7 +341,7 @@ seo-rank replay --run RUN_ID --response-id ...
 
 | Command | Action |
 |---------|--------|
-| `run` | Provider/fixture fetch, similarity scoring, `run.json` + `report.md` + `raw_responses`; optional `--stored-run` re-materializes marts |
+| `run` | Provider/fixture fetch, similarity scoring, `run.json` + `report.md` + `raw_responses`; optional `--stored-run` resumes partial runs in place and re-materializes marts |
 | `normalize` | `raw_responses` → curated tables |
 | `build-features` | curated → feature marts |
 | `analyze` | feature marts → `analysis_mart` (+ Phase 5 stats when not dry-run) |

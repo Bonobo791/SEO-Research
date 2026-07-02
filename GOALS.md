@@ -247,7 +247,9 @@ secondary comparisons in fixed order.
 - Passage-level similarity scoring (Phase 5.5).
 - Domain-level URL inventory scoring (Phase 5.5).
 - Phase 5.75 BGE hybrid / retrieve-then-rerank pipeline (separate spec v2).
-- Phase 5.1 exploratory extensions (rank-decile segments, keyword holdout).
+- Phase 5.1 DataForSEO live fail-fast (`ROADMAP.md` § 5.1).
+- Phase 5.2 Gemini/BGE empty-output fail-fast (`ROADMAP.md` § 5.2).
+- Phase 5.4 exploratory extensions (rank-decile segments, keyword holdout).
 - Expanded report sections beyond stats artifacts (Phase 6.1).
 - Entity-derived ranking features.
 - Direct page fetching outside DataForSEO.

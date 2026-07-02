@@ -58,7 +58,21 @@ def test_readme_documents_cli_capabilities() -> None:
     assert "--live-textrazor" in readme
     assert "Phase 5 stats" in readme
     assert "Fresh data" in readme
-    assert "Finish existing run" in readme
+    assert "Resume stored run in place" in readme
+
+
+def test_stored_run_docs_describe_partial_resume_and_current_suite_status() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
+    testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
+    roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
+
+    assert "resume stored runs in place" in readme
+    assert "reuses existing raw responses" in readme
+    assert "`--stored-run` resumes partial runs in place" in architecture
+    assert "refreshes only missing work" in architecture
+    assert "191 tests collected; 190 passing; 1 skipped" in testing
+    assert "resumes from the saved raw lake" in roadmap
 
 
 def test_manifest_records_resolved_pytest_commands() -> None:
@@ -129,8 +143,8 @@ def test_phase_45_slice_9_regression_sweep_marks_mart_sink_docs_as_shipped() -> 
     assert "Phase 4.5 Slice 9 shipped" in roadmap
     assert "Phase 4.5 Slice 10 shipped" in roadmap
     assert "Phase 4.5 signed off" in roadmap
-    assert "175 tests" in architecture
-    assert "175 tests collected; 175 passing" in testing
+    assert "191 tests" in architecture
+    assert "191 tests collected; 190 passing; 1 skipped" in testing
     assert "sink feature marts lazily with Parquet statistics" in testing
 
 
