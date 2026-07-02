@@ -365,7 +365,7 @@ seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-textrazor-on
     - Update `seo-rank analyze` and keyword inspection output so the TextRazor
       features appear alongside the existing similarity output.
 
-31. **[ ] Slice 31 — Golden fixtures and tests**
+31. **[ ] Slice 31 — TextRazor signal golden fixtures and tests**
     - Add synthetic fixtures that include both similarity rows and TextRazor
       rows with known rank relationships.
     - Add tests for family registry loading, TextRazor page-metric aggregation,
