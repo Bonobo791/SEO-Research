@@ -84,16 +84,17 @@ The repository contains an **offline-verifiable CLI scaffold** (Phase 1 shipped)
 - **CLI:** `seo-rank run` writes `run.json` and `report.md` from fixtures (no
   network calls) or gated live providers; Phase 4.5 adds `normalize`,
   `build-features`, `analyze`, `replay`, and `run --stored-run` (Slice 6 shipped)
-- **Tests:** 145 tests under `tests/`; gate: `python -m pytest`; Phase 4.5 Slice 7
+- **Tests:** 154 tests under `tests/`; gate: `python -m pytest`; Phase 4.5 Slice 7
   shipped the round-trip regression sweep in `test_sdlc_docs.py`
 - **Product docs:** `ARCHITECTURE.md`, `GOALS.md`, `ROADMAP.md`, `README.md`,
   `TESTING.md`
-- **Not yet:** `statsmodels` analysis (Phase 5)
+- **Not yet:** pooled OLS, diagnostics, multivariate sensitivity, influence
+  robustness, and final CLI stats expansion (Phase 5 slices 5–10)
 
 Module and artifact details are in [Application Surface](#application-surface)
-and [Key Product Components](#key-product-components) below. Planned live
-similarity and statistical analysis sections in this file are **not implemented**
-in code yet.
+and [Key Product Components](#key-product-components) below. Phase 5 slices 1–4
+ship the estimand spec, stats package scaffold, guardrails, and Spearman/BH
+primary path; confirmatory inference and CLI wiring continue in slices 5–10.
 
 ## Key Product Components
 
@@ -120,9 +121,10 @@ in code yet.
   `--live-gemini`; local **BGE** (`BAAI/bge-reranker-v2-m3`) behind
   `--live-bge` — see [Live similarity backends (Phase 4)](#live-similarity-backends-phase-4)
   and [Planned Page Similarity Run](#planned-page-similarity-run).
-- **Analysis engine (planned):** Phase 5 estimand (Spearman + pooled OLS),
-  guardrails, keyword-clustered inference, BH per backend family, pooled OLS
-  diagnostics — see [Planned Per-Run Statistical Analysis](#planned-per-run-statistical-analysis).
+- **Analysis engine (in progress, Phase 5):** slices 1–4 shipped —
+  `analysis_spec.v1.yaml`, `src/seo_rank/stats/` scaffold, guardrails/panel
+  prep, and Spearman + BH. Pooled OLS, diagnostics, and `stats_*` CLI output
+  remain in slices 5–10 — see [Planned Per-Run Statistical Analysis](#planned-per-run-statistical-analysis).
 - **Reporters (shipped):** JSON + Markdown under the selected run root;
   `seo-rank run` defaults to `runs/{run_id}/` when `--output-dir` is omitted
   and still supports explicit overrides. Phase 6 expands report narrative
@@ -353,10 +355,14 @@ src/seo_rank/stats/   # Phase 5 observational analysis (see ROADMAP.md)
 | `marts.py` | Join feature marts into `analysis_mart` at `target_keyword × SERP URL` grain |
 | `validate.py` | Schema contracts plus row-level uniqueness, null, and range audits; used before every mart write or at the sink edge |
 
-**Phase 5 stats package** (`src/seo_rank/stats/`): guardrails, Spearman + BH,
-pooled OLS with keyword-clustered SEs, diagnostics, multivariate sensitivity,
-influence robustness, and `runs/{run_id}/stats/` artifacts. Spec:
-`analysis_spec.v1.yaml`.
+**Phase 5 stats package** (`src/seo_rank/stats/`): **slices 1–4 shipped** —
+`spec.py` loads `analysis_spec.v1.yaml`; `artifacts.py` exposes estimand-version
+metadata for future `stats_*` outputs. Placeholder modules (`panel.py`,
+`spearman.py`, `regression.py`, `diagnostics.py`, `bh.py`) now include
+guardrails and the Spearman/BH primary path; later slices add pooled inference
+and diagnostics.
+Dependencies: `statsmodels`, `numpy`, `scipy`, `PyYAML` in `pyproject.toml`.
+Spec: `analysis_spec.v1.yaml`.
 
 **Execution model:** scan lazily, filter/select early, join on IDs only, validate
 schema contracts, then sink; materialized row audits run at the sink edge.
@@ -410,7 +416,7 @@ and env gates are enabled. Offline tests and `--dry-run` keep fixtures.
 | Library | `FlagEmbedding` |
 | Model | BGE **reranker** (cross-encoder), pinned `BAAI/bge-reranker-v2-m3` |
 | Query | Target keyword; prepend model-card instruction when required |
-| Scores | Relative rank within SERP (~0.6–1.0 typical); not calibrated vs Gemini |
+| Scores | Per-page sigmoid(raw logit) → `bge_normalized_score`; within-keyword rank/pct/z planned in Phase 5 slices 11–12 (`analysis_mart.v2`) |
 | Compute | Local CUDA GPU required; fp16 enabled; batch per keyword |
 
 ### Analysis use
@@ -434,9 +440,14 @@ similarity feature generation. Product review and open questions:
 `bge_normalized_score` for the primary path (per-backend null rules for
 secondary backends).
 
-**Mart columns:** `bge_normalized_score`, `gemini_doc_retrieval_normalized_score`,
+**Mart columns (absolute):** `bge_normalized_score`, `gemini_doc_retrieval_normalized_score`,
 `gemini_semantic_similarity_normalized_score`, `serp_rank`, `page_text_length`,
 `target_keyword_id`, `canonical_url_hash`.
+
+**Mart columns (relative, `analysis_mart.v2`, slices 11–12):** per backend,
+`*_similarity_rank`, `*_similarity_pct`, `*_similarity_z` — derived within each
+`target_keyword_id` from absolute scores (BGE ranks on `bge_raw_score`). Used in
+robustness appendix only (Slice 13); primary estimand stays on absolute scores.
 
 **Dependence:** cluster inference at `target_keyword_id`. The same URL may appear
 under multiple keywords; do not dedupe the panel in v1. Optional robustness:

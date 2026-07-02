@@ -122,8 +122,8 @@ def test_phase_45_slice_9_regression_sweep_marks_mart_sink_docs_as_shipped() -> 
     assert "Phase 4.5 Slice 9 shipped" in roadmap
     assert "Phase 4.5 Slice 10 shipped" in roadmap
     assert "Phase 4.5 signed off" in roadmap
-    assert "145 tests" in architecture
-    assert "145 tests collected; 144 passing, 1 skipped" in testing
+    assert "154 tests" in architecture
+    assert "154 tests collected; 153 passing, 1 skipped" in testing
     assert "sink feature marts lazily with Parquet statistics" in testing
 
 
@@ -131,6 +131,7 @@ def test_phase_5_slice_1_defines_analysis_spec_v1() -> None:
     spec = (ROOT / "analysis_spec.v1.yaml").read_text(encoding="utf-8")
     architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
     roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
+    goals = (ROOT / "GOALS.md").read_text(encoding="utf-8")
     plan_review = (ROOT / "PHASE5-STATS-PLAN-REVIEW.md").read_text(
         encoding="utf-8"
     )
@@ -146,3 +147,21 @@ def test_phase_5_slice_1_defines_analysis_spec_v1() -> None:
     assert "analysis_spec.v1.yaml" in architecture
     assert "analysis_spec.v1.yaml" in roadmap
     assert "analysis_spec.v1.yaml" in plan_review
+    assert "Phase 5 Slice 1 shipped" in roadmap
+    assert "**[x] Slice 1 — Estimand & analysis spec**" in goals
+
+
+def test_phase_5_slice_2_ships_stats_package_scaffold() -> None:
+    goals = (ROOT / "GOALS.md").read_text(encoding="utf-8")
+    roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
+    architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
+    testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert "Phase 5 Slice 2 shipped" in roadmap
+    assert "**[x] Slice 2 — Stats module & dependencies**" in goals
+    assert "src/seo_rank/stats/" in architecture
+    assert "load_analysis_spec" in architecture or "spec.py" in architecture
+    assert "test_stats_spec.py" in testing
+    assert "statsmodels>=0.14" in pyproject["project"]["dependencies"]
+    assert "PyYAML>=6.0" in pyproject["project"]["dependencies"]

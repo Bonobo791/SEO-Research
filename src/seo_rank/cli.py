@@ -18,6 +18,7 @@ import polars as pl
 from seo_rank.env import ensure_project_env_loaded
 from seo_rank.data import build_analysis_mart, build_feature_marts, normalize_run
 from seo_rank.data.scans import scan_curated_table, scan_raw_responses
+from seo_rank.stats.artifacts import run_phase5_stats
 from seo_rank.dataforseo import (
     DataForSeoClientError,
     DataForSeoCredentialError,
@@ -176,10 +177,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
 
         if args.command == "analyze":
-            build_analysis_mart(Path(args.run))
+            run_dir = Path(args.run)
+            build_analysis_mart(run_dir)
+            if run_manifest_is_dry_run(run_dir):
+                if args.keyword:
+                    emit_keyword_analysis(run_dir, args.keyword)
+                return 0
+            stats_result = run_phase5_stats(run_dir)
             if args.keyword:
-                emit_keyword_analysis(Path(args.run), args.keyword)
-            return 0
+                emit_keyword_analysis(run_dir, args.keyword)
+            return 1 if stats_result.hard_fail else 0
 
         if args.command == "replay":
             replay_raw_response(Path(args.run), args.response_id)
@@ -434,6 +441,18 @@ def replay_raw_response(run_dir: Path, response_id: str) -> None:
     raise CliCommandError(
         f"Stored response {response_id} does not contain raw bytes"
     )
+
+
+def run_manifest_is_dry_run(run_dir: Path) -> bool:
+    run_json_path = Path(run_dir) / "run.json"
+    try:
+        run_payload = json.loads(run_json_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    config = run_payload.get("config")
+    if isinstance(config, Mapping):
+        return bool(config.get("dry_run"))
+    return bool(run_payload.get("dry_run"))
 
 
 def write_artifacts(output_dir: Path, payload: dict[str, object]) -> None:

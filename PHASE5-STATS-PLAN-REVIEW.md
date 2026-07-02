@@ -206,6 +206,30 @@ prefer CIs over p-values alone.
 - Deterministic stats JSON schema for `seo-rank analyze`.
 - Minimum gates that skip or downgrade stats when guardrails fail.
 
+### 11. Relative similarity predictors (Phase 5 slices 11–14)
+
+Absolute `*_normalized_score` values answer "how similar is this page to the
+keyword?" Relative columns answer "how similar is this page **compared to the
+other top-20 SERP pages for this keyword**?"
+
+**Planned mart columns (`analysis_mart.v2`):** per backend,
+`*_similarity_rank` (1 = highest), `*_similarity_pct` (`(rank - 1) / (n - 1)`),
+`*_similarity_z` (within-keyword z-score). BGE ranks on `bge_raw_score`; Gemini
+on `*_normalized_score`. Derived at mart build time; absolute columns unchanged.
+
+**Primary estimand unchanged:** Spearman ρ and pooled OLS on absolute
+`*_normalized_score` remain confirmatory.
+
+**Robustness appendix (Slice 13):**
+
+1. Spearman ρ on `*_similarity_rank` — sanity check (should align with absolute
+   path up to ties).
+2. Pooled OLS refits with `*_similarity_z` and `*_similarity_pct` per backend
+   (keyword FE + length + clustered SEs).
+
+**Limitation:** relative ranks are within the observed top-20 only, not vs the
+full index. Not used for actionable flag or BH.
+
 ---
 
 ## Drawbacks of the current approach
@@ -314,6 +338,7 @@ fixtures):
 | `ROADMAP.md` | Phase 5 slices 1–10 + acceptance criteria + Phase 5.1 deferrals | Done |
 | `TESTING.md` | Golden `analysis_mart` + expected ρ/slope tolerance | Done |
 | `GOALS.md` | When Phase 5 becomes active scope, move stats items from Out Of Scope | Done |
+| Phase 5 slices 1–2 | `analysis_spec.v1.yaml` + `src/seo_rank/stats/` scaffold | Done (2026-07-01) |
 
 ---
 

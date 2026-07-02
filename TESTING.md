@@ -14,7 +14,7 @@ Pytest configuration and verification contract for SEO-Research.
   interpreter
 - Lint / type-check / build / coverage: not configured
 - Expected test duration: fast (< 1s)
-- **Current verification status:** 145 tests collected; 144 passing, 1 skipped
+- **Current verification status:** 154 tests collected; 153 passing, 1 skipped
 
 ## Active Verification Command
 
@@ -57,6 +57,8 @@ placeholders only.
 | `test_data_marts.py` | Analysis mart lazy join lives in `seo_rank.data.marts` and preserves the feature-mart contract |
 | `test_feature_marts.py` | Feature marts materialize lazy joins, validate before sink, sink feature marts lazily with Parquet statistics, audit the written parquet row rules, and refresh the run catalog |
 | `test_analysis_mart.py` | Feature marts materialize the lazy analysis mart, validate before sink, audit the written parquet row rules, and refresh the run catalog |
+| `test_stats_panel.py` | Guardrail evaluation, panel grain filtering, hard-fail artifact writing, and minimal stats report output |
+| `test_stats_spearman.py` | Benjamini-Hochberg adjustment, backend Spearman summaries, and Spearman artifact emission on passing panels |
 | `test_round_trip.py` | Dedicated Parquet lake write → normalize → build-features → analyze round-trip regression sweep on real Parquet artifacts; validates `run.json` updates and keyword-filtered `analyze` output |
 | `test_keyword_expansion.py` | 25-keyword cap, deduplication, raw provider payload |
 | `test_serp_normalization.py` | Organic-only SERP rows, depth cap |
@@ -92,15 +94,37 @@ Mock nondeterministic or destructive external effects (network, paid APIs,
 credentials). Prefer integration tests at real boundaries once live clients
 exist.
 
+## Shipped tests — Phase 5 slices 1–4
+
+- **`analysis_spec.v1.yaml` contract** — `tests/unit/test_sdlc_docs.py::
+  test_phase_5_slice_1_defines_analysis_spec_v1` asserts estimand fields
+  (outcome, BGE primary backend, BH family, actionable-association thresholds)
+  and cross-links in `ARCHITECTURE.md`, `ROADMAP.md`, and
+  `PHASE5-STATS-PLAN-REVIEW.md`.
+- **Spec loader and output metadata** — `tests/unit/test_stats_spec.py` loads
+  `analysis_spec.v1.yaml` via `load_analysis_spec()`, verifies backend order and
+  estimand outcome, and asserts `build_stats_output_metadata()` exposes
+  `analysis_spec_version` / `estimand_version`.
+- **Stats package surface** — `tests/unit/test_stats_spec.py::
+  test_stats_package_exports_module_surface` asserts `seo_rank.stats` exports
+  `spec`, `panel`, `spearman`, `regression`, `diagnostics`, `bh`, and
+  `artifacts`.
+- **Guardrail evaluation and hard-fail artifacts** —
+  `tests/unit/test_stats_panel.py` covers top-20 filtering, primary-backend
+  null dropping, guardrail statuses, and minimal stats summary/report output.
+- **Spearman primary path + BH** — `tests/unit/test_stats_spearman.py` covers
+  BH adjustment, keyword-level Spearman summaries, underpowered BH skipping,
+  and stats artifact emission on passing panels.
+
 ## Planned tests (not yet in suite) — Phase 5 active scope
 
-See `GOALS.md` and `ROADMAP.md` § Phase 5 slices 1–10.
+See `GOALS.md` and `ROADMAP.md` § Phase 5 slices 5–14.
 
 - Feature marts and `analysis_mart` join keys (`run_id`, `target_keyword_id`,
   `canonical_url_hash`, `response_id`, `passage_id`)
 - Passage / domain similarity scopes (feature marts; Phase 5.5 scoring)
 
-### Phase 5 — statistical analysis (see `ROADMAP.md` slices 1–10)
+### Phase 5 — statistical analysis (see `ROADMAP.md` slices 5–14)
 
 - **Golden `analysis_mart` fixture** — synthetic panel with known Spearman ρ and
   pooled slope per backend; tolerance bands for regression coefficients,

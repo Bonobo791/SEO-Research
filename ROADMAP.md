@@ -23,9 +23,14 @@ data-driven).
 coefficients + clustered CIs (secondary). Prefer CIs over p-values alone;
 coefficients are likely conservative under similarity measurement error.
 
-**Mart columns:** `bge_normalized_score`, `gemini_doc_retrieval_normalized_score`,
-`gemini_semantic_similarity_normalized_score`, `serp_rank`, `page_text_length`,
-`target_keyword_id`, `canonical_url_hash`.
+**Mart columns (absolute, v1):** `bge_normalized_score`,
+`gemini_doc_retrieval_normalized_score`, `gemini_semantic_similarity_normalized_score`,
+`serp_rank`, `page_text_length`, `target_keyword_id`, `canonical_url_hash`.
+
+**Mart columns (relative, v2 — slices 11–12):** per backend, `*_similarity_rank`,
+`*_similarity_pct`, `*_similarity_z` derived within each `target_keyword_id`
+from absolute scores (BGE ranks on `bge_raw_score`; Gemini on
+`*_normalized_score`). Primary confirmatory estimand remains absolute scores.
 
 **Panel dependence:** rows nest under `target_keyword_id`; the same
 `canonical_url_hash` may appear under multiple keywords. Default clustering =
@@ -78,9 +83,9 @@ confirmatory keyword holdout (Phase 5.1).
 
 #### Dev slices
 
-**Progress:** 0 of 10 shipped, 10 open.
+**Progress:** 4 of 14 shipped, 10 open.
 
-1. **[ ] Slice 1 — Estimand & analysis spec**
+1. **[x] Slice 1 — Estimand & analysis spec**
    - Add `analysis_spec.v1.yaml`: outcome (`-log(serp_rank)`), predictors,
      keyword FE, length adjustment, clustering rule, BH family, success
      thresholds, backend drop order for multivariate sensitivity.
@@ -88,13 +93,13 @@ confirmatory keyword holdout (Phase 5.1).
      BH-when-K ≥ 10, actionable-association rule, spec versioning vs 5.75.
    - Cross-link `ARCHITECTURE.md`, `ROADMAP.md`, `PHASE5-STATS-PLAN-REVIEW.md`.
 
-2. **[ ] Slice 2 — Stats module & dependencies**
+2. **[x] Slice 2 — Stats module & dependencies**
    - Add `src/seo_rank/stats/` (`spec.py`, `panel.py`, `spearman.py`,
      `regression.py`, `diagnostics.py`, `bh.py`, `artifacts.py`).
    - Declare `statsmodels` (+ existing `scipy`/`numpy`) in `pyproject.toml`.
    - Load `analysis_spec.v1.yaml` at runtime; expose estimand version in outputs.
 
-3. **[ ] Slice 3 — Guardrails & panel prep**
+3. **[x] Slice 3 — Guardrails & panel prep**
    - Load `runs/{run_id}/parquet/analysis_mart/part-*.parquet`.
    - Grain: `target_keyword_id × canonical_url_hash`; filter `serp_rank` 1–20;
      drop rows with null `bge_normalized_score` for primary path (per-backend
@@ -106,7 +111,7 @@ confirmatory keyword holdout (Phase 5.1).
    - Document duplicate-URL-across-keywords handling (no dedupe in v1; cluster
      on keyword; URL two-way cluster deferred to robustness).
 
-4. **[ ] Slice 4 — Spearman primary path**
+4. **[x] Slice 4 — Spearman primary path**
    - Per `target_keyword_id`, two-sided Spearman ρ(normalized similarity,
      `serp_rank`) for each backend.
    - Summarize ρ across keywords (median, IQR, fraction same-sign).
@@ -168,13 +173,61 @@ confirmatory keyword holdout (Phase 5.1).
       actionable flag logic, influence refit delta, multivariate VIF drop order,
       clustered vs IID SE guard; see `TESTING.md`.
 
+11. **[ ] Slice 11 — Within-keyword rank transform**
+    - Add `src/seo_rank/data/ranks.py` with
+      `add_within_keyword_similarity_ranks()` (Polars lazy).
+    - Per backend, derive from absolute scores within each `target_keyword_id`:
+      `{backend}_similarity_rank` (1 = highest; average rank on ties),
+      `{backend}_similarity_pct` (`(rank - 1) / (n - 1)` when `n > 1`; else
+      `null`), `{backend}_similarity_z` (within-keyword z-score; `null` when
+      `n < 2` or `σ = 0`).
+    - **Ranking source:** BGE on `bge_raw_score`; Gemini backends on
+      `*_normalized_score`.
+    - Unit tests: ties, `n = 1`, full top-20 panel, descending order, null
+      when backend score is null (`tests/unit/test_within_keyword_ranks.py`).
+
+12. **[ ] Slice 12 — Analysis mart v2 columns**
+    - Wire rank transform in `marts.py` after `keyword_serp` ⨝ `page_features`
+      join; bump `schema_version` to `analysis_mart.v2`.
+    - Extend `FEATURE_VALIDATION_RULES`, `ANALYSIS_REQUIRED_COLUMNS`, bounded
+      columns (`similarity_rank` 1–20, `similarity_pct` 0–1).
+    - Nine new columns per run (3 backends × rank/pct/z); absolute score
+      columns unchanged.
+    - Tests: mart integration (`test_analysis_mart_ranks.py`), round-trip
+      extension in `test_round_trip.py`.
+    - Update `ARCHITECTURE.md` mart column list and BGE scoring note (sigmoid per
+      page today; relative ranks are mart-derived).
+
+13. **[ ] Slice 13 — Relative similarity stats sensitivity**
+    - Extend `analysis_spec.v1.yaml` `sensitivity.relative_similarity` block:
+      rank/pct/z column names per backend; robustness-only (not primary
+      estimand).
+    - **Primary estimand unchanged:** absolute `*_normalized_score` + Spearman ρ.
+    - **Robustness appendix:** (a) Spearman ρ on `*_similarity_rank` as sanity
+      check vs absolute path; (b) pooled OLS refits with `*_similarity_z` and
+      `*_similarity_pct` per backend (keyword FE + length + clustered SEs).
+    - Add limitation text: relative ranks are within observed top-20 SERP rows
+      only, not vs the full web.
+    - Write sensitivity coefficients to `stats_diagnostics.json`
+      (`relative_similarity_sensitivity` block); not used for actionable flag
+      or BH.
+
+14. **[ ] Slice 14 — Relative ranks in CLI & fixtures**
+    - `emit_keyword_analysis` / `report.md`: show `rank/pct` (and optional `z`)
+      alongside absolute scores; sort Page Similarity by
+      `{primary_backend}_similarity_rank`.
+    - Extend Slice 10 golden `analysis_mart` with relative columns and known
+      rank invariants (e.g. highest absolute score → rank 1).
+    - Acceptance: rebuild `analysis_mart` on stored runs derives relative
+      columns from stored absolutes without re-scoring.
+
 #### Phase 5 acceptance criteria
 
 | Acceptance item | Slice(s) | Status |
 | --------------- | -------- | ------ |
-| `analysis_spec.v1.yaml` loaded; estimand version in outputs | 1, 2 | Open |
+| `analysis_spec.v1.yaml` loaded; estimand version in outputs | 1, 2 | Shipped |
 | Guardrail hard-fail skips inference; warn surfaces in JSON | 3, 9 | Open |
-| Spearman + BH per backend when K ≥ 10 | 4 | Open |
+| Spearman + BH per backend when K ≥ 10 | 4 | Shipped |
 | Pooled regression with keyword-clustered SEs only in primary output | 5 | Open |
 | Effect-size translation + actionable_association rule | 5, 9 | Open |
 | Pooled diagnostics + influence % in diagnostics JSON | 6, 8 | Open |
@@ -182,6 +235,9 @@ confirmatory keyword holdout (Phase 5.1).
 | Limitations in JSON and Markdown | 9 | Open |
 | `seo-rank analyze` exit code + dry-run skip | 9 | Open |
 | Golden fixture ρ/slope within tolerance | 10 | Open |
+| Within-keyword rank/pct/z columns in `analysis_mart.v2` | 11, 12 | Open |
+| Relative similarity robustness in `stats_diagnostics.json` | 13 | Open |
+| CLI keyword report surfaces relative ranks | 14 | Open |
 
 ### Phase 5.1 — Exploratory extensions (deferred)
 
@@ -372,6 +428,16 @@ their effective defaults.
   `analysis_mart` — Spearman-first observational association, pooled OLS with
   keyword-clustered SEs, guardrails, BH policy, `analysis_spec.v1.yaml`, and
   `stats_*` artifacts wired through `seo-rank analyze`.
+- **Phase 5 Slice 1 shipped:** `analysis_spec.v1.yaml` locks the v1 estimand
+  (Spearman-first, pooled OLS secondary, BGE primary backend, BH per backend
+  when K ≥ 10, guardrail thresholds, actionable-association rule, multivariate
+  drop order, limitations); cross-linked in `ARCHITECTURE.md`,
+  `PHASE5-STATS-PLAN-REVIEW.md`, and `ROADMAP.md`.
+- **Phase 5 Slice 2 shipped:** `src/seo_rank/stats/` package scaffold with
+  `spec.py` (`load_analysis_spec`), `artifacts.py` (`build_stats_output_metadata`),
+  and placeholder modules for panel, Spearman, regression, BH, and diagnostics;
+  `statsmodels`, `numpy`, `scipy`, and `PyYAML` declared in `pyproject.toml`;
+  `tests/unit/test_stats_spec.py` covers spec load and estimand-version metadata.
 - **GOALS retargeted to Phase 4.75 (2026-06-29):** page_text curation hardening
   after stored-run normalize failed on live nested `page_content` payloads.
 - **Phase 4.75 Slice 1 shipped:** `parsed_page_text()` decodes nested DataForSEO

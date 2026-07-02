@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import polars as pl
 
@@ -49,6 +50,11 @@ def test_storage_commands_dispatch_to_data_layer(
     monkeypatch.setattr(
         "seo_rank.cli.build_analysis_mart",
         lambda path: calls.append(("analyze", path)) or {"datasets": {}},
+    )
+    monkeypatch.setattr(
+        "seo_rank.cli.run_phase5_stats",
+        lambda path: calls.append(("phase5-stats", path))
+        or SimpleNamespace(hard_fail=False),
     )
     monkeypatch.setattr(
         "seo_rank.cli.scan_raw_responses",
@@ -106,6 +112,7 @@ def test_storage_commands_dispatch_to_data_layer(
         ("normalize", run_dir),
         ("build-features", run_dir),
         ("analyze", run_dir),
+        ("phase5-stats", run_dir),
     ]
 
 
@@ -158,6 +165,10 @@ def test_analyze_rejects_unknown_keyword_with_exit_code_2(
         lambda path: {"datasets": {}},
     )
     monkeypatch.setattr(
+        "seo_rank.cli.run_phase5_stats",
+        lambda path: SimpleNamespace(hard_fail=False),
+    )
+    monkeypatch.setattr(
         "seo_rank.cli.scan_analysis_mart",
         lambda path: pl.DataFrame(
             [{"target_keyword": "other keyword", "url": "https://example.com"}]
@@ -171,6 +182,25 @@ def test_analyze_rejects_unknown_keyword_with_exit_code_2(
     captured = capsys.readouterr()
     assert exit_code == 2
     assert "technical seo" in captured.err
+
+
+def test_analyze_returns_exit_code_1_when_phase5_guardrails_fail(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    run_dir = tmp_path / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+
+    monkeypatch.setattr(
+        "seo_rank.cli.build_analysis_mart",
+        lambda path: {"datasets": {}},
+    )
+    monkeypatch.setattr(
+        "seo_rank.cli.run_phase5_stats",
+        lambda path: SimpleNamespace(hard_fail=True),
+    )
+
+    assert main(["analyze", "--run", str(run_dir)]) == 1
 
 
 def test_storage_commands_return_exit_code_2_on_storage_errors(
