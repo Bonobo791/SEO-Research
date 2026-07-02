@@ -30,7 +30,7 @@ secondary comparisons in fixed order.
 
 #### Progress
 
-**Slices:** 5 of 14 shipped, 9 open.
+**Slices:** 6 of 14 shipped, 8 open.
 
 | # | Slice | Layer | Status | Primary deliverable |
 | - | ----- | ----- | ------ | ------------------- |
@@ -39,7 +39,7 @@ secondary comparisons in fixed order.
 | 3 | Guardrails & panel prep | Stats | Shipped | Hard-fail / warn gates on `analysis_mart` |
 | 4 | Spearman primary path | Stats | Shipped | Per-keyword ρ + BH per backend |
 | 5 | Pooled regression (secondary) | Stats | Shipped | Keyword FE + clustered SEs |
-| 6 | Pooled OLS diagnostics | Stats | Open | RESET, BP, Cook's D, influence flags |
+| 6 | Pooled OLS diagnostics | Stats | Shipped | RESET, BP, Cook's D, influence flags |
 | 7 | Multivariate sensitivity | Stats | Open | Joint model + VIF drop order |
 | 8 | Robustness appendix (influence) | Stats | Open | Refit excluding influential rows |
 | 9 | Stats artifacts & CLI | Stats | Open | `stats_summary.json`, `analyze` wiring |
@@ -49,11 +49,11 @@ secondary comparisons in fixed order.
 | 13 | Relative similarity sensitivity | Stats | Open | Robustness appendix on rank/pct/z |
 | 14 | Relative ranks in CLI & fixtures | CLI | Open | Keyword report + golden invariants |
 
-**Remaining to close Phase 5:** slices 6–14 (see `ROADMAP.md`).
+**Remaining to close Phase 5:** slices 7–14 (see `ROADMAP.md`).
 
 #### Dev slices
 
-**Progress:** 5 of 14 shipped, 9 open.
+**Progress:** 6 of 14 shipped, 8 open.
 
 1. **[x] Slice 1 — Estimand & analysis spec**
    - Add `analysis_spec.v1.yaml`: outcome (`-log(serp_rank)`), predictors,
@@ -100,7 +100,7 @@ secondary comparisons in fixed order.
    - **Sensitivity (robustness appendix):** refit with two-way cluster
      (keyword × `canonical_url_hash`) when URL repeats exist.
 
-6. **[ ] Slice 6 — Pooled OLS diagnostics**
+6. **[x] Slice 6 — Pooled OLS diagnostics**
    - On **pooled** feature model per backend only (not per-keyword n ≈ 20).
    - **Run:** residuals vs fitted, RESET, Breusch–Pagan (→ HC3 SEs when
      flagged), Cook's D > 4/n, leverage / studentized residuals / DFFITS /

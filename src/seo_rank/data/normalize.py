@@ -22,7 +22,6 @@ from seo_rank.dataforseo import (
     parsed_page_text_details,
     validate_dataforseo_response,
 )
-from seo_rank.similarity import compute_page_similarity_scores
 from seo_rank.text import normalize_page_text
 from seo_rank.textrazor import normalize_entities
 
@@ -423,6 +422,7 @@ def normalize_run(run_dir: Path) -> dict[str, object]:
     assert isinstance(config, Mapping)
     seed = str(config["seed"])
     depth = int(config["depth"])
+    page_similarity_scores = _load_run_page_similarity_scores(run_payload)
 
     catalog: dict[str, object] = run_payload.get("catalog", {})
     if not isinstance(catalog, dict):
@@ -437,6 +437,7 @@ def normalize_run(run_dir: Path) -> dict[str, object]:
         run_id=run_id,
         seed=seed,
         depth=depth,
+        page_similarity_scores=page_similarity_scores,
     )
     for name, frame in curated_lazyframes.items():
         dataset_catalog[name] = write_curated_lazyframe_dataset(
@@ -496,6 +497,7 @@ def build_curated_lazyframes_from_raw_responses(
     run_id: str,
     seed: str,
     depth: int,
+    page_similarity_scores: Mapping[str, Mapping[str, Mapping[str, object]]],
 ) -> dict[str, pl.LazyFrame]:
     keyword_responses = raw_responses.filter(
         pl.col("endpoint") == "keyword_expansion"
@@ -566,7 +568,14 @@ def build_curated_lazyframes_from_raw_responses(
         schema=CURATED_VALIDATION_RULES["entities"]["expected_schema"],
     )
     similarity_scores = pages.group_by("target_keyword").map_groups(
-        lambda frame: build_similarity_scores_frame(frame, run_id=run_id),
+        lambda frame: build_similarity_scores_frame(
+            frame,
+            run_id=run_id,
+            page_similarity_scores=page_similarity_scores.get(
+                str(frame.get_column("target_keyword")[0]),
+                {},
+            ),
+        ),
         schema=CURATED_VALIDATION_RULES["similarity_scores"]["expected_schema"],
     )
 
@@ -841,38 +850,30 @@ def build_similarity_scores_frame(
     frame: pl.DataFrame,
     *,
     run_id: str,
+    page_similarity_scores: Mapping[str, Mapping[str, object]] | None = None,
 ) -> pl.DataFrame:
     rows = frame.to_dicts()
     if not rows:
         return pl.DataFrame(
             schema=CURATED_VALIDATION_RULES["similarity_scores"]["expected_schema"]
         )
+    if page_similarity_scores is None:
+        raise ValueError("page_similarity_scores are required to normalize similarity scores")
     target_keyword = str(rows[0]["target_keyword"])
     target_keyword_id = stable_id(target_keyword)
-    pages = [
-        {
-            "url": str(row["url"]),
-            "title": str(row["title"]),
-            "text": str(row["text"]),
-            "response_id": str(row["response_id"]),
-            "canonical_url_hash": str(row["canonical_url_hash"]),
-        }
-        for row in rows
-    ]
-    scores = compute_page_similarity_scores(target_keyword, pages)
-    page_by_url = {page["url"]: page for page in pages}
     similarity_rows: list[dict[str, object]] = []
-    for score in scores:
-        url = str(score["url"])
-        page_score = score["page_similarity"]
-        page = page_by_url[url]
+    for row in rows:
+        url = str(row["url"])
+        page_score = page_similarity_scores.get(url)
+        if page_score is None:
+            raise ValueError(f"page similarity score missing for normalized url {url!r}")
         similarity_rows.append(
             {
                 "run_id": run_id,
                 "target_keyword_id": target_keyword_id,
                 "target_keyword": target_keyword,
-                "response_id": str(page["response_id"]),
-                "canonical_url_hash": str(page["canonical_url_hash"]),
+                "response_id": str(row["response_id"]),
+                "canonical_url_hash": str(row["canonical_url_hash"]),
                 "url": url,
                 "score_row_id": stable_id(run_id, target_keyword, url),
                 "bge_raw_score": float(page_score["bge"]["raw_score"]),
@@ -893,6 +894,28 @@ def build_similarity_scores_frame(
             }
         )
     return pl.DataFrame(similarity_rows)
+
+
+def _load_run_page_similarity_scores(
+    run_payload: Mapping[str, object],
+) -> dict[str, dict[str, dict[str, object]]]:
+    page_similarity = run_payload.get("page_similarity")
+    if page_similarity is None:
+        raise ValueError("run.json is missing page_similarity")
+    if not isinstance(page_similarity, list):
+        raise ValueError("run.json page_similarity must be a list")
+
+    scores_by_keyword: dict[str, dict[str, dict[str, object]]] = {}
+    for score in page_similarity:
+        if not isinstance(score, Mapping):
+            continue
+        target_keyword = str(score["target_keyword"])
+        url = str(score["url"])
+        page_score = score["page_similarity"]
+        if not isinstance(page_score, Mapping):
+            raise ValueError("run.json page_similarity entries must contain scores")
+        scores_by_keyword.setdefault(target_keyword, {})[url] = dict(page_score)
+    return scores_by_keyword
 
 
 def _validated_response_body(

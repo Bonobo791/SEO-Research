@@ -6,6 +6,7 @@ import json
 from collections.abc import Mapping
 from pathlib import Path
 
+from seo_rank.stats.diagnostics import summarize_diagnostics_backends
 from seo_rank.stats.spec import AnalysisSpec
 from seo_rank.stats.panel import AnalysisPanelResult, load_analysis_panel
 from seo_rank.stats.regression import summarize_regression_backends
@@ -48,11 +49,26 @@ def build_stats_summary(
     return summary
 
 
+def build_stats_diagnostics(
+    result: AnalysisPanelResult,
+    *,
+    diagnostics: dict[str, object],
+) -> dict[str, object]:
+    return {
+        "analysis_spec_version": result.analysis_spec_version,
+        "estimand_version": result.estimand_version,
+        "primary_backend": result.primary_backend,
+        "backend_order": list(result.backend_order),
+        "backends": diagnostics["backends"],
+    }
+
+
 def build_stats_report(
     result: AnalysisPanelResult,
     *,
     spearman: dict[str, object] | None = None,
     regression: dict[str, object] | None = None,
+    diagnostics: dict[str, object] | None = None,
 ) -> str:
     lines = [
         "# Phase 5 Stats",
@@ -123,6 +139,47 @@ def build_stats_report(
                 f"two_way_cluster_status={two_way_cluster['status']}"
             )
 
+    if diagnostics is not None:
+        lines.extend(
+            [
+                "",
+                "## Diagnostics",
+            ]
+        )
+        for backend, backend_summary in diagnostics["backends"].items():
+            backend_summary = dict(backend_summary)
+            if backend_summary.get("status") == "skipped":
+                lines.append(
+                    "- "
+                    f"{backend}: status=skipped, "
+                    f"skipped_reason={backend_summary['skipped_reason']}"
+                )
+                continue
+            reset = backend_summary["reset"]
+            breusch_pagan = backend_summary["breusch_pagan"]
+            influence = backend_summary["influence"]
+            line = (
+                "- "
+                f"{backend}: reset_status={reset['status']}, "
+                f"reset_p_value={reset['p_value']}, "
+                f"reset_flagged={reset['flagged']}, "
+                f"breusch_pagan_p_value={breusch_pagan['lm_p_value']}, "
+                f"breusch_pagan_flagged={breusch_pagan['flagged']}, "
+                f"recommended_se_type={breusch_pagan['recommended_se_type']}, "
+                f"cook_d_count={influence['cook_d_count']}/{influence['row_count']}, "
+                f"leverage_count={influence['leverage_count']}, "
+                f"studentized_residual_count={influence['studentized_residual_count']}, "
+                f"dffits_count={influence['dffits_count']}, "
+                f"dfbeta_count={influence['dfbeta_count']}"
+            )
+            shapiro = backend_summary.get("shapiro")
+            if shapiro is not None and shapiro.get("status") != "skipped":
+                line += (
+                    f", shapiro_status={shapiro['status']}, "
+                    f"shapiro_p_value={shapiro['p_value']}"
+                )
+            lines.append(line)
+
     lines.extend(
         [
             "",
@@ -143,6 +200,7 @@ def write_stats_artifacts(
     *,
     spearman: dict[str, object] | None = None,
     regression: dict[str, object] | None = None,
+    diagnostics: dict[str, object] | None = None,
 ) -> dict[str, object]:
     stats_dir = Path(run_dir) / "stats"
     stats_dir.mkdir(parents=True, exist_ok=True)
@@ -152,8 +210,19 @@ def write_stats_artifacts(
         json.dumps(summary, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    if diagnostics is not None:
+        diagnostics_summary = build_stats_diagnostics(result, diagnostics=diagnostics)
+        (stats_dir / "stats_diagnostics.json").write_text(
+            json.dumps(diagnostics_summary, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
     (stats_dir / "stats_report.md").write_text(
-        build_stats_report(result, spearman=spearman, regression=regression),
+        build_stats_report(
+            result,
+            spearman=spearman,
+            regression=regression,
+            diagnostics=diagnostics,
+        ),
         encoding="utf-8",
     )
     return summary
@@ -169,8 +238,19 @@ def run_phase5_stats(
     result = load_analysis_panel(run_dir, spec=spec)
     spearman = None
     regression = None
+    diagnostics = None
     if not result.hard_fail:
         spearman = summarize_spearman_backends(result.analysis_mart, result.backend_order)
         regression = summarize_regression_backends(result.analysis_mart, result.backend_order)
-    write_stats_artifacts(run_dir, result, spearman=spearman, regression=regression)
+        diagnostics = summarize_diagnostics_backends(
+            result.analysis_mart,
+            result.backend_order,
+        )
+    write_stats_artifacts(
+        run_dir,
+        result,
+        spearman=spearman,
+        regression=regression,
+        diagnostics=diagnostics,
+    )
     return result

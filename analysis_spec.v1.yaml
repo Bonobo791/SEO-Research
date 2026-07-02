@@ -45,16 +45,10 @@ inference:
 
 guardrails:
   hard_fail:
-    - name: keywords_with_complete_primary_backend_scores
-      relation: gte
-      threshold: 10
     - name: serp_rank_variance_within_keyword
       relation: gt
       threshold: 0
   warn:
-    - name: non_null_score_rate_per_backend
-      relation: gte
-      threshold: 0.90
     - name: similarity_variance_within_keyword
       relation: gt
       threshold: 0

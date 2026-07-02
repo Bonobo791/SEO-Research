@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import polars as pl
@@ -164,6 +165,9 @@ def test_run_phase5_stats_writes_regression_summary_for_passing_panels(
     result = run_phase5_stats(run_dir)
 
     summary = (run_dir / "stats" / "stats_summary.json").read_text(encoding="utf-8")
+    diagnostics = json.loads(
+        (run_dir / "stats" / "stats_diagnostics.json").read_text(encoding="utf-8")
+    )
     report = (run_dir / "stats" / "stats_report.md").read_text(encoding="utf-8")
 
     assert result.hard_fail is False
@@ -171,4 +175,6 @@ def test_run_phase5_stats_writes_regression_summary_for_passing_panels(
     assert '"clustered_standard_error"' in summary
     assert '"two_way_cluster"' in summary
     assert '"naive_standard_error"' not in summary
+    assert diagnostics["analysis_spec_version"]
+    assert diagnostics["backends"]["bge"]["backend"] == "bge"
     assert "## Regression" in report

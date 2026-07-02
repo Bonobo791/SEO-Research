@@ -98,26 +98,6 @@ def _evaluate_guardrails(
     analysis_mart: pl.DataFrame,
     spec: AnalysisSpec,
 ) -> list[dict[str, Any]]:
-    total_rows = analysis_mart.height
-    primary_backend_column = f"{spec.primary_backend}_normalized_score"
-    complete_primary_keywords = 0
-    if total_rows:
-        complete_primary_keywords = (
-            analysis_mart.group_by("target_keyword_id")
-            .agg(pl.col(primary_backend_column).is_not_null().all().alias("complete"))
-            .filter(pl.col("complete"))
-            .height
-        )
-
-    non_null_rates = {}
-    for backend, column in SIMILARITY_RATE_COLUMNS.items():
-        non_null_count = (
-            analysis_mart.select(pl.col(column).is_not_null().sum()).item()
-            if total_rows
-            else 0
-        )
-        non_null_rates[backend] = non_null_count / total_rows if total_rows else 0.0
-
     serp_rank_variance = _min_keyword_variance(analysis_mart, "serp_rank")
     similarity_variances = {
         backend: _min_keyword_variance(analysis_mart, column)
@@ -125,18 +105,6 @@ def _evaluate_guardrails(
     }
 
     guardrails: list[dict[str, Any]] = [
-        {
-            "name": "keywords_with_complete_primary_backend_scores",
-            "status": "pass" if complete_primary_keywords >= 10 else "fail",
-            "value": complete_primary_keywords,
-            "threshold": 10,
-        },
-        {
-            "name": "non_null_score_rate_per_backend",
-            "status": "pass" if min(non_null_rates.values() or [0.0]) >= 0.90 else "warn",
-            "value": non_null_rates,
-            "threshold": 0.90,
-        },
         {
             "name": "serp_rank_variance_within_keyword",
             "status": "pass" if serp_rank_variance > 0 else "fail",

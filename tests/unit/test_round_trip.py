@@ -183,6 +183,23 @@ def test_cli_round_trip_materializes_structured_only_page_text_payload(
         ]
     ).write_parquet(page_text_dir / "part-structured-only.parquet")
 
+    run_payload = _read_run_payload(output_dir)
+    run_payload.setdefault("page_similarity", []).append(
+        {
+            "target_keyword": "technical seo",
+            "url": "https://example.com/structured-only",
+            "page_similarity": {
+                "bge": {"raw_score": 0.9, "normalized_score": 0.9},
+                "gemini_doc_retrieval": {"raw_score": 0.9, "normalized_score": 0.9},
+                "gemini_semantic_similarity": {"raw_score": 0.9, "normalized_score": 0.9},
+            },
+        }
+    )
+    (output_dir / "run.json").write_text(
+        json.dumps(run_payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
     assert main(["normalize", "--run", str(output_dir)]) == 0
 
     normalized_payload = _read_run_payload(output_dir)

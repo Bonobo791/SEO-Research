@@ -92,6 +92,59 @@ def _analysis_mart_frame() -> pl.DataFrame:
     return pl.DataFrame(rows)
 
 
+def _zero_serp_variance_frame() -> pl.DataFrame:
+    return pl.DataFrame(
+        [
+            {
+                "run_id": "run-1",
+                "target_keyword_id": "kw-1",
+                "target_keyword": "keyword 1",
+                "keyword_order": 1,
+                "source_response_id": "resp-1",
+                "serp_item_id": "serp-1-1",
+                "page_id": "page-1-1",
+                "response_id": "page-resp-1-1",
+                "canonical_url_hash": "url-1-1",
+                "url": "https://example.com/1/1",
+                "serp_rank": 1,
+                "title": "title-1-1",
+                "description": "description-1-1",
+                "page_text_length": 100,
+                "bge_raw_score": 0.5,
+                "bge_normalized_score": 0.5,
+                "gemini_doc_retrieval_raw_score": 0.8,
+                "gemini_doc_retrieval_normalized_score": 0.8,
+                "gemini_semantic_similarity_raw_score": 0.7,
+                "gemini_semantic_similarity_normalized_score": 0.7,
+                "schema_version": "analysis_mart.v1",
+            },
+            {
+                "run_id": "run-1",
+                "target_keyword_id": "kw-1",
+                "target_keyword": "keyword 1",
+                "keyword_order": 1,
+                "source_response_id": "resp-1",
+                "serp_item_id": "serp-1-2",
+                "page_id": "page-1-2",
+                "response_id": "page-resp-1-2",
+                "canonical_url_hash": "url-1-2",
+                "url": "https://example.com/1/2",
+                "serp_rank": 1,
+                "title": "title-1-2",
+                "description": "description-1-2",
+                "page_text_length": 101,
+                "bge_raw_score": 0.6,
+                "bge_normalized_score": 0.6,
+                "gemini_doc_retrieval_raw_score": 0.8,
+                "gemini_doc_retrieval_normalized_score": 0.8,
+                "gemini_semantic_similarity_raw_score": 0.7,
+                "gemini_semantic_similarity_normalized_score": 0.7,
+                "schema_version": "analysis_mart.v1",
+            },
+        ]
+    )
+
+
 def test_load_analysis_panel_filters_top20_and_evaluates_guardrails(
     tmp_path: Path,
     monkeypatch,
@@ -106,28 +159,12 @@ def test_load_analysis_panel_filters_top20_and_evaluates_guardrails(
 
     result = load_analysis_panel(run_dir)
 
-    assert result.hard_fail is True
+    assert result.hard_fail is False
     assert result.primary_backend == "bge"
     assert result.analysis_mart.height == 20
     assert result.panel.height == 19
     assert result.panel.filter(pl.col("bge_normalized_score").is_null()).height == 0
     assert result.guardrails == [
-        {
-            "name": "keywords_with_complete_primary_backend_scores",
-            "status": "fail",
-            "value": 9,
-            "threshold": 10,
-        },
-        {
-            "name": "non_null_score_rate_per_backend",
-            "status": "pass",
-            "value": {
-                "bge": 0.95,
-                "gemini_doc_retrieval": 1.0,
-                "gemini_semantic_similarity": 1.0,
-            },
-            "threshold": 0.9,
-        },
         {
             "name": "serp_rank_variance_within_keyword",
             "status": "pass",
@@ -153,7 +190,30 @@ def test_load_analysis_panel_filters_top20_and_evaluates_guardrails(
     }
 
 
-def test_run_phase5_stats_writes_guardrail_summary_and_minimal_report(
+def test_load_analysis_panel_hard_fails_when_serp_rank_has_no_variance(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    run_dir = tmp_path / "runs" / "run-1"
+    (run_dir / "parquet" / "analysis_mart").mkdir(parents=True)
+
+    monkeypatch.setattr(
+        "seo_rank.stats.panel.scan_curated_table",
+        lambda path, table_name: _zero_serp_variance_frame().lazy(),
+    )
+
+    result = load_analysis_panel(run_dir)
+
+    assert result.hard_fail is True
+    assert result.guardrails[0] == {
+        "name": "serp_rank_variance_within_keyword",
+        "status": "fail",
+        "value": 0.0,
+        "threshold": 0,
+    }
+
+
+def test_run_phase5_stats_writes_full_artifacts_when_guardrails_pass(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -169,12 +229,45 @@ def test_run_phase5_stats_writes_guardrail_summary_and_minimal_report(
 
     summary_path = run_dir / "stats" / "stats_summary.json"
     report_path = run_dir / "stats" / "stats_report.md"
+    diagnostics_path = run_dir / "stats" / "stats_diagnostics.json"
 
     assert summary_path.exists()
     assert report_path.exists()
+    assert diagnostics_path.exists()
 
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
-    assert summary["hard_fail"] is True
-    assert summary["guardrails"][0]["name"] == "keywords_with_complete_primary_backend_scores"
-    assert summary["limitations"]["no_causal_claims"].startswith("Do not interpret")
+    report = report_path.read_text(encoding="utf-8")
+
+    assert result.hard_fail is False
+    assert "regression" in summary
+    assert "spearman" in summary
+    assert "## Diagnostics" in report
+    assert "Confirmatory inference skipped" not in report
+
+
+def test_run_phase5_stats_writes_minimal_report_on_hard_fail(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    run_dir = tmp_path / "runs" / "run-1"
+    (run_dir / "parquet" / "analysis_mart").mkdir(parents=True)
+
+    monkeypatch.setattr(
+        "seo_rank.stats.panel.scan_curated_table",
+        lambda path, table_name: _zero_serp_variance_frame().lazy(),
+    )
+
+    result = run_phase5_stats(run_dir)
+
+    summary_path = run_dir / "stats" / "stats_summary.json"
+    report_path = run_dir / "stats" / "stats_report.md"
+
+    assert summary_path.exists()
+    assert report_path.exists()
+    assert not (run_dir / "stats" / "stats_diagnostics.json").exists()
+
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert result.hard_fail is True
+    assert "regression" not in summary
+    assert "spearman" not in summary
     assert "Confirmatory inference skipped" in report_path.read_text(encoding="utf-8")

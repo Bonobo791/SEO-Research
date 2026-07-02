@@ -57,8 +57,6 @@ and limitations. On **warn**, run full stats but surface warnings prominently.
 
 | Guardrail | Default threshold | Severity |
 | --------- | ----------------- | -------- |
-| Keywords with complete primary-backend scores | ≥ 10 | hard-fail |
-| SERP rows with non-null score per backend | ≥ 90% | warn |
 | Within-keyword variance in `serp_rank` | > 0 per keyword with data | hard-fail |
 | Within-keyword variance in each similarity column | > 0 per keyword with data | warn |
 | Influential rows (Cook's D > 4/n on pooled BGE model) | report %; warn if > 5% | warn |

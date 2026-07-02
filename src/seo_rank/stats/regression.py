@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from collections.abc import Sequence
 
 import numpy as np
 import polars as pl
+import pandas as pd
 import statsmodels.formula.api as smf
 from scipy import stats
 from statsmodels.regression.linear_model import RegressionResultsWrapper
@@ -19,6 +21,16 @@ SIMILARITY_SCORE_COLUMNS = {
 }
 BASELINE_FORMULA = "outcome ~ np.log(page_text_length + 1) + C(target_keyword_id)"
 REGRESSION_REQUIRED_COLUMNS = ("serp_rank", "page_text_length")
+
+
+@dataclass(frozen=True)
+class BackendRegressionFit:
+    backend: str
+    score_column: str
+    model_data: pd.DataFrame
+    baseline_result: RegressionResultsWrapper
+    feature_result: RegressionResultsWrapper
+    clustered_result: RegressionResultsWrapper
 
 
 def summarize_regression_backends(
@@ -42,58 +54,62 @@ def summarize_backend_regression(
 ) -> dict[str, object]:
     """Fit the baseline and univariate pooled models for one backend."""
 
-    score_column = _score_column_for_backend(backend)
-    model_frame = _prepare_regression_frame(analysis_mart, score_column)
-    if model_frame.is_empty():
-        return _skipped_backend_summary(backend=backend, score_column=score_column)
+    fit = fit_backend_regression(analysis_mart, backend=backend)
+    if fit is None:
+        score_column = _score_column_for_backend(backend)
+        model_frame = _prepare_regression_frame(analysis_mart, score_column)
+        if model_frame.is_empty():
+            skipped_reason = "no_usable_rows"
+        elif model_frame["target_keyword_id"].n_unique() < 2:
+            skipped_reason = "insufficient_keyword_clusters"
+        else:
+            skipped_reason = "no_usable_rows"
+        return _skipped_backend_summary(
+            backend=backend,
+            score_column=score_column,
+            skipped_reason=skipped_reason,
+            row_count=model_frame.height,
+            keyword_count=model_frame["target_keyword_id"].n_unique()
+            if not model_frame.is_empty()
+            else 0,
+        )
 
-    model_data = model_frame.to_pandas().copy()
-    model_data["outcome"] = -np.log(model_data["serp_rank"].astype(float))
-
-    baseline_result = smf.ols(BASELINE_FORMULA, data=model_data).fit()
-    feature_formula = (
-        f"outcome ~ {score_column} + np.log(page_text_length + 1) + C(target_keyword_id)"
-    )
-    feature_result = smf.ols(feature_formula, data=model_data).fit()
-    clustered_result = feature_result.get_robustcov_results(
-        cov_type="cluster",
-        groups=model_data["target_keyword_id"],
-    )
-
-    coefficient = _parameter_value(clustered_result, score_column)
-    clustered_standard_error = _parameter_standard_error(clustered_result, score_column)
+    coefficient = _parameter_value(fit.clustered_result, fit.score_column)
+    clustered_standard_error = _parameter_standard_error(fit.clustered_result, fit.score_column)
     clustered_confidence_interval = _parameter_confidence_interval(
-        clustered_result, score_column
+        fit.clustered_result, fit.score_column
     )
-    similarity_sd = float(model_data[score_column].std(ddof=1))
-    median_rank = float(np.median(model_data["serp_rank"].astype(float)))
+    similarity_sd = float(fit.model_data[fit.score_column].std(ddof=1))
+    median_rank = float(np.median(fit.model_data["serp_rank"].astype(float)))
 
     return {
-        "backend": backend,
-        "score_column": score_column,
-        "row_count": int(len(model_data)),
-        "keyword_count": int(model_data["target_keyword_id"].nunique()),
+        "backend": fit.backend,
+        "score_column": fit.score_column,
+        "row_count": int(len(fit.model_data)),
+        "keyword_count": int(fit.model_data["target_keyword_id"].nunique()),
         "baseline_model": {
             "formula": BASELINE_FORMULA,
-            "adjusted_r_squared": float(baseline_result.rsquared_adj),
-            "aic": float(baseline_result.aic),
+            "adjusted_r_squared": float(fit.baseline_result.rsquared_adj),
+            "aic": float(fit.baseline_result.aic),
         },
         "feature_model": {
-            "formula": feature_formula,
+            "formula": fit.feature_result.model.formula,
             "coefficient": coefficient,
             "clustered_standard_error": clustered_standard_error,
             "clustered_confidence_interval": clustered_confidence_interval,
-            "p_value": _parameter_p_value(clustered_result, score_column),
-            "adjusted_r_squared": float(feature_result.rsquared_adj),
-            "aic": float(feature_result.aic),
+            "p_value": _parameter_p_value(fit.clustered_result, fit.score_column),
+            "adjusted_r_squared": float(fit.feature_result.rsquared_adj),
+            "aic": float(fit.feature_result.aic),
             "covariance": {
                 "type": "cluster",
                 "clusters": ["target_keyword_id"],
             },
         },
         "descriptive_fit_delta": {
-            "adjusted_r_squared": float(feature_result.rsquared_adj - baseline_result.rsquared_adj),
-            "aic": float(feature_result.aic - baseline_result.aic),
+            "adjusted_r_squared": float(
+                fit.feature_result.rsquared_adj - fit.baseline_result.rsquared_adj
+            ),
+            "aic": float(fit.feature_result.aic - fit.baseline_result.aic),
         },
         "effect_size": {
             "formula": "median_rank * (exp(-(coefficient * similarity_sd)) - 1)",
@@ -106,12 +122,47 @@ def summarize_backend_regression(
         },
         "sensitivity": {
             "two_way_cluster": _two_way_cluster_sensitivity(
-                feature_result=feature_result,
-                model_data=model_data,
-                parameter=score_column,
+                feature_result=fit.feature_result,
+                model_data=fit.model_data,
+                parameter=fit.score_column,
             )
         },
     }
+
+
+def fit_backend_regression(
+    analysis_mart: pl.DataFrame,
+    *,
+    backend: str,
+) -> BackendRegressionFit | None:
+    score_column = _score_column_for_backend(backend)
+    model_frame = _prepare_regression_frame(analysis_mart, score_column)
+    if model_frame.is_empty():
+        return None
+
+    model_data = model_frame.to_pandas().copy()
+    if model_data["target_keyword_id"].nunique() < 2:
+        return None
+
+    model_data["outcome"] = -np.log(model_data["serp_rank"].astype(float))
+
+    baseline_result = smf.ols(BASELINE_FORMULA, data=model_data).fit()
+    feature_formula = (
+        f"outcome ~ {score_column} + np.log(page_text_length + 1) + C(target_keyword_id)"
+    )
+    feature_result = smf.ols(feature_formula, data=model_data).fit()
+    clustered_result = feature_result.get_robustcov_results(
+        cov_type="cluster",
+        groups=model_data["target_keyword_id"],
+    )
+    return BackendRegressionFit(
+        backend=backend,
+        score_column=score_column,
+        model_data=model_data,
+        baseline_result=baseline_result,
+        feature_result=feature_result,
+        clustered_result=clustered_result,
+    )
 
 
 def _score_column_for_backend(backend: str) -> str:
@@ -134,14 +185,17 @@ def _skipped_backend_summary(
     *,
     backend: str,
     score_column: str,
+    skipped_reason: str = "no_usable_rows",
+    row_count: int = 0,
+    keyword_count: int = 0,
 ) -> dict[str, object]:
     return {
         "backend": backend,
         "score_column": score_column,
         "status": "skipped",
-        "skipped_reason": "no_usable_rows",
-        "row_count": 0,
-        "keyword_count": 0,
+        "skipped_reason": skipped_reason,
+        "row_count": row_count,
+        "keyword_count": keyword_count,
     }
 
 

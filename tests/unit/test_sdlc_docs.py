@@ -47,6 +47,7 @@ def test_readme_documents_cli_capabilities() -> None:
 
     assert "What works today" in readme
     assert 'seo-rank run --seed "technical seo" --dry-run' in readme
+    assert "stats_diagnostics.json" in readme
     assert "runs/{run_id}/" in readme
     assert "--live-bge" in readme
     assert "--live-gemini" in readme
@@ -122,8 +123,8 @@ def test_phase_45_slice_9_regression_sweep_marks_mart_sink_docs_as_shipped() -> 
     assert "Phase 4.5 Slice 9 shipped" in roadmap
     assert "Phase 4.5 Slice 10 shipped" in roadmap
     assert "Phase 4.5 signed off" in roadmap
-    assert "159 tests" in architecture
-    assert "159 tests collected; 158 passing, 1 skipped" in testing
+    assert "169 tests" in architecture
+    assert "169 tests collected; 168 passing, 1 skipped" in testing
     assert "sink feature marts lazily with Parquet statistics" in testing
 
 
@@ -179,7 +180,7 @@ def test_phase_5_slice_5_ships_pooled_regression_secondary_path() -> None:
     assert "| 5 | Pooled regression (secondary) | Stats | Shipped |" in goals
     assert "Phase 5 Slice 5 shipped" in roadmap
     assert "**[x] Slice 5 — Pooled regression (secondary)**" in roadmap
-    assert "slices 1–5 shipped" in architecture
+    assert "slices 1–6 shipped" in architecture
     assert "pooled regression summaries with" in architecture
     assert "test_stats_regression.py" in testing
-    assert "Phase 5 slices 1–5" in testing
+    assert "Phase 5 slices 1–6" in testing

@@ -84,17 +84,18 @@ The repository contains an **offline-verifiable CLI scaffold** (Phase 1 shipped)
 - **CLI:** `seo-rank run` writes `run.json` and `report.md` from fixtures (no
   network calls) or gated live providers; Phase 4.5 adds `normalize`,
   `build-features`, `analyze`, `replay`, and `run --stored-run` (Slice 6 shipped)
-- **Tests:** 159 tests under `tests/`; gate: `python -m pytest`; Phase 4.5 Slice 7
+- **Tests:** 169 tests under `tests/`; gate: `python -m pytest`; Phase 4.5 Slice 7
   shipped the round-trip regression sweep in `test_sdlc_docs.py`
 - **Product docs:** `ARCHITECTURE.md`, `GOALS.md`, `ROADMAP.md`, `README.md`,
   `TESTING.md`
-- **Not yet:** pooled OLS, diagnostics, multivariate sensitivity, influence
-  robustness, and final CLI stats expansion (Phase 5 slices 5–10)
+- **Not yet:** multivariate sensitivity, influence robustness, and final CLI
+  stats expansion (Phase 5 slices 7–10)
 
 Module and artifact details are in [Application Surface](#application-surface)
-and [Key Product Components](#key-product-components) below. Phase 5 slices 1–4
-ship the estimand spec, stats package scaffold, guardrails, and Spearman/BH
-primary path; confirmatory inference and CLI wiring continue in slices 5–10.
+and [Key Product Components](#key-product-components) below. Phase 5 slices 1–6
+ship the estimand spec, stats package scaffold, guardrails, Spearman/BH primary
+path, pooled regression, and pooled diagnostics; confirmatory inference and
+CLI wiring continue in slices 7–10.
 
 ## Key Product Components
 
@@ -121,11 +122,12 @@ primary path; confirmatory inference and CLI wiring continue in slices 5–10.
   `--live-gemini`; local **BGE** (`BAAI/bge-reranker-v2-m3`) behind
   `--live-bge` — see [Live similarity backends (Phase 4)](#live-similarity-backends-phase-4)
   and [Planned Page Similarity Run](#planned-page-similarity-run).
-- **Analysis engine (in progress, Phase 5):** slices 1–5 shipped —
+- **Analysis engine (in progress, Phase 5):** slices 1–6 shipped —
   `analysis_spec.v1.yaml`, `src/seo_rank/stats/` scaffold, guardrails/panel
-  prep, Spearman + BH, and pooled OLS with clustered regression summaries.
-  Diagnostics, robustness appendices, and final CLI stats expansion remain in
-  slices 6–10 — see [Planned Per-Run Statistical Analysis](#planned-per-run-statistical-analysis).
+  prep, Spearman + BH, pooled OLS with clustered regression summaries, and
+  pooled OLS diagnostics. Multivariate sensitivity, robustness appendices, and
+  final CLI stats expansion remain in slices 7–10 — see [Planned Per-Run
+  Statistical Analysis](#planned-per-run-statistical-analysis).
 - **Reporters (shipped):** JSON + Markdown under the selected run root;
   `seo-rank run` defaults to `runs/{run_id}/` when `--output-dir` is omitted
   and still supports explicit overrides. Phase 6 expands report narrative
@@ -358,13 +360,14 @@ src/seo_rank/stats/   # Phase 5 observational analysis (see ROADMAP.md)
 | `marts.py` | Join feature marts into `analysis_mart` at `target_keyword × SERP URL` grain |
 | `validate.py` | Schema contracts plus row-level uniqueness, null, and range audits; used before every mart write or at the sink edge |
 
-**Phase 5 stats package** (`src/seo_rank/stats/`): **slices 1–5 shipped** —
+**Phase 5 stats package** (`src/seo_rank/stats/`): **slices 1–6 shipped** —
 `spec.py` loads `analysis_spec.v1.yaml`; `artifacts.py` exposes estimand-version
 metadata for future `stats_*` outputs. Placeholder modules (`panel.py`,
 `spearman.py`, `regression.py`, `diagnostics.py`, `bh.py`) now include
-guardrails, the Spearman/BH primary path, and pooled regression summaries with
-keyword-clustered SEs plus two-way-cluster sensitivity; later slices add
-diagnostics and the remaining robustness paths.
+guardrails, the Spearman/BH primary path, pooled regression summaries with
+keyword-clustered SEs plus two-way-cluster sensitivity, and pooled OLS
+diagnostics; later slices add multivariate sensitivity and the remaining
+robustness paths.
 Dependencies: `statsmodels`, `numpy`, `scipy`, `PyYAML` in `pyproject.toml`.
 Spec: `analysis_spec.v1.yaml`.
 
@@ -504,8 +507,6 @@ runs full stats:
 
 | Guardrail | Default | Severity |
 | --------- | ------- | -------- |
-| Keywords with complete BGE scores | ≥ 10 | hard-fail |
-| Non-null score fraction per backend | ≥ 90% | warn |
 | Within-keyword `serp_rank` variance | > 0 | hard-fail |
 | Within-keyword similarity variance | > 0 | warn |
 | Influential rows (Cook's D > 4/n) | report %; warn if > 5% | warn |

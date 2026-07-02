@@ -1,4 +1,5 @@
 import json
+import shutil
 from pathlib import Path
 
 import polars as pl
@@ -22,6 +23,33 @@ from seo_rank.data.normalize import (
     stable_id,
     write_curated_dataset,
 )
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def _page_similarity_entry(
+    *,
+    target_keyword: str,
+    url: str,
+    bge: float = 0.9,
+    gemini_doc_retrieval: float = 0.9,
+    gemini_semantic_similarity: float = 0.9,
+) -> dict[str, object]:
+    return {
+        "target_keyword": target_keyword,
+        "url": url,
+        "page_similarity": {
+            "bge": {"raw_score": bge, "normalized_score": bge},
+            "gemini_doc_retrieval": {
+                "raw_score": gemini_doc_retrieval,
+                "normalized_score": gemini_doc_retrieval,
+            },
+            "gemini_semantic_similarity": {
+                "raw_score": gemini_semantic_similarity,
+                "normalized_score": gemini_semantic_similarity,
+            },
+        },
+    }
 
 
 def test_normalize_run_materializes_curated_tables_from_raw_responses(
@@ -79,6 +107,29 @@ def test_normalize_run_materializes_curated_tables_from_raw_responses(
     run_json = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
     assert run_json["catalog"]["datasets"]["keywords"]["row_count"] == 25
     assert run_json["catalog"]["datasets"]["similarity_scores"]["row_count"] == 25
+
+
+def test_normalize_run_preserves_run_json_page_similarity_scores(
+    tmp_path: Path,
+) -> None:
+    source_run_dir = ROOT / "runs" / "northwest-houston-realtors-07d131b873c1"
+    run_dir = tmp_path / "northwest-houston-realtors-07d131b873c1"
+    shutil.copytree(source_run_dir, run_dir)
+
+    run_payload = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+    report_row = run_payload["page_similarity"][0]
+    report_url = report_row["url"]
+    report_score = report_row["page_similarity"]["bge"]["normalized_score"]
+
+    normalize_run(run_dir)
+
+    similarity_scores = ds.dataset(
+        run_dir / "parquet" / "similarity_scores",
+        format="parquet",
+    ).to_table().to_pylist()
+    parquet_row = next(row for row in similarity_scores if row["url"] == report_url)
+
+    assert parquet_row["bge_normalized_score"] == report_score
 
 
 def test_normalize_run_does_not_load_raw_rows_eagerly(
@@ -192,6 +243,21 @@ def test_normalize_run_stores_raw_html_when_present(
             }
         ]
     ).write_parquet(page_text_dir / "part-structured-only.parquet")
+
+    run_payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
+    run_payload.setdefault("page_similarity", []).append(
+        _page_similarity_entry(
+            target_keyword="technical seo",
+            url="https://example.com/product",
+            bge=0.9,
+            gemini_doc_retrieval=0.9,
+            gemini_semantic_similarity=0.9,
+        )
+    )
+    (output_dir / "run.json").write_text(
+        json.dumps(run_payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
     catalog = normalize_run(output_dir)
 
@@ -722,6 +788,15 @@ def test_normalize_run_materializes_page_content_fields(
             {
                 "run_id": "artifacts",
                 "config": {"seed": "technical seo", "depth": 1},
+                    "page_similarity": [
+                        _page_similarity_entry(
+                            target_keyword="technical seo",
+                            url="https://example.com/page",
+                            bge=0.9,
+                            gemini_doc_retrieval=0.9,
+                            gemini_semantic_similarity=0.9,
+                        )
+                    ],
                 "catalog": {"datasets": {}},
             },
             indent=2,
@@ -869,6 +944,15 @@ def test_normalize_run_materializes_structured_fields_and_html_from_stored_run(
             {
                 "run_id": "artifacts",
                 "config": {"seed": "technical seo", "depth": 1},
+                "page_similarity": [
+                    _page_similarity_entry(
+                        target_keyword="technical seo",
+                        url="https://example.com/product",
+                        bge=0.9,
+                        gemini_doc_retrieval=0.9,
+                        gemini_semantic_similarity=0.9,
+                    )
+                ],
                 "catalog": {"datasets": {}},
             },
             indent=2,
@@ -959,6 +1043,15 @@ def test_normalize_run_rejects_stored_raw_response_schema_drift(
             {
                 "run_id": "artifacts",
                 "config": {"seed": "technical seo", "depth": 1},
+                "page_similarity": [
+                    _page_similarity_entry(
+                        target_keyword="technical seo",
+                        url="https://example.com/page",
+                        bge=0.9,
+                        gemini_doc_retrieval=0.9,
+                        gemini_semantic_similarity=0.9,
+                    )
+                ],
                 "catalog": {"datasets": {}},
             },
             indent=2,

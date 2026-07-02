@@ -14,7 +14,7 @@ Pytest configuration and verification contract for SEO-Research.
   interpreter
 - Lint / type-check / build / coverage: not configured
 - Expected test duration: fast (< 1s)
-- **Current verification status:** 159 tests collected; 158 passing, 1 skipped
+- **Current verification status:** 169 tests collected; 168 passing, 1 skipped
 
 ## Active Verification Command
 
@@ -59,6 +59,7 @@ placeholders only.
 | `test_analysis_mart.py` | Feature marts materialize the lazy analysis mart, preserve unmatched SERP rows with nullable feature columns, validate before sink, audit the written parquet row rules, and refresh the run catalog |
 | `test_stats_panel.py` | Guardrail evaluation, panel grain filtering, hard-fail artifact writing, and minimal stats report output |
 | `test_stats_spearman.py` | Benjamini-Hochberg adjustment, backend Spearman summaries, and Spearman artifact emission on passing panels |
+| `test_stats_diagnostics.py` | Pooled OLS diagnostics, small-sample Shapiro handling, diagnostic artifact emission on passing panels, and skipped-backend diagnostics behavior |
 | `test_stats_regression.py` | Pooled baseline and per-backend feature regressions with keyword-clustered SEs, effect-size translation, two-way-cluster sensitivity, and regression artifact emission on passing panels |
 | `test_round_trip.py` | Dedicated Parquet lake write → normalize → build-features → analyze round-trip regression sweep on real Parquet artifacts; validates `run.json` updates and keyword-filtered `analyze` output |
 | `test_keyword_expansion.py` | 25-keyword cap, deduplication, raw provider payload |
@@ -95,7 +96,7 @@ Mock nondeterministic or destructive external effects (network, paid APIs,
 credentials). Prefer integration tests at real boundaries once live clients
 exist.
 
-## Shipped tests — Phase 5 slices 1–5
+## Shipped tests — Phase 5 slices 1–6
 
 - **`analysis_spec.v1.yaml` contract** — `tests/unit/test_sdlc_docs.py::
   test_phase_5_slice_1_defines_analysis_spec_v1` asserts estimand fields
@@ -121,6 +122,10 @@ exist.
   output, the explicit Δ-rank effect-size formula, repeated-URL two-way-cluster
   sensitivity, and regression sections in `stats_summary.json` /
   `stats_report.md`.
+- **Pooled OLS diagnostics** — `tests/unit/test_stats_diagnostics.py` covers
+  RESET, Breusch–Pagan with HC3 recommendation, Cook's D and influence flags,
+  small-sample Shapiro as informational, skipped-backend diagnostics, and
+  `stats_diagnostics.json` / `stats_report.md` emission on passing panels.
 
 ## Planned tests (not yet in suite) — Phase 5 active scope
 

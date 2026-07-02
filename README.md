@@ -59,8 +59,9 @@ see `ROADMAP.md` (BGE hybrid / retrieve-then-rerank backlog).
 columns and page text length). If feature marts are missing, it materializes
 them first from the curated tables. It does **not** re-fetch pages or re-run
 embeddings. The current stats path runs guardrails, Spearman summaries, and
-pooled regression summaries into `runs/{run_id}/stats/`; later slices expand
-diagnostics and CLI reporting.
+pooled regression summaries into `runs/{run_id}/stats/`, including
+`stats_summary.json`, `stats_diagnostics.json`, and `stats_report.md`; later
+slices expand CLI reporting.
 
 ### Standalone script
 

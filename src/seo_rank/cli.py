@@ -290,7 +290,7 @@ def config_from_args(args: argparse.Namespace) -> RunConfig:
         live_providers=args.live_providers,
         live_bge=args.live_bge,
         live_gemini=args.live_gemini,
-        live_textrazor=args.live_textrazor,
+        live_textrazor=args.live_textrazor and not args.skip_textrazor,
     )
 
 
@@ -321,7 +321,7 @@ def serialized_run_config_from_args(args: argparse.Namespace) -> dict[str, objec
         "live_providers": args.live_providers,
         "live_bge": args.live_bge,
         "live_gemini": args.live_gemini,
-        "live_textrazor": args.live_textrazor,
+        "live_textrazor": args.live_textrazor and not args.skip_textrazor,
     }
 
 
