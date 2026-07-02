@@ -106,18 +106,12 @@ def test_run_writes_offline_json_and_markdown_artifacts(
         "live_gemini": False,
         "live_textrazor": False,
     }
-    assert len(payload["keywords"]) == 25
-    assert payload["keywords"][:3] == [
-        "technical seo",
-        "technical seo audit",
-        "technical seo checklist",
-    ]
+    assert payload["keywords"] == ["technical seo"]
     assert payload["run_id"] == "artifacts"
     assert "raw_provider_data" not in payload
-    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 101
-    assert len(payload["keyword_results"]) == 25
+    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 5
+    assert len(payload["keyword_results"]) == 1
     assert payload["keyword_results"][0]["target_keyword"] == "technical seo"
-    assert payload["keyword_results"][1]["target_keyword"] == "technical seo audit"
     assert all("raw_provider_data" not in keyword_result for keyword_result in payload["keyword_results"])
     assert [result["rank"] for result in payload["keyword_results"][0]["serp_results"]] == [
         1,
@@ -175,13 +169,13 @@ def test_run_writes_offline_json_and_markdown_artifacts(
         score["target_keyword"]
         for score in payload["keyword_results"][0]["page_similarity"]
     } == {"technical seo"}
-    assert len(payload["serp_results"]) == 75
+    assert len(payload["serp_results"]) == 3
     assert len(payload["passages"]) == sum(
         len(keyword_result["passages"])
         for keyword_result in payload["keyword_results"]
     )
-    assert len(payload["similarity_features"]) == 75
-    assert len(payload["page_similarity"]) == 75
+    assert len(payload["similarity_features"]) == 3
+    assert len(payload["page_similarity"]) == 3
     assert {passage["target_keyword"] for passage in payload["passages"]} == set(
         payload["keywords"]
     )
@@ -199,7 +193,7 @@ def test_run_writes_offline_json_and_markdown_artifacts(
     assert "- Seed: technical seo" in report
     assert "- Network calls: 0" in report
     assert "## Target Keyword: technical seo" in report
-    assert "## Target Keyword: technical seo audit" in report
+    assert "## Target Keyword: technical seo audit" not in report
     assert "### Page Similarity" in report
     assert "BGE: 0.98 (normalized 0.98)" in report
     assert "Gemini Doc Retrieval:" in report
@@ -242,7 +236,7 @@ def test_run_writes_raw_response_parquet_and_catalog_metadata(
     ).to_table()
     rows = table.to_pylist()
 
-    assert len(rows) == 51
+    assert len(rows) == 3
     assert {row["endpoint"] for row in rows} == {
         "keyword_expansion",
         "serp",
@@ -257,7 +251,7 @@ def test_run_writes_raw_response_parquet_and_catalog_metadata(
     payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
     assert payload["run_id"] == "artifacts"
     assert "raw_provider_data" not in payload
-    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 51
+    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 3
     assert payload["catalog"]["datasets"]["raw_responses"]["source_response_ids"] == sorted(
         row["response_id"] for row in rows
     )
@@ -287,9 +281,9 @@ def test_run_includes_offline_textrazor_entities_when_not_skipped(tmp_path: Path
     assert exit_code == 0
 
     payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
-    assert len(payload["keyword_results"]) == 25
+    assert len(payload["keyword_results"]) == 1
     assert all("raw_provider_data" not in keyword_result for keyword_result in payload["keyword_results"])
-    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 76
+    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 4
     assert payload["catalog"]["datasets"]["raw_responses"]["files"] == [
         "parquet/raw_responses/endpoint=entities/part-0.parquet",
         "parquet/raw_responses/endpoint=keyword_expansion/part-0.parquet",
@@ -704,6 +698,7 @@ def test_run_live_gemini_uses_live_gemini_page_scores(
         *,
         api_key: str,
         embed_content=None,
+        on_page_progress=None,
     ) -> list[dict[str, object]]:
         gemini_calls.append(
             {
@@ -1177,28 +1172,18 @@ def test_run_live_providers_writes_artifacts_with_injected_transports(
     )
 
     assert exit_code == 0
-    assert len(dataforseo_calls) == 5
-    assert len(textrazor_calls) == 2
+    assert len(dataforseo_calls) == 3
+    assert len(textrazor_calls) == 1
 
     payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
     assert payload["config"]["live_providers"] is True
-    assert payload["keywords"] == ["technical seo", "technical seo audit"]
+    assert payload["keywords"] == ["technical seo"]
     assert [result["target_keyword"] for result in payload["keyword_results"]] == [
         "technical seo",
-        "technical seo audit",
     ]
     assert payload["keyword_results"][0]["serp_results"] == [
         {
             "keyword": "technical seo",
-            "rank": 1,
-            "url": "https://example.com/live",
-            "title": "Live Result",
-            "description": "Live provider result.",
-        }
-    ]
-    assert payload["keyword_results"][1]["serp_results"] == [
-        {
-            "keyword": "technical seo audit",
             "rank": 1,
             "url": "https://example.com/live",
             "title": "Live Result",
@@ -1210,12 +1195,9 @@ def test_run_live_providers_writes_artifacts_with_injected_transports(
         "dataforseo.serp",
         "dataforseo.page_text",
         "textrazor.entities",
-        "dataforseo.serp",
-        "dataforseo.page_text",
-        "textrazor.entities",
     ]
     assert "raw_provider_data" not in payload
-    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 7
+    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 4
     assert payload["catalog"]["datasets"]["raw_responses"]["files"] == [
         "parquet/raw_responses/endpoint=entities/part-0.parquet",
         "parquet/raw_responses/endpoint=keyword_expansion/part-0.parquet",
@@ -1236,22 +1218,6 @@ def test_run_live_providers_writes_artifacts_with_injected_transports(
     assert (
         payload["keyword_results"][0]["textrazor_entities"][0]["target_keyword"]
         == "technical seo"
-    )
-    assert (
-        payload["keyword_results"][1]["passages"][0]["target_keyword"]
-        == "technical seo audit"
-    )
-    assert (
-        payload["keyword_results"][1]["similarity_features"][0]["target_keyword"]
-        == "technical seo audit"
-    )
-    assert (
-        payload["keyword_results"][1]["page_similarity"][0]["target_keyword"]
-        == "technical seo audit"
-    )
-    assert (
-        payload["keyword_results"][1]["textrazor_entities"][0]["target_keyword"]
-        == "technical seo audit"
     )
 
 

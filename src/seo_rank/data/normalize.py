@@ -675,6 +675,7 @@ def build_pages_and_passages_frame(
     run_id: str,
 ) -> pl.DataFrame:
     rows: list[dict[str, object]] = []
+    seen_page_ids: set[str] = set()
     for record in frame.to_dicts():
         response_id = str(record["response_id"])
         target_keyword = str(record["target_keyword"])
@@ -689,6 +690,9 @@ def build_pages_and_passages_frame(
             continue
         canonical_url_hash = stable_id(url)
         page_id = stable_id(run_id, target_keyword, url)
+        if page_id in seen_page_ids:
+            continue
+        seen_page_ids.add(page_id)
         rows.append(
             {
                 "run_id": run_id,
@@ -823,6 +827,7 @@ def build_page_html_frame(
 
 def build_entities_frame(frame: pl.DataFrame, *, run_id: str) -> pl.DataFrame:
     rows: list[dict[str, object]] = []
+    seen_entity_row_ids: set[str] = set()
     for record in frame.to_dicts():
         response_id = str(record["response_id"])
         target_keyword = str(record["target_keyword"])
@@ -831,6 +836,16 @@ def build_entities_frame(frame: pl.DataFrame, *, run_id: str) -> pl.DataFrame:
         url = str(body.get("url", ""))
         canonical_url_hash = stable_id(url)
         for entity in normalize_entities(body, url=url):
+            entity_row_id = stable_id(
+                run_id,
+                target_keyword,
+                url,
+                entity["entity_id"],
+                entity["matched_text"],
+            )
+            if entity_row_id in seen_entity_row_ids:
+                continue
+            seen_entity_row_ids.add(entity_row_id)
             rows.append(
                 {
                     "run_id": run_id,
@@ -839,13 +854,7 @@ def build_entities_frame(frame: pl.DataFrame, *, run_id: str) -> pl.DataFrame:
                     "response_id": response_id,
                     "canonical_url_hash": canonical_url_hash,
                     "url": url,
-                    "entity_row_id": stable_id(
-                        run_id,
-                        target_keyword,
-                        url,
-                        entity["entity_id"],
-                        entity["matched_text"],
-                    ),
+                    "entity_row_id": entity_row_id,
                     "entity_id": entity["entity_id"],
                     "matched_text": entity["matched_text"],
                     "confidence": float(entity["confidence"]),

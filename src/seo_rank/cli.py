@@ -18,12 +18,14 @@ import polars as pl
 from seo_rank.env import ensure_project_env_loaded
 from seo_rank.data import build_analysis_mart, build_feature_marts, normalize_run
 from seo_rank.data.scans import scan_curated_table, scan_raw_responses
+from seo_rank.progress import RunProgress
 from seo_rank.stats.artifacts import run_phase5_stats
 from seo_rank.dataforseo import (
     DataForSeoClientError,
     DataForSeoCredentialError,
     DataForSeoParseError,
     DataForSeoCredentials,
+    DEFAULT_KEYWORD_LIMIT,
     build_keyword_expansion_request,
     build_page_text_request,
     build_serp_request,
@@ -104,6 +106,7 @@ class RunConfig:
     model_name: str
     dry_run: bool
     skip_textrazor: bool
+    keyword_limit: int = DEFAULT_KEYWORD_LIMIT
     live_providers: bool = False
     live_bge: bool = False
     live_gemini: bool = False
@@ -147,13 +150,15 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "run":
         assert config is not None
+        progress = RunProgress()
+        progress.log(f"run: output directory {config.output_dir}")
         try:
             if args.stored_run is not None:
-                replay_stored_run(Path(args.stored_run), config)
+                replay_stored_run(Path(args.stored_run), config, progress=progress)
             elif config.live_providers:
-                write_live_artifacts(config, os.environ)
+                write_live_artifacts(config, os.environ, progress=progress)
             else:
-                write_offline_artifacts(config)
+                write_offline_artifacts(config, progress=progress)
         except (
             BgeRerankerError,
             CliCommandError,
@@ -213,6 +218,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--language", default="en")
     run.add_argument("--device", choices=["desktop", "mobile"], default="desktop")
     run.add_argument("--depth", type=positive_int, default=20)
+    run.add_argument("--keyword-limit", type=positive_int, default=DEFAULT_KEYWORD_LIMIT)
     run.add_argument("--output-dir", type=Path)
     run.add_argument("--model-name", default="fixture-similarity-v1")
     run.add_argument("--dry-run", action="store_true")
@@ -283,6 +289,7 @@ def config_from_args(args: argparse.Namespace) -> RunConfig:
         language=args.language,
         device=args.device,
         depth=args.depth,
+        keyword_limit=args.keyword_limit,
         output_dir=output_dir,
         model_name=args.model_name,
         dry_run=args.dry_run,
@@ -309,7 +316,7 @@ def default_run_id(args: argparse.Namespace) -> str:
 
 
 def serialized_run_config_from_args(args: argparse.Namespace) -> dict[str, object]:
-    return {
+    serialized = {
         "seed": args.seed,
         "location": args.location,
         "language": args.language,
@@ -318,11 +325,14 @@ def serialized_run_config_from_args(args: argparse.Namespace) -> dict[str, objec
         "model_name": args.model_name,
         "dry_run": args.dry_run,
         "skip_textrazor": args.skip_textrazor,
-        "live_providers": args.live_providers,
-        "live_bge": args.live_bge,
-        "live_gemini": args.live_gemini,
-        "live_textrazor": args.live_textrazor and not args.skip_textrazor,
     }
+    if args.keyword_limit != DEFAULT_KEYWORD_LIMIT:
+        serialized["keyword_limit"] = args.keyword_limit
+    serialized["live_providers"] = args.live_providers
+    serialized["live_bge"] = args.live_bge
+    serialized["live_gemini"] = args.live_gemini
+    serialized["live_textrazor"] = args.live_textrazor and not args.skip_textrazor
+    return serialized
 
 
 def seed_slug(seed: str) -> str:
@@ -372,29 +382,60 @@ def validate_live_textrazor_config(env: Mapping[str, str]) -> TextRazorCredentia
         raise LiveProviderGateError(str(error)) from error
 
 
-def write_offline_artifacts(config: RunConfig) -> None:
+def write_offline_artifacts(
+    config: RunConfig,
+    *,
+    progress: RunProgress | None = None,
+) -> None:
     config.output_dir.mkdir(parents=True, exist_ok=True)
-    payload = build_offline_payload(config)
-    write_artifacts(config.output_dir, payload)
+    payload = build_offline_payload(config, progress=progress)
+    if progress is not None:
+        progress.log("run: writing artifacts")
+    write_artifacts(config.output_dir, payload, progress=progress)
+    if progress is not None:
+        progress.log(f"run: finished -> {config.output_dir}")
 
 
-def write_live_artifacts(config: RunConfig, env: Mapping[str, str]) -> None:
+def write_live_artifacts(
+    config: RunConfig,
+    env: Mapping[str, str],
+    *,
+    progress: RunProgress | None = None,
+) -> None:
     config.output_dir.mkdir(parents=True, exist_ok=True)
     payload = build_live_payload(
         config,
         env=env,
         dataforseo_transport=DEFAULT_DATAFORSEO_TRANSPORT,
         textrazor_transport=DEFAULT_TEXTRAZOR_TRANSPORT,
+        progress=progress,
     )
-    write_artifacts(config.output_dir, payload)
+    if progress is not None:
+        progress.log("run: writing artifacts")
+    write_artifacts(config.output_dir, payload, progress=progress)
+    if progress is not None:
+        progress.log(f"run: finished -> {config.output_dir}")
 
 
-def replay_stored_run(stored_run: Path, config: RunConfig) -> None:
+def replay_stored_run(
+    stored_run: Path,
+    config: RunConfig,
+    *,
+    progress: RunProgress | None = None,
+) -> None:
     del config
     try:
+        if progress is not None:
+            progress.log(f"replay: normalizing {stored_run}")
         normalize_run(stored_run)
+        if progress is not None:
+            progress.log("replay: building feature marts")
         build_feature_marts(stored_run)
+        if progress is not None:
+            progress.log("replay: building analysis mart")
         build_analysis_mart(stored_run)
+        if progress is not None:
+            progress.log(f"replay: finished -> {stored_run}")
     except STORAGE_COMMAND_EXCEPTIONS as error:
         raise CliCommandError(str(error)) from error
 
@@ -469,13 +510,23 @@ def ensure_feature_marts_for_analysis(run_dir: Path) -> None:
     build_feature_marts(Path(run_dir))
 
 
-def write_artifacts(output_dir: Path, payload: dict[str, object]) -> None:
+def write_artifacts(
+    output_dir: Path,
+    payload: dict[str, object],
+    *,
+    progress: RunProgress | None = None,
+) -> None:
     run_id = output_dir.name
     raw_response_records = build_raw_response_records(run_id, payload)
+    if progress is not None:
+        progress.log(f"run: writing raw responses ({len(raw_response_records)} records)")
     catalog = write_raw_response_catalog(
         output_dir,
         raw_response_records=raw_response_records,
+        progress=progress,
     )
+    if progress is not None:
+        progress.log("run: writing run.json")
     (output_dir / "run.json").write_text(
         json.dumps(
             build_run_json_payload(payload, run_id=run_id, catalog=catalog),
@@ -485,19 +536,40 @@ def write_artifacts(output_dir: Path, payload: dict[str, object]) -> None:
         + "\n",
         encoding="utf-8",
     )
+    if progress is not None:
+        progress.log("run: writing report.md")
     (output_dir / "report.md").write_text(
         render_markdown_report(payload),
         encoding="utf-8",
     )
 
 
-def build_offline_payload(config: RunConfig) -> dict[str, object]:
+def build_offline_payload(
+    config: RunConfig,
+    *,
+    progress: RunProgress | None = None,
+) -> dict[str, object]:
+    if progress is not None:
+        progress.log("run: starting offline")
     keyword_expansion = fixture_keyword_expansion_response(config.seed)
-    keywords = normalize_keyword_expansion(keyword_expansion, seed=config.seed)
-    keyword_results = [
-        build_offline_keyword_result(config, target_keyword=keyword)
-        for keyword in keywords
-    ]
+    keywords = normalize_keyword_expansion(
+        keyword_expansion,
+        seed=config.seed,
+        limit=config.keyword_limit,
+    )
+    if progress is not None:
+        progress.log(f"run: expanded {len(keywords)} keywords")
+    keyword_results = []
+    for index, keyword in enumerate(keywords, start=1):
+        keyword_results.append(
+            build_offline_keyword_result(
+                config,
+                target_keyword=keyword,
+                progress=progress,
+            )
+        )
+        if progress is not None:
+            progress.keyword_step(index, len(keywords), keyword, "done")
     raw_provider_data: dict[str, object] = {
         "dataforseo": {
             "keyword_expansion": keyword_expansion,
@@ -537,13 +609,18 @@ def build_offline_keyword_result(
     config: RunConfig,
     *,
     target_keyword: str,
+    progress: RunProgress | None = None,
 ) -> dict[str, object]:
+    if progress is not None:
+        progress.keyword_log(target_keyword, "serp")
     serp_response = fixture_serp_response(target_keyword)
     serp_results = normalize_serp_results(
         serp_response,
         keyword=target_keyword,
         depth=config.depth,
     )
+    if progress is not None:
+        progress.keyword_log(target_keyword, f"page text ({len(serp_results)} urls)")
     page_text_responses = [
         fixture_page_text_response(str(result["url"]), target_keyword)
         for result in serp_results
@@ -554,11 +631,15 @@ def build_offline_keyword_result(
         for page_text in [parsed_page_text(response)]
         if page_text
     ]
+    if progress is not None:
+        progress.keyword_log(target_keyword, f"passages ({len(parsed_pages)} pages)")
     passages = [
         annotate_target_keyword(passage, target_keyword)
         for page_text in parsed_pages
         for passage in normalize_page_text(page_text)
     ]
+    if progress is not None:
+        progress.keyword_log(target_keyword, "similarity")
     similarity_features = [
         annotate_target_keyword(feature, target_keyword)
         for feature in compute_page_similarity_features(target_keyword, passages)
@@ -570,6 +651,8 @@ def build_offline_keyword_result(
     textrazor_responses: list[dict[str, object]] = []
     textrazor_entities: list[dict[str, object]] = []
     if not config.skip_textrazor:
+        if progress is not None:
+            progress.keyword_log(target_keyword, "textrazor entities")
         textrazor_responses = [
             fixture_entity_response(
                 url=str(page_text["url"]),
@@ -609,21 +692,34 @@ def build_live_payload(
     env: Mapping[str, str],
     dataforseo_transport,
     textrazor_transport,
+    progress: RunProgress | None = None,
 ) -> dict[str, object]:
+    if progress is not None:
+        progress.log("run: starting live")
     credentials = validate_live_provider_gate(env)
+    if progress is not None:
+        progress.log("run: credentials validated")
     live_bge_enabled = False
     bge_reranker = None
     if config.live_bge:
         validate_live_bge_config(env)
+        if progress is not None:
+            progress.log("run: loading BGE reranker")
         live_bge_enabled = True
         bge_reranker = load_bge_reranker()
     gemini_api_key = validate_live_gemini_config(env) if config.live_gemini else None
+    if config.live_gemini and progress is not None:
+        progress.log("run: Gemini embeddings enabled")
     textrazor_credentials = (
         validate_live_textrazor_config(env) if config.live_textrazor else None
     )
+    if config.live_textrazor and progress is not None:
+        progress.log("run: TextRazor entities enabled")
     location_code = dataforseo_location_code(config.location)
     network_calls: list[str] = []
 
+    if progress is not None:
+        progress.log("run: keyword expansion request")
     keyword_request = build_keyword_expansion_request(
         config.seed,
         location_code=location_code,
@@ -636,23 +732,33 @@ def build_live_payload(
         transport=dataforseo_transport,
     )
     network_calls.append("dataforseo.keyword_expansion")
-    keywords = normalize_keyword_expansion(keyword_expansion, seed=config.seed)
-    keyword_results = [
-        build_live_keyword_result(
-            config,
-            target_keyword=keyword,
-            credentials=credentials,
-            live_bge_enabled=live_bge_enabled,
-            bge_reranker=bge_reranker,
-            gemini_api_key=gemini_api_key,
-            textrazor_credentials=textrazor_credentials,
-            location_code=location_code,
-            dataforseo_transport=dataforseo_transport,
-            textrazor_transport=textrazor_transport,
-            network_calls=network_calls,
+    keywords = normalize_keyword_expansion(
+        keyword_expansion,
+        seed=config.seed,
+        limit=config.keyword_limit,
+    )
+    if progress is not None:
+        progress.log(f"run: expanded {len(keywords)} keywords")
+    keyword_results = []
+    for index, keyword in enumerate(keywords, start=1):
+        keyword_results.append(
+            build_live_keyword_result(
+                config,
+                target_keyword=keyword,
+                credentials=credentials,
+                live_bge_enabled=live_bge_enabled,
+                bge_reranker=bge_reranker,
+                gemini_api_key=gemini_api_key,
+                textrazor_credentials=textrazor_credentials,
+                location_code=location_code,
+                dataforseo_transport=dataforseo_transport,
+                textrazor_transport=textrazor_transport,
+                network_calls=network_calls,
+                progress=progress,
+            )
         )
-        for keyword in keywords
-    ]
+        if progress is not None:
+            progress.keyword_step(index, len(keywords), keyword, "done")
 
     raw_provider_data: dict[str, object] = {
         "dataforseo": {
@@ -702,7 +808,10 @@ def build_live_keyword_result(
     dataforseo_transport,
     textrazor_transport,
     network_calls: list[str],
+    progress: RunProgress | None = None,
 ) -> dict[str, object]:
+    if progress is not None:
+        progress.keyword_log(target_keyword, "dataforseo serp request")
     serp_response = execute_validated_dataforseo_request(
         "serp",
         build_serp_request(
@@ -725,6 +834,11 @@ def build_live_keyword_result(
         str(result["url"]): str(result["title"]) for result in serp_results
     }
 
+    if progress is not None:
+        progress.keyword_log(
+            target_keyword,
+            f"dataforseo page text ({len(serp_results)} urls)",
+        )
     page_text_responses = [
         execute_validated_dataforseo_request(
             "page_text",
@@ -754,18 +868,31 @@ def build_live_keyword_result(
         }
         for page_text in parsed_pages
     ]
-    similarity_scores = (
-        compute_gemini_page_similarity_scores(
+    if gemini_api_key is not None:
+        if progress is not None:
+            progress.keyword_log(target_keyword, "gemini embeddings")
+        similarity_scores = compute_gemini_page_similarity_scores(
             target_keyword,
             gemini_pages,
             api_key=gemini_api_key,
+            on_page_progress=(
+                None
+                if progress is None
+                else lambda index, total, url, step: progress.keyword_log(
+                    target_keyword,
+                    f"gemini {step} ({index}/{total}) {url}".rstrip(),
+                )
+            ),
         )
-        if gemini_api_key is not None
-        else compute_page_similarity_scores(target_keyword, parsed_pages)
-    )
+    else:
+        if progress is not None:
+            progress.keyword_log(target_keyword, "similarity")
+        similarity_scores = compute_page_similarity_scores(target_keyword, parsed_pages)
     if gemini_api_key is not None and parsed_pages:
         network_calls.append("genai.embed_content")
     if live_bge_enabled:
+        if progress is not None:
+            progress.keyword_log(target_keyword, "bge scoring")
         similarity_scores = merge_bge_page_similarity_scores(
             similarity_scores,
             compute_bge_page_similarity_scores(
@@ -781,6 +908,11 @@ def build_live_keyword_result(
     textrazor_responses: list[dict[str, object]] = []
     textrazor_entities: list[dict[str, object]] = []
     if config.live_textrazor and textrazor_credentials is not None:
+        if progress is not None:
+            progress.keyword_log(
+                target_keyword,
+                f"textrazor entities ({len(parsed_pages)} pages)",
+            )
         textrazor_responses = [
             execute_textrazor_request(
                 build_entity_request(page_text),
@@ -935,6 +1067,8 @@ def dataforseo_location_code(location: str) -> int:
 def serialized_config(config: RunConfig) -> dict[str, object]:
     serialized = asdict(config)
     serialized["output_dir"] = str(config.output_dir)
+    if serialized.get("keyword_limit") == DEFAULT_KEYWORD_LIMIT:
+        serialized.pop("keyword_limit", None)
     return serialized
 
 
@@ -1182,6 +1316,7 @@ def write_raw_response_catalog(
     output_dir: Path,
     *,
     raw_response_records: list[dict[str, object]],
+    progress: RunProgress | None = None,
 ) -> dict[str, object]:
     dataset_dir = output_dir / "parquet" / "raw_responses"
     files: list[str] = []
@@ -1190,6 +1325,7 @@ def write_raw_response_catalog(
             output_dir,
             dataset_dir=dataset_dir,
             raw_response_records=raw_response_records,
+            progress=progress,
         )
     return {
         "schema_version": RUN_CATALOG_SCHEMA_VERSION,
@@ -1218,6 +1354,7 @@ def write_raw_response_dataset(
     *,
     dataset_dir: Path,
     raw_response_records: list[dict[str, object]],
+    progress: RunProgress | None = None,
 ) -> list[str]:
     dataset_dir.mkdir(parents=True, exist_ok=True)
     records_by_endpoint: dict[str, list[dict[str, object]]] = {}
@@ -1228,6 +1365,11 @@ def write_raw_response_dataset(
 
     files: list[str] = []
     for endpoint in sorted(records_by_endpoint):
+        if progress is not None:
+            progress.log(
+                f"run: writing parquet endpoint={endpoint} "
+                f"({len(records_by_endpoint[endpoint])} rows)"
+            )
         partition_dir = dataset_dir / f"endpoint={endpoint}"
         partition_dir.mkdir(parents=True, exist_ok=True)
         file_path = partition_dir / "part-0.parquet"

@@ -15,6 +15,40 @@ standard-library HTTP clients, env-gated live DataForSEO and TextRazor paths,
 and env-gated live Gemini (`gemini-embedding-2`) and BGE (FlagEmbedding on CUDA)
 page scoring.
 
+Long runs print **progress to stderr** (`[seo-rank]` prefix): run phase, per-keyword
+steps (SERP, page text, similarity, optional TextRazor/Gemini/BGE), a keyword
+progress bar, and artifact writes. Stdout stays clean for piping.
+
+### Recommended workflows
+
+Use these commands in order. Each step reads or extends the same run tree under
+`runs/{run_id}/` (or `--output-dir`).
+
+| Goal | Command |
+|------|---------|
+| **Fast local smoke** (default: 1 keyword, fixtures, no network) | `seo-rank run --seed "technical seo" --dry-run` |
+| **Full offline cluster** (25 keywords from fixtures) | `seo-rank run --seed "technical seo" --dry-run --keyword-limit 25` |
+| **Materialize curated Parquet tables** | `seo-rank normalize --run runs/RUN_ID` |
+| **Build feature marts** | `seo-rank build-features --run runs/RUN_ID` |
+| **Analysis mart + stats** | `seo-rank analyze --run runs/RUN_ID` |
+| **Inspect one keyword row** | `seo-rank analyze --run runs/RUN_ID --keyword "technical seo"` |
+| **Re-process stored run** (no provider calls) | `seo-rank run --seed "technical seo" --stored-run runs/RUN_ID` |
+| **Audit one raw HTTP response** | `seo-rank replay --run runs/RUN_ID --response-id RESPONSE_ID` |
+| **Live provider smoke** (DataForSEO; optional Gemini/BGE/TextRazor) | See [Live providers](#live-providers) below |
+
+**Typical offline research path:**
+
+```bash
+seo-rank run --seed "technical seo" --dry-run --keyword-limit 25
+seo-rank normalize --run runs/RUN_ID
+seo-rank build-features --run runs/RUN_ID
+seo-rank analyze --run runs/RUN_ID
+```
+
+`analyze` backfills missing feature marts automatically. On non–dry-run runs it
+also writes `runs/{run_id}/stats/` (`stats_summary.json`, `stats_diagnostics.json`,
+`stats_report.md`) and exits `1` when guardrails hard-fail.
+
 ### What `seo-rank run` executes
 
 On every `run` (offline or live), per expanded cluster keyword:
@@ -32,6 +66,10 @@ On every `run` (offline or live), per expanded cluster keyword:
 A plain `run` does **not** call `normalize`, `build-features`, or `analyze`. Use
 `--stored-run runs/RUN_ID` to re-materialize curated tables and marts from an
 existing run tree without provider calls.
+
+By default, keyword expansion keeps **one** cluster keyword (the seed). Pass
+`--keyword-limit 25` for the full fixture expansion set used in lake round-trip
+tests.
 
 ### Similarity backends (fixture vs live)
 
@@ -72,8 +110,10 @@ is not part of the default CLI `run` flow.
 ```bash
 python -m pytest
 seo-rank run --seed "technical seo" --dry-run
-seo-rank run --seed "technical seo" --dry-run --output-dir artifacts
+seo-rank run --seed "technical seo" --dry-run --keyword-limit 25 --output-dir artifacts
 ```
+
+### Live providers
 
 For live provider smoke tests, copy `.env.example` to `.env` in the project root
 and fill in real credentials. The CLI and pytest **load `.env` automatically**
@@ -96,6 +136,23 @@ Live-provider contract:
   `--language`. Keyword expansion and SERP still use those flags, so
   `--language fr --location France` returns French SERPs but US-fetched page
   HTML. Aligning page-crawl locale with SERP locale is **not supported** today.
+
+Example live smoke (DataForSEO only, fixture similarity):
+
+```bash
+# .env: SEO_RANK_ENABLE_LIVE_PROVIDERS=1, DATAFORSEO_LOGIN, DATAFORSEO_PASSWORD
+seo-rank run --seed "technical seo" --live-providers --output-dir artifacts
+```
+
+Example with live Gemini:
+
+```bash
+# .env: also SEO_RANK_ENABLE_GEMINI=1, GEMINI_API_KEY
+seo-rank run --seed "technical seo" --live-providers --live-gemini --output-dir artifacts
+```
+
+**Removed flags:** `--javascript-parsing` was dropped; argparse rejects it if
+scripts still pass it.
 
 ### Storage layout 
 
@@ -121,14 +178,65 @@ runs/{run_id}/
     analysis_mart/part-*.parquet
 ```
 
-### CLI 
+### CLI reference
+
+All subcommands. Prefer the [recommended workflows](#recommended-workflows) above
+for day-to-day use.
+
+#### `seo-rank run`
+
+Fetch or fixture provider data, score pages, write `run.json`, `report.md`, and
+`parquet/raw_responses/`. Progress logs go to **stderr**.
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `--seed` | *(required)* | Seed keyword for expansion |
+| `--location` | `United States` | DataForSEO location (name or numeric code) |
+| `--language` | `en` | Language code for expansion/SERP |
+| `--device` | `desktop` | `desktop` or `mobile` SERP |
+| `--depth` | `20` | Max organic SERP rows per keyword |
+| `--keyword-limit` | `1` | Max cluster keywords after expansion |
+| `--output-dir` | `runs/{run_id}` | Run root (content-addressed id when omitted) |
+| `--model-name` | `fixture-similarity-v1` | Recorded in `run.json` |
+| `--dry-run` | off | Mark run as fixture/offline in config |
+| `--skip-textrazor` | off | Skip TextRazor entities (offline and live) |
+| `--stored-run` | — | Re-materialize marts from an existing run tree |
+| `--live-providers` | off | Live DataForSEO (requires env gate) |
+| `--live-bge` | off | Live BGE reranking (requires `--live-providers`) |
+| `--live-gemini` | off | Live Gemini embeddings (requires `--live-providers`) |
+| `--live-textrazor` | off | Live TextRazor (requires `--live-providers`) |
 
 ```bash
-seo-rank normalize --run RUN_ID
-seo-rank build-features --run RUN_ID
-seo-rank analyze --run RUN_ID --keyword "technical seo"
-seo-rank replay --run RUN_ID --response-id RESPONSE_ID
-seo-rank run --seed "technical seo" --stored-run runs/RUN_ID   # re-materialize marts
+# Offline defaults (1 keyword, progress on stderr)
+seo-rank run --seed "technical seo" --dry-run
+
+# Full fixture cluster
+seo-rank run --seed "technical seo" --dry-run --keyword-limit 25 --depth 3 --skip-textrazor
+
+# Explicit output directory
+seo-rank run --seed "technical seo" --dry-run --output-dir artifacts
+
+# Re-process stored lake (no network)
+seo-rank run --seed "technical seo" --stored-run runs/RUN_ID
+```
+
+#### Lake pipeline commands
+
+Materialize downstream layers on an existing run directory:
+
+```bash
+seo-rank normalize --run runs/RUN_ID      # raw_responses → curated tables
+seo-rank build-features --run runs/RUN_ID   # curated → feature marts
+seo-rank analyze --run runs/RUN_ID            # feature marts → analysis_mart (+ stats)
+seo-rank analyze --run runs/RUN_ID --keyword "technical seo"   # JSON rows for one keyword
+```
+
+#### `seo-rank replay`
+
+Re-parse one stored raw response body (audit / debugging):
+
+```bash
+seo-rank replay --run runs/RUN_ID --response-id RESPONSE_ID
 ```
 
 Storage commands exit `2` on missing run data or unknown `--keyword` / `--response-id`
@@ -143,7 +251,7 @@ response.
 
 | Path | Purpose |
 |------|---------|
-| `src/seo_rank/` | CLI and provider boundaries |
+| `src/seo_rank/` | CLI, provider boundaries, `progress.py` (stderr run logging) |
 | `src/seo_rank/data/` | Polars lake transforms: `scans`, `normalize`, `features`, `marts`, `validate` |
 | `tests/unit/` | pytest unit tests |
 | `ARCHITECTURE.md` | Product architecture, data flow, planned pipeline |

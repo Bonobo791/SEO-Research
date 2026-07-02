@@ -359,14 +359,15 @@ their effective defaults.
 - **Phase 3 shipped:** per-keyword cluster orchestration in offline and gated
   live paths.
   - `build_offline_keyword_result` / `build_live_keyword_result` loop every capped
-    keyword (up to 25) with that keyword as `target_keyword`.
+    keyword (up to the configured keyword limit, default 1) with that keyword as
+    `target_keyword`.
   - Per-keyword SERP, page text, passages, fixture similarity, TextRazor entities.
   - `keyword_results[]` in `run.json` / `report.md` with per-keyword raw provider
     payloads; top-level rollup preserved.
   - Flattened aggregate rows annotated with `target_keyword`.
   - `.env.example` documents live-provider and integration env gates.
-  - Tests: 25-keyword offline cluster + injected live cluster orchestration in
-    `test_cli_run.py`.
+  - Tests: 1-keyword default offline cluster + injected live cluster orchestration
+    in `test_cli_run.py`.
 - **GOALS retargeted to Phase 4:** live similarity backends and passage/page/domain
   scoring.
 - **Phase 4 started:** fixture page-level scoring for **BGE**, **Gemini Doc

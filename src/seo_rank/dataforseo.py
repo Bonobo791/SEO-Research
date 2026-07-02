@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-DEFAULT_KEYWORD_LIMIT = 25
+DEFAULT_KEYWORD_LIMIT = 1
 DEFAULT_SERP_DEPTH = 20
 DATAFORSEO_BASE_URL = "https://api.dataforseo.com"
 

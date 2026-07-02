@@ -76,12 +76,12 @@ def test_normalize_run_materializes_curated_tables_from_raw_responses(
 
     catalog = normalize_run(output_dir)
 
-    assert catalog["datasets"]["keywords"]["row_count"] == 25
-    assert catalog["datasets"]["serp_items"]["row_count"] == 25
-    assert catalog["datasets"]["pages"]["row_count"] == 25
-    assert catalog["datasets"]["passages"]["row_count"] == 74
-    assert catalog["datasets"]["entities"]["row_count"] == 50
-    assert catalog["datasets"]["similarity_scores"]["row_count"] == 25
+    assert catalog["datasets"]["keywords"]["row_count"] == 1
+    assert catalog["datasets"]["serp_items"]["row_count"] == 1
+    assert catalog["datasets"]["pages"]["row_count"] == 1
+    assert catalog["datasets"]["passages"]["row_count"] == 2
+    assert catalog["datasets"]["entities"]["row_count"] == 2
+    assert catalog["datasets"]["similarity_scores"]["row_count"] == 1
 
     keywords_dir = output_dir / "parquet" / "keywords"
     pages_dir = output_dir / "parquet" / "pages"
@@ -105,8 +105,8 @@ def test_normalize_run_materializes_curated_tables_from_raw_responses(
     assert any(row["bge_raw_score"] == 0.98 for row in scores)
 
     run_json = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
-    assert run_json["catalog"]["datasets"]["keywords"]["row_count"] == 25
-    assert run_json["catalog"]["datasets"]["similarity_scores"]["row_count"] == 25
+    assert run_json["catalog"]["datasets"]["keywords"]["row_count"] == 1
+    assert run_json["catalog"]["datasets"]["similarity_scores"]["row_count"] == 1
 
 
 def test_normalize_run_preserves_run_json_page_similarity_scores(
@@ -161,7 +161,7 @@ def test_normalize_run_does_not_load_raw_rows_eagerly(
 
     catalog = normalize_run(output_dir)
 
-    assert catalog["datasets"]["keywords"]["row_count"] == 25
+    assert catalog["datasets"]["keywords"]["row_count"] == 1
 
 
 def test_normalize_run_stores_raw_html_when_present(
@@ -292,6 +292,137 @@ def test_normalize_run_stores_raw_html_when_present(
         row["page_id"] == structured_field["page_id"] and row["text"] == ""
         for row in page_rows
     )
+
+
+def test_normalize_run_deduplicates_repeated_page_text_urls(
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    raw_responses_dir = output_dir / "parquet" / "raw_responses"
+    (raw_responses_dir / "endpoint=keyword_expansion").mkdir(parents=True)
+    (raw_responses_dir / "endpoint=serp").mkdir(parents=True)
+    (raw_responses_dir / "endpoint=page_text").mkdir(parents=True)
+
+    run_payload = {
+        "run_id": "artifacts",
+        "config": {
+            "seed": "technical seo",
+            "depth": 1,
+            "dry_run": True,
+        },
+        "catalog": {},
+        "page_similarity": [
+            _page_similarity_entry(
+                target_keyword="technical seo",
+                url="https://example.com/page",
+                bge=0.9,
+                gemini_doc_retrieval=0.9,
+                gemini_semantic_similarity=0.9,
+            )
+        ],
+    }
+    (output_dir / "run.json").write_text(
+        json.dumps(run_payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    keyword_response_body = fixture_keyword_expansion_response("technical seo")
+    serp_response_body = {
+        "tasks": [
+            {
+                "keyword": "technical seo",
+                "result": [
+                    {
+                        "items": [
+                            {
+                                "type": "organic",
+                                "rank_group": 1,
+                                "url": "https://example.com/page",
+                                "title": "Example Page",
+                                "description": "First duplicate result.",
+                            },
+                            {
+                                "type": "organic",
+                                "rank_group": 2,
+                                "url": "https://example.com/page",
+                                "title": "Example Page",
+                                "description": "Second duplicate result.",
+                            },
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+    page_text_response_body = {
+        "tasks": [
+            {
+                "data": {"url": "https://example.com/page"},
+                "result": [
+                    {
+                        "url": "https://example.com/page",
+                        "title": "Example Page",
+                        "text": """
+                            Technical SEO helps crawlers discover pages.
+
+                            Internal links and index controls make findings actionable.
+                        """,
+                        "raw_html": "<html><body><main>Example Page</main></body></html>",
+                    }
+                ],
+            }
+        ]
+    }
+
+    pl.DataFrame(
+        [
+            {
+                "run_id": "artifacts",
+                "response_id": "kw-resp-1",
+                "target_keyword": "technical seo",
+                "response_body_bytes": json.dumps(keyword_response_body).encode("utf-8"),
+            }
+        ]
+    ).write_parquet(raw_responses_dir / "endpoint=keyword_expansion" / "part-0.parquet")
+    pl.DataFrame(
+        [
+            {
+                "run_id": "artifacts",
+                "response_id": "serp-resp-1",
+                "target_keyword": "technical seo",
+                "response_body_bytes": json.dumps(serp_response_body).encode("utf-8"),
+            }
+        ]
+    ).write_parquet(raw_responses_dir / "endpoint=serp" / "part-0.parquet")
+    pl.DataFrame(
+        [
+            {
+                "run_id": "artifacts",
+                "response_id": "page-resp-1",
+                "target_keyword": "technical seo",
+                "response_body_bytes": json.dumps(page_text_response_body).encode("utf-8"),
+            },
+            {
+                "run_id": "artifacts",
+                "response_id": "page-resp-2",
+                "target_keyword": "technical seo",
+                "response_body_bytes": json.dumps(page_text_response_body).encode("utf-8"),
+            },
+        ]
+    ).write_parquet(raw_responses_dir / "endpoint=page_text" / "part-0.parquet")
+
+    catalog = normalize_run(output_dir)
+
+    assert catalog["datasets"]["pages"]["row_count"] == 1
+    assert catalog["datasets"]["passages"]["row_count"] == 2
+    assert catalog["datasets"]["similarity_scores"]["row_count"] == 1
+
+    pages = ds.dataset(output_dir / "parquet" / "pages", format="parquet").to_table().to_pylist()
+    passages = ds.dataset(output_dir / "parquet" / "passages", format="parquet").to_table().to_pylist()
+
+    assert len(pages) == 1
+    assert len(passages) == 2
+    assert {row["page_id"] for row in passages} == {pages[0]["page_id"]}
 
 
 def test_build_page_content_fields_frame_decodes_structured_fields() -> None:

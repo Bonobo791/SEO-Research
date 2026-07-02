@@ -14,7 +14,7 @@ Pytest configuration and verification contract for SEO-Research.
   interpreter
 - Lint / type-check / build / coverage: not configured
 - Expected test duration: fast (< 1s)
-- **Current verification status:** 170 tests collected; 169 passing, 1 skipped
+- **Current verification status:** 175 tests collected; 175 passing
 
 ## Active Verification Command
 
@@ -51,6 +51,7 @@ placeholders only.
 | Test file | What it verifies |
 |-----------|------------------|
 | `test_cli_run.py` | CLI writes grouped per-keyword artifacts, including BGE, Gemini Doc Retrieval, and Gemini Semantic Similarity rows; run-scoped `raw_responses` Parquet + `run.json` catalog metadata; offline TextRazor include/skip; explicit live-provider gates; opt-in live Gemini, BGE, and TextRazor orchestration |
+| `test_run_progress.py` | `seo-rank run` stderr progress: run phases, per-keyword substeps, progress bar, artifact-write logs |
 | `test_cli_surfaces.py` | Phase 4.5 storage CLI: subcommand parser wiring, `normalize` / `build-features` / `analyze` / `replay` dispatch, missing feature-mart backfill on `analyze`, `run --stored-run` routing, exit code `2` on storage errors and unknown keyword/response |
 | `test_run_normalize.py` | Stored `raw_responses` normalize into curated Parquet tables (including `similarity_scores` copied from `run.json` `page_similarity`, `page_content_fields`) via lazy scan + batch UDFs; refresh the run catalog |
 | `test_data_scans_validate.py` | Raw-response scans use `pl.scan_parquet()`, lazy curated frames are built, schema-only validation rejects missing columns, and materialized row-rule checks stay off the lazy edge |
@@ -62,7 +63,7 @@ placeholders only.
 | `test_stats_diagnostics.py` | Pooled OLS diagnostics, small-sample Shapiro handling, diagnostic artifact emission on passing panels, and skipped-backend diagnostics behavior |
 | `test_stats_regression.py` | Pooled baseline and per-backend feature regressions with keyword-clustered SEs, effect-size translation, two-way-cluster sensitivity, and regression artifact emission on passing panels |
 | `test_round_trip.py` | Dedicated Parquet lake write → normalize → build-features → analyze round-trip regression sweep on real Parquet artifacts; validates `run.json` updates and keyword-filtered `analyze` output |
-| `test_keyword_expansion.py` | 25-keyword cap, deduplication, raw provider payload |
+| `test_keyword_expansion.py` | 1-keyword default, deduplication, raw provider payload |
 | `test_serp_normalization.py` | Organic-only SERP rows, depth cap |
 | `test_env.py` | `.env` discovery, parsing, and override of shell exports |
 | `test_bge_reranker.py` | Live BGE GPU gate, pinned model loading, tokenizer compatibility shim, and batched score shaping |

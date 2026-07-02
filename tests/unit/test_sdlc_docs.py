@@ -47,6 +47,9 @@ def test_readme_documents_cli_capabilities() -> None:
 
     assert "What works today" in readme
     assert 'seo-rank run --seed "technical seo" --dry-run' in readme
+    assert "[seo-rank]" in readme
+    assert "--keyword-limit" in readme
+    assert "seo-rank normalize --run" in readme
     assert "stats_diagnostics.json" in readme
     assert "runs/{run_id}/" in readme
     assert "--live-bge" in readme
@@ -123,8 +126,8 @@ def test_phase_45_slice_9_regression_sweep_marks_mart_sink_docs_as_shipped() -> 
     assert "Phase 4.5 Slice 9 shipped" in roadmap
     assert "Phase 4.5 Slice 10 shipped" in roadmap
     assert "Phase 4.5 signed off" in roadmap
-    assert "170 tests" in architecture
-    assert "170 tests collected; 169 passing, 1 skipped" in testing
+    assert "175 tests" in architecture
+    assert "175 tests collected; 175 passing" in testing
     assert "sink feature marts lazily with Parquet statistics" in testing
 
 

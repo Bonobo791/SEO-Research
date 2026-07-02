@@ -36,10 +36,10 @@ def test_build_feature_marts_materializes_lazy_joins_from_curated_tables(
     normalize_run(output_dir)
     catalog = build_feature_marts(output_dir)
 
-    assert catalog["datasets"]["keyword_serp"]["row_count"] == 25
-    assert catalog["datasets"]["page_features"]["row_count"] == 25
-    assert catalog["datasets"]["passage_features"]["row_count"] == 74
-    assert catalog["datasets"]["domain_features"]["row_count"] == 25
+    assert catalog["datasets"]["keyword_serp"]["row_count"] == 1
+    assert catalog["datasets"]["page_features"]["row_count"] == 1
+    assert catalog["datasets"]["passage_features"]["row_count"] == 2
+    assert catalog["datasets"]["domain_features"]["row_count"] == 1
 
     keyword_serp = ds.dataset(
         output_dir / "parquet" / "keyword_serp",
@@ -54,8 +54,8 @@ def test_build_feature_marts_materializes_lazy_joins_from_curated_tables(
     assert any(row["domain"] == "example.com" for row in domain_features)
 
     run_json = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
-    assert run_json["catalog"]["datasets"]["keyword_serp"]["row_count"] == 25
-    assert run_json["catalog"]["datasets"]["domain_features"]["row_count"] == 25
+    assert run_json["catalog"]["datasets"]["keyword_serp"]["row_count"] == 1
+    assert run_json["catalog"]["datasets"]["domain_features"]["row_count"] == 1
 
 
 def test_build_feature_marts_validates_each_feature_frame_before_sinking(

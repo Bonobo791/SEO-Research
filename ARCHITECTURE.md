@@ -84,7 +84,7 @@ The repository contains an **offline-verifiable CLI scaffold** (Phase 1 shipped)
 - **CLI:** `seo-rank run` writes `run.json` and `report.md` from fixtures (no
   network calls) or gated live providers; Phase 4.5 adds `normalize`,
   `build-features`, `analyze`, `replay`, and `run --stored-run` (Slice 6 shipped)
-- **Tests:** 170 tests under `tests/`; gate: `python -m pytest`; Phase 4.5 Slice 7
+- **Tests:** 175 tests under `tests/`; gate: `python -m pytest`; Phase 4.5 Slice 7
   shipped the round-trip regression sweep in `test_sdlc_docs.py`
 - **Product docs:** `ARCHITECTURE.md`, `GOALS.md`, `ROADMAP.md`, `README.md`,
   `TESTING.md`
@@ -100,8 +100,9 @@ CLI wiring continue in slices 7–10.
 ## Key Product Components
 
 - **CLI (shipped):** `seo-rank run` — seed keyword, location, language, device,
-  depth, output directory, model name, JavaScript parsing, `--dry-run`,
-  `--skip-textrazor`.
+  depth, `--keyword-limit`, output directory, model name, `--dry-run`,
+  `--skip-textrazor`, stderr progress logging (`progress.py`). The removed
+  `--javascript-parsing` flag is no longer accepted.
 - **Provider fixtures + normalizers (shipped):** DataForSEO-shaped keyword/SERP/
   page-text fixtures; TextRazor entity fixtures (`dataforseo.py`, `textrazor.py`).
 - **Provider request boundaries (shipped):** DataForSEO keyword expansion,
@@ -130,8 +131,9 @@ CLI wiring continue in slices 7–10.
   Statistical Analysis](#planned-per-run-statistical-analysis).
 - **Reporters (shipped):** JSON + Markdown under the selected run root;
   `seo-rank run` defaults to `runs/{run_id}/` when `--output-dir` is omitted
-  and still supports explicit overrides. Phase 6 expands report narrative
-  sections.
+  and still supports explicit overrides. Long runs emit `[seo-rank]` progress on
+  stderr (run phase, per-keyword steps, progress bar, artifact writes). Phase 6
+  expands report narrative sections.
 - **Storage (planned, Phase 4.5):** run-scoped Parquet lake with three processing
   layers — see [Run-scoped Parquet lake](#run-scoped-parquet-lake-phase-45) and
   [Polars data layer](#polars-data-layer-phase-45).
@@ -317,18 +319,24 @@ Built by `marts.py` when Phase 5 analysis needs a single panel. One row per
 ### CLI commands (Phase 4.5)
 
 ```text
+seo-rank run --seed "..." [--dry-run] [--keyword-limit N] [--stored-run PATH]
 seo-rank normalize --run RUN_ID
 seo-rank build-features --run RUN_ID
-seo-rank analyze --run RUN_ID --keyword "..."
+seo-rank analyze --run RUN_ID [--keyword "..."]
 seo-rank replay --run RUN_ID --response-id ...
 ```
 
 | Command | Action |
 |---------|--------|
+| `run` | Provider/fixture fetch, similarity scoring, `run.json` + `report.md` + `raw_responses`; optional `--stored-run` re-materializes marts |
 | `normalize` | `raw_responses` → curated tables |
 | `build-features` | curated → feature marts |
-| `analyze` | feature marts → `analysis_mart` (+ Phase 5 stats when shipped) |
+| `analyze` | feature marts → `analysis_mart` (+ Phase 5 stats when not dry-run) |
 | `replay` | re-parse one `response_id` from `raw_responses` (audit/re-normalize) |
+
+`run` defaults to `--keyword-limit 1` for fast fixture smoke; use
+`--keyword-limit 25` for the full offline cluster used in lake tests. Progress
+logs stream to stderr via `RunProgress` in `progress.py`.
 
 ## Polars data layer (Phase 4.5)
 

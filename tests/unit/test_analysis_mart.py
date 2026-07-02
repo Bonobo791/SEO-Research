@@ -35,20 +35,20 @@ def test_build_analysis_mart_materializes_one_row_per_serp_url(
     build_feature_marts(output_dir)
     catalog = build_analysis_mart(output_dir)
 
-    assert catalog["datasets"]["analysis_mart"]["row_count"] == 25
+    assert catalog["datasets"]["analysis_mart"]["row_count"] == 1
 
     analysis_mart = ds.dataset(
         output_dir / "parquet" / "analysis_mart",
         format="parquet",
     ).to_table().to_pylist()
 
-    assert len(analysis_mart) == 25
+    assert len(analysis_mart) == 1
     assert all(row["serp_rank"] == 1 for row in analysis_mart)
     assert any(row["target_keyword"] == "technical seo" for row in analysis_mart)
     assert any(row["page_text_length"] > 0 for row in analysis_mart)
 
     run_json = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
-    assert run_json["catalog"]["datasets"]["analysis_mart"]["row_count"] == 25
+    assert run_json["catalog"]["datasets"]["analysis_mart"]["row_count"] == 1
 
 
 def test_build_analysis_mart_validates_the_analysis_frame_before_sinking(

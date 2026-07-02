@@ -131,15 +131,21 @@ def test_run_stored_run_replays_existing_tree_without_provider_calls(
 
     monkeypatch.setattr(
         "seo_rank.cli.replay_stored_run",
-        lambda path, config: calls.append(("replay", path, config.output_dir)),
+        lambda path, config, *, progress=None: calls.append(
+            ("replay", path, config.output_dir)
+        ),
     )
     monkeypatch.setattr(
         "seo_rank.cli.write_offline_artifacts",
-        lambda config: (_ for _ in ()).throw(AssertionError("offline run should not execute")),
+        lambda config, *, progress=None: (_ for _ in ()).throw(
+            AssertionError("offline run should not execute")
+        ),
     )
     monkeypatch.setattr(
         "seo_rank.cli.write_live_artifacts",
-        lambda config, env: (_ for _ in ()).throw(AssertionError("live run should not execute")),
+        lambda config, env, *, progress=None: (_ for _ in ()).throw(
+            AssertionError("live run should not execute")
+        ),
     )
 
     exit_code = main(
