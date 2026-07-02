@@ -123,8 +123,8 @@ def test_phase_45_slice_9_regression_sweep_marks_mart_sink_docs_as_shipped() -> 
     assert "Phase 4.5 Slice 9 shipped" in roadmap
     assert "Phase 4.5 Slice 10 shipped" in roadmap
     assert "Phase 4.5 signed off" in roadmap
-    assert "169 tests" in architecture
-    assert "169 tests collected; 168 passing, 1 skipped" in testing
+    assert "170 tests" in architecture
+    assert "170 tests collected; 169 passing, 1 skipped" in testing
     assert "sink feature marts lazily with Parquet statistics" in testing
 
 
@@ -184,3 +184,21 @@ def test_phase_5_slice_5_ships_pooled_regression_secondary_path() -> None:
     assert "pooled regression summaries with" in architecture
     assert "test_stats_regression.py" in testing
     assert "Phase 5 slices 1–6" in testing
+
+
+def test_phase_5_slice_6_ships_pooled_ols_diagnostics() -> None:
+    goals = (ROOT / "GOALS.md").read_text(encoding="utf-8")
+    roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
+    architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
+    testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "**[x] Slice 6 — Pooled OLS diagnostics**" in goals
+    assert "| 6 | Pooled OLS diagnostics | Stats | Shipped (S5-11 open) |" in goals
+    assert "S5-11" in goals
+    assert "Phase 5 Slice 6 shipped" in roadmap
+    assert "**[x] Slice 6 — Pooled OLS diagnostics**" in roadmap
+    assert "stats_diagnostics.json" in architecture
+    assert "page_similarity" in architecture
+    assert "test_stats_diagnostics.py" in testing
+    assert "stats_diagnostics.json" in readme

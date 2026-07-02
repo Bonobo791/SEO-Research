@@ -418,13 +418,26 @@ Spearman/BH, artifact writers, and `seo-rank analyze` wiring. None block Slice 5
 | S5-01 | Update `test_phase_45_slice_9_regression_sweep_marks_mart_sink_docs_as_shipped` (and keep `ARCHITECTURE.md` / `TESTING.md` in sync) when the unit suite grows — currently asserts **145** tests while docs say **153** collected / **152** passing / **1** skipped; full `pytest tests/unit` fails until reconciled (extends S476-22) | 5 docs | required | open |
 | S5-02 | Secondary-backend Spearman: `prepare_analysis_panel()` filters one BGE-complete panel for all backends; `GOALS.md` Slice 3 calls for per-backend null checks on secondary paths — filter from `prepared_mart` per backend in `summarize_backend_spearman()` (or document that v1 intentionally shares the BGE-complete panel) | 5 Slice 4 | required | open |
 | S5-03 | Read guardrail thresholds and relations from `analysis_spec.v1.yaml` (`guardrails.hard_fail` / `guardrails.warn`) in `_evaluate_guardrails()` instead of hardcoding `10`, `0.90`, and variance thresholds | 5 Slice 3 | nice-to-have | open |
-| S5-04 | Implement or explicitly defer `influential_rows_rate` warn guardrail from the spec — evaluate in Slice 6 when Cook's D influence diagnostics land; until then emit a `limitations` or guardrail stub so artifacts match the spec table | 5 Slice 6 | nice-to-have | open |
+| S5-04 | `influential_rows_rate` warn guardrail deferred to Slice 8 — Slice 6 reports Cook's D / influence counts in `stats_diagnostics.json`; panel guardrail evaluation still pending | 5 Slice 8 | nice-to-have | open |
 | S5-05 | Trim `stats_summary.json` payload: move per-keyword `keyword_tests` arrays to `stats_diagnostics.json` (or a sibling artifact) and keep summary aggregates only (median ρ, IQR, fraction same-sign, BH q-values) per `PHASE5-STATS-PLAN-REVIEW.md` | 5 Slice 9 | nice-to-have | open |
 | S5-06 | Deduplicate backend→column maps: `SIMILARITY_RATE_COLUMNS` (`panel.py`) and `BACKEND_SCORE_COLUMNS` (`spearman.py`) are identical — single shared constant in `stats/` | 5 Slice 4 | nice-to-have | open |
 | S5-07 | Fix stale `ARCHITECTURE.md` wording that still calls `panel.py` / `spearman.py` “placeholder modules” after Slices 3–4 shipped; update `README.md` § `seo-rank analyze` (still says stats are not implemented in the CLI) | 5 docs | nice-to-have | open |
 | S5-08 | Add CLI test: `run_manifest_is_dry_run()` causes `analyze` to skip `run_phase5_stats` and exit `0` without writing `stats/` (dry-run fixture contract in `TESTING.md`) | 5 Slice 9 | nice-to-have | open |
 | S5-09 | Add Spearman/BH edge-case tests: empty panel, keywords skipped when paired `n < 2` (silent K reduction vs guardrail keyword count), single-keyword panel BH skip | 5 Slice 4 | nice-to-have | open |
 | S5-10 | Read `bh_when_keyword_count_gte` and `bh_q` from `AnalysisSpec` instead of literal `10` / implicit q in `summarize_backend_spearman()` | 5 Slice 4 | nice-to-have | open |
+
+---
+
+## Phase 5 — Slice 6 (live-run blocker)
+
+Blocks end-to-end `seo-rank run --live-providers` validation of pooled OLS
+diagnostics on real DataForSEO crawls. Relates to Phase 4.77 schema contracts
+(`dataforseo.py`); top-level `tasks[].result` type check runs before
+`_validate_content_parsing_response` can skip non-list results.
+
+| ID | Fix | Phase | Priority | Status |
+| --- | --- | --- | --- | --- |
+| S5-11 | Accept `page_text` responses where `tasks[].result` is `null` (task-level crawl failure) instead of raising `DataForSEO page_text response schema drift at tasks[0].result: expected list, got NoneType`. Align `DATAFORSEO_RESPONSE_SCHEMAS` `tasks[].result` with `_validate_content_parsing_response` (already `continue`s when `result` is not a list); CLI live path should skip the URL and continue the run. Repro: `seo-rank run --seed "seo company columbus" --live-providers --live-gemini --live-bge`. Add unit test for `result: null` pass-through and CLI regression that run does not abort on one failed page_text task | 5 Slice 6 | required | open |
 
 ---
 

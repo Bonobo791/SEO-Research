@@ -14,7 +14,7 @@ Pytest configuration and verification contract for SEO-Research.
   interpreter
 - Lint / type-check / build / coverage: not configured
 - Expected test duration: fast (< 1s)
-- **Current verification status:** 169 tests collected; 168 passing, 1 skipped
+- **Current verification status:** 170 tests collected; 169 passing, 1 skipped
 
 ## Active Verification Command
 
@@ -52,12 +52,12 @@ placeholders only.
 |-----------|------------------|
 | `test_cli_run.py` | CLI writes grouped per-keyword artifacts, including BGE, Gemini Doc Retrieval, and Gemini Semantic Similarity rows; run-scoped `raw_responses` Parquet + `run.json` catalog metadata; offline TextRazor include/skip; explicit live-provider gates; opt-in live Gemini, BGE, and TextRazor orchestration |
 | `test_cli_surfaces.py` | Phase 4.5 storage CLI: subcommand parser wiring, `normalize` / `build-features` / `analyze` / `replay` dispatch, missing feature-mart backfill on `analyze`, `run --stored-run` routing, exit code `2` on storage errors and unknown keyword/response |
-| `test_run_normalize.py` | Stored `raw_responses` normalize into curated Parquet tables, including `page_content_fields`, via lazy scan + batch UDFs (no eager `load_raw_response_rows`); refresh the run catalog |
+| `test_run_normalize.py` | Stored `raw_responses` normalize into curated Parquet tables (including `similarity_scores` copied from `run.json` `page_similarity`, `page_content_fields`) via lazy scan + batch UDFs; refresh the run catalog |
 | `test_data_scans_validate.py` | Raw-response scans use `pl.scan_parquet()`, lazy curated frames are built, schema-only validation rejects missing columns, and materialized row-rule checks stay off the lazy edge |
 | `test_data_marts.py` | Analysis mart lazy join lives in `seo_rank.data.marts` and preserves the feature-mart contract |
 | `test_feature_marts.py` | Feature marts materialize lazy joins, validate before sink, sink feature marts lazily with Parquet statistics, audit the written parquet row rules, and refresh the run catalog |
 | `test_analysis_mart.py` | Feature marts materialize the lazy analysis mart, preserve unmatched SERP rows with nullable feature columns, validate before sink, audit the written parquet row rules, and refresh the run catalog |
-| `test_stats_panel.py` | Guardrail evaluation, panel grain filtering, hard-fail artifact writing, and minimal stats report output |
+| `test_stats_panel.py` | Guardrail evaluation (SERP-rank variance hard-fail, similarity-variance warn), panel grain filtering, full vs minimal stats artifact writing on pass/fail |
 | `test_stats_spearman.py` | Benjamini-Hochberg adjustment, backend Spearman summaries, and Spearman artifact emission on passing panels |
 | `test_stats_diagnostics.py` | Pooled OLS diagnostics, small-sample Shapiro handling, diagnostic artifact emission on passing panels, and skipped-backend diagnostics behavior |
 | `test_stats_regression.py` | Pooled baseline and per-backend feature regressions with keyword-clustered SEs, effect-size translation, two-way-cluster sensitivity, and regression artifact emission on passing panels |
@@ -113,7 +113,8 @@ exist.
   `artifacts`.
 - **Guardrail evaluation and hard-fail artifacts** —
   `tests/unit/test_stats_panel.py` covers top-20 filtering, primary-backend
-  null dropping, guardrail statuses, and minimal stats summary/report output.
+  null dropping, SERP-rank variance hard-fail, similarity-variance warn, full
+  stats artifacts on pass, and minimal summary/report on hard-fail.
 - **Spearman primary path + BH** — `tests/unit/test_stats_spearman.py` covers
   BH adjustment, keyword-level Spearman summaries, underpowered BH skipping,
   and stats artifact emission on passing panels.
@@ -129,13 +130,13 @@ exist.
 
 ## Planned tests (not yet in suite) — Phase 5 active scope
 
-See `GOALS.md` and `ROADMAP.md` § Phase 5 slices 5–14.
+See `GOALS.md` and `ROADMAP.md` § Phase 5 slices 7–14.
 
 - Feature marts and `analysis_mart` join keys (`run_id`, `target_keyword_id`,
   `canonical_url_hash`, `response_id`, `passage_id`)
 - Passage / domain similarity scopes (feature marts; Phase 5.5 scoring)
 
-### Phase 5 — statistical analysis (see `ROADMAP.md` slices 5–14)
+### Phase 5 — statistical analysis (see `ROADMAP.md` slices 7–14)
 
 - **Golden `analysis_mart` fixture** — synthetic panel with known Spearman ρ and
   pooled slope per backend; tolerance bands for regression coefficients,

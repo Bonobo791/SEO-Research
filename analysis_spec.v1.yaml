@@ -52,6 +52,8 @@ guardrails:
     - name: similarity_variance_within_keyword
       relation: gt
       threshold: 0
+    # Deferred to Slice 8: influence counts land in stats_diagnostics.json today;
+    # panel guardrail evaluation wires up with influence robustness refit.
     - name: influential_rows_rate
       relation: lte
       threshold: 0.05

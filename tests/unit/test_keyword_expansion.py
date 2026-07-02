@@ -11,6 +11,7 @@ def test_offline_payload_expands_seed_keywords_from_capped_provider_fixture(tmp_
             language="en",
             device="desktop",
             depth=3,
+            keyword_limit=25,
             output_dir=tmp_path,
             model_name="fixture-similarity-v1",
             dry_run=True,

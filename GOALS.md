@@ -39,7 +39,7 @@ secondary comparisons in fixed order.
 | 3 | Guardrails & panel prep | Stats | Shipped | Hard-fail / warn gates on `analysis_mart` |
 | 4 | Spearman primary path | Stats | Shipped | Per-keyword ρ + BH per backend |
 | 5 | Pooled regression (secondary) | Stats | Shipped | Keyword FE + clustered SEs |
-| 6 | Pooled OLS diagnostics | Stats | Shipped | RESET, BP, Cook's D, influence flags |
+| 6 | Pooled OLS diagnostics | Stats | Shipped (S5-11 open) | RESET, BP, Cook's D, influence flags |
 | 7 | Multivariate sensitivity | Stats | Open | Joint model + VIF drop order |
 | 8 | Robustness appendix (influence) | Stats | Open | Refit excluding influential rows |
 | 9 | Stats artifacts & CLI | Stats | Open | `stats_summary.json`, `analyze` wiring |
@@ -49,7 +49,8 @@ secondary comparisons in fixed order.
 | 13 | Relative similarity sensitivity | Stats | Open | Robustness appendix on rank/pct/z |
 | 14 | Relative ranks in CLI & fixtures | CLI | Open | Keyword report + golden invariants |
 
-**Remaining to close Phase 5:** slices 7–14 (see `ROADMAP.md`).
+**Remaining to close Phase 5:** slices 7–14 (see `ROADMAP.md`). Slice 6 live E2E:
+**S5-11** in `FIXUPS.md` (`page_text` `tasks[].result: null` schema drift).
 
 #### Dev slices
 
@@ -72,10 +73,12 @@ secondary comparisons in fixed order.
 3. **[x] Slice 3 — Guardrails & panel prep**
    - Load `runs/{run_id}/parquet/analysis_mart/part-*.parquet`.
    - Grain: `target_keyword_id × canonical_url_hash`; filter `serp_rank` 1–20;
-     drop rows with null `bge_normalized_score` for primary path (per-backend
-     null checks for secondary backends).
-   - Evaluate guardrail table; emit `guardrails: {name, status, value, threshold}`
-     in `stats_summary.json`.
+     drop rows with null `bge_normalized_score` for the primary Spearman/regression
+     panel (secondary backends may be null on individual rows).
+   - Evaluate guardrail table from `analysis_spec.v1.yaml`: hard-fail when
+     within-keyword `serp_rank` variance is zero; warn when within-keyword
+     similarity variance is zero for any backend. Emit
+     `guardrails: {name, status, value, threshold}` in `stats_summary.json`.
    - **Hard-fail behavior:** write guardrails + limitations JSON + minimal
      `stats_report.md`; skip BH, pooled inference, actionable flag.
    - Document duplicate-URL-across-keywords handling (no dedupe in v1; cluster
@@ -109,6 +112,13 @@ secondary comparisons in fixed order.
      diagnostics JSON when n is small (informational, not confirmatory).
    - **Skip for v1 primary path:** LOWESS / CCPR plot files (flags only unless
      debug mode); diagnostic-driven spec changes stay out of confirmatory path.
+   - **[ ] S5-11 — Live `page_text` null `result`:** DataForSEO returns
+     `tasks[].result: null` on failed crawls; top-level schema validation raises
+     `expected list, got NoneType` and aborts `seo-rank run --live-providers`.
+     Accept or skip null `result`, align `DATAFORSEO_RESPONSE_SCHEMAS` with
+     `_validate_content_parsing_response`, add unit + CLI tests. Repro:
+     `seo-rank run --seed "seo company columbus" --live-providers --live-gemini
+     --live-bge`. Tracked in `FIXUPS.md` **S5-11**.
 
 7. **[ ] Slice 7 — Multivariate sensitivity**
    - Joint model: all three `*_normalized_score` + length + keyword FE.
@@ -123,7 +133,8 @@ secondary comparisons in fixed order.
      4/n; optional WLS/RLM noted in appendix only.
    - Compare confirmatory vs sensitivity coefficients in
      `stats_diagnostics.json` (`influence_sensitivity` block).
-   - Report % influential rows; warn when > 5% (guardrail table).
+   - Wire `influential_rows_rate` warn guardrail from pooled influence counts
+     (spec threshold 5%; deferred from Slice 6).
 
 9. **[ ] Slice 9 — Stats artifacts & CLI**
    - `stats_summary.json`: estimand version, guardrails, per-backend ρ, BH
@@ -255,6 +266,7 @@ secondary comparisons in fixed order.
 | Pooled regression with keyword-clustered SEs only in primary output | 5 | Shipped |
 | Effect-size translation + `actionable_association` rule | 5, 9 | Open |
 | Pooled diagnostics + influence % in diagnostics JSON | 6, 8 | Open |
+| `page_text` accepts `tasks[].result: null`; live run continues (S5-11) | 6 | Open |
 | Multivariate sensitivity with VIF drop order | 7 | Open |
 | Limitations in JSON and Markdown | 9 | Open |
 | `seo-rank analyze` exit code + dry-run skip | 9 | Open |

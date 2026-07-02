@@ -39,9 +39,9 @@ robustness appendix only.
 
 **BH policy (v1):** one **two-sided Spearman correlation test** per keyword per
 backend; family = all keywords for that backend (size K). Apply BH at q = 0.05
-**within each backend family** only when **K ≥ 10** (same as keyword-count
-guardrail); below K, report raw p-values with an underpowered warning and skip
-BH. Never BH-adjust diagnostic p-values (RESET, Breusch–Pagan, etc.).
+**within each backend family** only when **K ≥ 10** keywords in the panel; below
+K, report raw p-values with an underpowered warning and skip BH. Never
+BH-adjust diagnostic p-values (RESET, Breusch–Pagan, etc.).
 
 **Actionable association (v1, tune after golden fixtures):** set
 `actionable_association: true` in `stats_summary.json` only when **all** hold
@@ -59,7 +59,7 @@ and limitations. On **warn**, run full stats but surface warnings prominently.
 | --------- | ----------------- | -------- |
 | Within-keyword variance in `serp_rank` | > 0 per keyword with data | hard-fail |
 | Within-keyword variance in each similarity column | > 0 per keyword with data | warn |
-| Influential rows (Cook's D > 4/n on pooled BGE model) | report %; warn if > 5% | warn |
+| Influential rows (Cook's D > 4/n on pooled BGE model) | report %; warn if > 5% | warn (deferred — counts in `stats_diagnostics.json` today; guardrail evaluation in Slice 8) |
 
 **Outputs:** `runs/{run_id}/stats/stats_summary.json` (includes `limitations`
 object), `stats_diagnostics.json`, `stats_report.md`. Link from existing
@@ -100,10 +100,12 @@ confirmatory keyword holdout (Phase 5.1).
 3. **[x] Slice 3 — Guardrails & panel prep**
    - Load `runs/{run_id}/parquet/analysis_mart/part-*.parquet`.
    - Grain: `target_keyword_id × canonical_url_hash`; filter `serp_rank` 1–20;
-     drop rows with null `bge_normalized_score` for primary path (per-backend
-     null checks for secondary backends).
-   - Evaluate guardrail table; emit `guardrails: {name, status, value, threshold}`
-     in `stats_summary.json`.
+     drop rows with null `bge_normalized_score` for the primary Spearman/regression
+     panel (secondary backends may be null on individual rows).
+   - Evaluate guardrail table from `analysis_spec.v1.yaml`: hard-fail when
+     within-keyword `serp_rank` variance is zero; warn when within-keyword
+     similarity variance is zero for any backend. Emit
+     `guardrails: {name, status, value, threshold}` in `stats_summary.json`.
    - **Hard-fail behavior:** write guardrails + limitations JSON + minimal
      `stats_report.md`; skip BH, pooled inference, actionable flag.
    - Document duplicate-URL-across-keywords handling (no dedupe in v1; cluster
@@ -128,7 +130,7 @@ confirmatory keyword holdout (Phase 5.1).
    - **Sensitivity (robustness appendix):** refit with two-way cluster
      (keyword × `canonical_url_hash`) when URL repeats exist.
 
-6. **[ ] Slice 6 — Pooled OLS diagnostics**
+6. **[x] Slice 6 — Pooled OLS diagnostics**
    - On **pooled** feature model per backend only (not per-keyword n ≈ 20).
    - **Run:** residuals vs fitted, RESET, Breusch–Pagan (→ HC3 SEs when
      flagged), Cook's D > 4/n, leverage / studentized residuals / DFFITS /
@@ -137,6 +139,9 @@ confirmatory keyword holdout (Phase 5.1).
      diagnostics JSON when n is small (informational, not confirmatory).
    - **Skip for v1 primary path:** LOWESS / CCPR plot files (flags only unless
      debug mode); diagnostic-driven spec changes stay out of confirmatory path.
+   - **Remaining (live run):** `FIXUPS.md` **S5-11** — `page_text` schema
+     rejects `tasks[].result: null` from DataForSEO; blocks
+     `--live-providers` E2E sign-off.
 
 7. **[ ] Slice 7 — Multivariate sensitivity**
    - Joint model: all three `*_normalized_score` + length + keyword FE.
@@ -151,7 +156,8 @@ confirmatory keyword holdout (Phase 5.1).
      4/n; optional WLS/RLM noted in appendix only.
    - Compare confirmatory vs sensitivity coefficients in
      `stats_diagnostics.json` (`influence_sensitivity` block).
-   - Report % influential rows; warn when > 5% (guardrail table).
+   - Wire `influential_rows_rate` warn guardrail from pooled influence counts
+     (spec threshold 5%; deferred from Slice 6).
 
 9. **[ ] Slice 9 — Stats artifacts & CLI**
    - `stats_summary.json`: estimand version, guardrails, per-backend ρ, BH
@@ -442,6 +448,13 @@ their effective defaults.
   sensitivity on repeated URLs; `run_phase5_stats()` writes regression summaries
   into `stats_summary.json` and `stats_report.md`, covered by
   `tests/unit/test_stats_regression.py`.
+- **Phase 5 Slice 6 shipped:** `diagnostics.py` summarizes pooled OLS RESET,
+  Breusch–Pagan (with HC3 recommendation when flagged), Cook's D, leverage,
+  studentized residuals, DFFITS, and DFBETAs per backend; `run_phase5_stats()`
+  writes `stats_diagnostics.json` and a Diagnostics section in `stats_report.md`
+  on passing guardrails, covered by `tests/unit/test_stats_diagnostics.py`.
+  `normalize` now materializes `similarity_scores` from `run.json`
+  `page_similarity` instead of recomputing scores during curation.
 - **GOALS retargeted to Phase 4.75 (2026-06-29):** page_text curation hardening
   after stored-run normalize failed on live nested `page_content` payloads.
 - **Phase 4.75 Slice 1 shipped:** `parsed_page_text()` decodes nested DataForSEO

@@ -34,9 +34,13 @@ def compute_gemini_page_similarity_scores(
     *,
     api_key: str,
     embed_content=None,
+    on_page_progress=None,
 ) -> list[dict[str, object]]:
     if embed_content is None:
         embed_content = default_embed_content
+
+    if on_page_progress is not None:
+        on_page_progress(0, len(pages), "", "query vectors")
 
     retrieval_query_vector = to_vector(
         embed_content(
@@ -56,7 +60,8 @@ def compute_gemini_page_similarity_scores(
     )
 
     scores: list[dict[str, object]] = []
-    for page in pages:
+    page_total = len(pages)
+    for page_index, page in enumerate(pages, start=1):
         url = page.get("url")
         text = page.get("text")
         if not isinstance(url, str) or not isinstance(text, str):
@@ -65,6 +70,8 @@ def compute_gemini_page_similarity_scores(
         if not isinstance(title, str):
             title = None
 
+        if on_page_progress is not None:
+            on_page_progress(page_index, page_total, url, "doc retrieval embed")
         retrieval_document_vector = to_vector(
             embed_content(
                 prepare_document(text, title=title),
@@ -73,6 +80,8 @@ def compute_gemini_page_similarity_scores(
                 output_dimensionality=GEMINI_EMBEDDING_DIMENSIONALITY,
             )
         )
+        if on_page_progress is not None:
+            on_page_progress(page_index, page_total, url, "semantic embed")
         semantic_page_vector = to_vector(
             embed_content(
                 prepare_semantic_input(text),

@@ -84,7 +84,7 @@ The repository contains an **offline-verifiable CLI scaffold** (Phase 1 shipped)
 - **CLI:** `seo-rank run` writes `run.json` and `report.md` from fixtures (no
   network calls) or gated live providers; Phase 4.5 adds `normalize`,
   `build-features`, `analyze`, `replay`, and `run --stored-run` (Slice 6 shipped)
-- **Tests:** 169 tests under `tests/`; gate: `python -m pytest`; Phase 4.5 Slice 7
+- **Tests:** 170 tests under `tests/`; gate: `python -m pytest`; Phase 4.5 Slice 7
   shipped the round-trip regression sweep in `test_sdlc_docs.py`
 - **Product docs:** `ARCHITECTURE.md`, `GOALS.md`, `ROADMAP.md`, `README.md`,
   `TESTING.md`
@@ -236,8 +236,10 @@ for `seo-rank replay` and explicit re-normalization paths.
 
 Normalized tables derived from `raw_responses` via `normalize.py`. The write path
 scans lazily, filters by `endpoint`, and applies batch UDFs for JSON parsing,
-passage splitting, entity normalization, and per-keyword similarity scoring;
-each table collects once at sink. Every row includes join keys: `run_id`,
+passage splitting, and entity normalization; `similarity_scores` rows are copied
+from the run's authoritative `run.json` `page_similarity` list (written during
+`seo-rank run`), not recomputed during normalize. Each table collects once at
+sink. Every row includes join keys: `run_id`,
 `target_keyword_id`, `response_id`, `schema_version`, plus stable entity IDs
 (`canonical_url_hash`, `passage_id`, etc.).
 
@@ -249,7 +251,7 @@ each table collects once at sink. Every row includes join keys: `run_id`,
 | `page_content_fields` | One row per decoded `content_parsing/live` field with path metadata and stable ids |
 | `passages` | Passage splits with offsets; no duplicate full page bodies |
 | `entities` | TextRazor entity rows when present |
-| `similarity_scores` | Page-level `bge`, `gemini_doc_retrieval`, `gemini_semantic_similarity` |
+| `similarity_scores` | Page-level `bge`, `gemini_doc_retrieval`, `gemini_semantic_similarity` (sourced from `run.json` `page_similarity`) |
 
 Planned follow-on: raw HTML persistence still needs a dedicated sink path, and
 the aggregate page row remains the source for passage splitting.
@@ -355,7 +357,7 @@ src/seo_rank/stats/   # Phase 5 observational analysis (see ROADMAP.md)
 | Module | Responsibility |
 |--------|----------------|
 | `scans.py` | `scan_raw_responses(run_id)`, `scan_keywords(run_id)`, etc.; stable paths under `runs/{run_id}/parquet/` |
-| `normalize.py` | Scan `raw_responses`, filter by `endpoint`, parse `response_body_bytes` via batch UDFs (`map_batches` / `map_groups`); emit curated LazyFrames; no analytical reads of `raw_responses` elsewhere |
+| `normalize.py` | Scan `raw_responses`, filter by `endpoint`, parse `response_body_bytes` via batch UDFs (`map_batches` / `map_groups`); copy `similarity_scores` from `run.json` `page_similarity`; emit curated LazyFrames; no analytical reads of `raw_responses` elsewhere |
 | `features.py` | Build `keyword_serp`, `page_features`, `passage_features`, `domain_features` from curated scans |
 | `marts.py` | Join feature marts into `analysis_mart` at `target_keyword × SERP URL` grain |
 | `validate.py` | Schema contracts plus row-level uniqueness, null, and range audits; used before every mart write or at the sink edge |
@@ -444,8 +446,8 @@ similarity feature generation. Product review and open questions:
 
 **Grain:** one row per `target_keyword_id × canonical_url_hash` from
 `analysis_mart`; filter `serp_rank` 1–20; drop rows with null
-`bge_normalized_score` for the primary path (per-backend null rules for
-secondary backends).
+`bge_normalized_score` for the primary Spearman/regression panel (secondary
+backends may be null on individual rows).
 
 **Mart columns (absolute):** `bge_normalized_score`, `gemini_doc_retrieval_normalized_score`,
 `gemini_semantic_similarity_normalized_score`, `serp_rank`, `page_text_length`,
@@ -509,7 +511,7 @@ runs full stats:
 | --------- | ------- | -------- |
 | Within-keyword `serp_rank` variance | > 0 | hard-fail |
 | Within-keyword similarity variance | > 0 | warn |
-| Influential rows (Cook's D > 4/n) | report %; warn if > 5% | warn |
+| Influential rows (Cook's D > 4/n) | report %; warn if > 5% | warn (deferred — influence counts in `stats_diagnostics.json`; guardrail evaluation in Slice 8) |
 
 **Limitations** (required in `stats_summary.json` `limitations` object **and**
 `stats_report.md`): observational only; associations within observed top 20 only
@@ -518,7 +520,8 @@ measurement error on similarity scores.
 
 **Diagnostics (pooled feature model per backend):** RESET, Breusch–Pagan (→ HC3
 when flagged), Cook's D plus leverage / studentized residuals / DFFITS /
-DFBETAs in diagnostics JSON. Skip per-keyword normality as primary gates; skip
+DFBETAs in `stats_diagnostics.json` (Slice 6 shipped). Skip per-keyword
+normality as primary gates; pooled Shapiro is informational when n < 50. Skip
 LOWESS/CCPR file artifacts in v1 unless debug.
 
 **Module layout:** `src/seo_rank/stats/`; spec in `analysis_spec.v1.yaml`.

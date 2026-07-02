@@ -15,6 +15,7 @@ from seo_rank.data.validate import (
 )
 from seo_rank.dataforseo import (
     DATAFORSEO_RESPONSE_SCHEMAS,
+    DEFAULT_KEYWORD_LIMIT,
     decode_content_parsing_items,
     normalize_keyword_expansion,
     normalize_serp_results,
@@ -422,6 +423,7 @@ def normalize_run(run_dir: Path) -> dict[str, object]:
     assert isinstance(config, Mapping)
     seed = str(config["seed"])
     depth = int(config["depth"])
+    keyword_limit = int(config.get("keyword_limit", DEFAULT_KEYWORD_LIMIT))
     page_similarity_scores = _load_run_page_similarity_scores(run_payload)
 
     catalog: dict[str, object] = run_payload.get("catalog", {})
@@ -437,6 +439,7 @@ def normalize_run(run_dir: Path) -> dict[str, object]:
         run_id=run_id,
         seed=seed,
         depth=depth,
+        keyword_limit=keyword_limit,
         page_similarity_scores=page_similarity_scores,
     )
     for name, frame in curated_lazyframes.items():
@@ -497,6 +500,7 @@ def build_curated_lazyframes_from_raw_responses(
     run_id: str,
     seed: str,
     depth: int,
+    keyword_limit: int,
     page_similarity_scores: Mapping[str, Mapping[str, Mapping[str, object]]],
 ) -> dict[str, pl.LazyFrame]:
     keyword_responses = raw_responses.filter(
@@ -513,7 +517,12 @@ def build_curated_lazyframes_from_raw_responses(
     )
 
     keywords = keyword_responses.map_batches(
-        lambda frame: build_keywords_frame(frame, run_id=run_id, seed=seed),
+        lambda frame: build_keywords_frame(
+            frame,
+            run_id=run_id,
+            seed=seed,
+            keyword_limit=keyword_limit,
+        ),
         schema=CURATED_VALIDATION_RULES["keywords"]["expected_schema"],
     )
     serp_items = serp_responses.map_batches(
@@ -591,13 +600,19 @@ def build_curated_lazyframes_from_raw_responses(
     }
 
 
-def build_keywords_frame(frame: pl.DataFrame, *, run_id: str, seed: str) -> pl.DataFrame:
+def build_keywords_frame(
+    frame: pl.DataFrame,
+    *,
+    run_id: str,
+    seed: str,
+    keyword_limit: int = DEFAULT_KEYWORD_LIMIT,
+) -> pl.DataFrame:
     rows: list[dict[str, object]] = []
     for record in frame.to_dicts():
         response_id = str(record["response_id"])
         body = _validated_response_body(record, endpoint="keyword_expansion")
         for order, keyword in enumerate(
-            normalize_keyword_expansion(body, seed=seed),
+            normalize_keyword_expansion(body, seed=seed, limit=keyword_limit),
             start=1,
         ):
             rows.append(
