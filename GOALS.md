@@ -38,7 +38,7 @@ Plackett-Luce is deferred backlog work only and is not wired in code today.
 
 #### Progress
 
-**Slices:** 11 of 31 shipped, 20 open.
+**Slices:** 14 of 31 shipped, 1 partial, 16 open.
 
 | # | Slice | Layer | Status | Primary deliverable |
 | - | ----- | ----- | ------ | ------------------- |
@@ -52,19 +52,19 @@ Plackett-Luce is deferred backlog work only and is not wired in code today.
 | 8 | Robustness appendix (influence) | Stats | Open | Refit excluding influential rows |
 | 9 | Stats artifacts & CLI | Stats | Open | `stats_summary.json`, `analyze` wiring |
 | 10 | Golden fixtures & tests | Stats | Open | Synthetic mart + schema contracts |
-| 11 | Within-keyword rank transform | Data | Open | `data/ranks.py` rank + pct + z |
-| 12 | Analysis mart v2 columns | Data | Open | `analysis_mart.v2` + validation |
-| 13 | Relative similarity sensitivity | Stats | Open | Robustness appendix on rank/pct/z |
-| 14 | Relative ranks in CLI & fixtures | CLI | Open | Keyword report + golden invariants |
-| 15 | Plackett-Luce estimand runtime wiring | Stats | Partial | YAML block + depth `max_rank`; thresholds still hardcoded |
+| 11 | Within-keyword rank transform | Data | Phase 6.1 | `data/ranks.py` rank + pct + z |
+| 12 | Analysis mart v2 columns | Data | Phase 6.1 | `analysis_mart.v2` + validation |
+| 13 | Relative similarity sensitivity | Stats | Phase 6.1 | Robustness appendix on rank/pct/z |
+| 14 | Relative ranks in CLI & fixtures | CLI | Phase 6.1 | Keyword report + golden invariants |
+| 15 | Plackett-Luce estimand runtime wiring | Stats | Phase 6.1 (partial) | YAML block + depth `max_rank`; thresholds still hardcoded |
 | 16 | Rank-depth spec and panel filtering | Stats | Shipped | `rank_depth.py` + spec `rank_depths` |
 | 17 | Per-depth Spearman and pooled OLS | Stats | Shipped | Confirmatory bundles at 20/10/5/3 |
 | 18 | Per-depth Plackett-Luce | Stats | Shipped | Primary PL per depth |
 | 19 | Rank-depth artifacts and report | Stats | Shipped | `rank_depths` JSON + report sections |
 | 20 | Rank-depth fixtures and tests | Stats | Shipped | `test_stats_rank_depth.py` |
-| 21 | TextRazor-only flags and gates | CLI | Open | `--live-textrazor-only`, `--refresh-textrazor` |
-| 22 | TextRazor ingest core | Data | Open | `fetch_textrazor_entities_for_pages`, endpoint registry |
-| 23 | Raw lake merge for entities | Data | Open | `merge_raw_response_records` (keyword+url dedupe) |
+| 21 | TextRazor-only flags and gates | CLI | Shipped | `--live-textrazor-only`, `--refresh-textrazor` |
+| 22 | TextRazor ingest core | Data | Shipped | `fetch_textrazor_entities_for_pages`, endpoint registry |
+| 23 | Raw lake merge for entities | Data | Shipped | `merge_raw_response_records` (keyword+url dedupe) |
 | 24 | Stored-run TextRazor backfill | CLI | Open | `backfill_textrazor_run` from stored `page_text` |
 | 25 | Brand-new TextRazor-only run | CLI | Open | Fixture DFS structure + live TextRazor only |
 | 26 | TextRazor-only tests and docs | CLI | Open | CLI tests, README, `ARCHITECTURE` cross-links |
@@ -74,15 +74,17 @@ Plackett-Luce is deferred backlog work only and is not wired in code today.
 | 30 | Fold families into CLI output and artifacts | Stats | Open | Similarity + TextRazor in `stats_*` |
 | 31 | TextRazor signal golden fixtures and tests | Stats | Open | End-to-end fixture with known rank relationships |
 
-**Remaining to close the core similarity delivery:** slices 7–15 (see
-`ROADMAP.md`). TextRazor-only ingestion slices are 21–26 (data plane prerequisite).
+**Remaining to close the core similarity delivery:** slices 7–10 (see
+`ROADMAP.md`). OLS / Plackett-Luce standardization and relative-rank work (former
+Phase 5 slices 11–15) is **Phase 6.1** in `ROADMAP.md`. TextRazor-only ingestion: slices 21–23 shipped; runtime paths
+24–26 open (stored-run backfill, brand-new textrazor-only run, tests/docs).
 TextRazor signal expansion slices are 27–31.
 Slice 6 live E2E: **S5-11** in `FIXUPS.md` (`page_text` `tasks[].result: null`
 schema drift).
 
 #### Dev slices
 
-**Progress:** 11 of 31 shipped, 20 open.
+**Progress:** 14 of 31 shipped, 1 partial, 16 open.
 
 1. **[x] Slice 1 — Estimand & analysis spec**
    - Add `analysis_spec.v1.yaml`: outcome (`-log(serp_rank)`), predictors,
@@ -230,7 +232,7 @@ schema drift).
     - Acceptance: rebuild `analysis_mart` on stored runs derives relative
       columns from stored absolutes without re-scoring.
 
-15. **[~] Slice 15 — Plackett-Luce estimand runtime wiring** (partial)
+15. **[~] Slice 15 — Plackett-Luce estimand runtime wiring**
     - **Done**
       - `analysis_spec.v1.yaml` `estimand.plackett_luce` block (outcome,
         formula, clustered_se, choice_set_scope, `iia_sensitivity`).
@@ -285,6 +287,8 @@ schema drift).
     - `prepare_textrazor_only_context(env)` returns `TextRazorCredentials` without
       validating DataForSEO credentials.
     - Persist `live_textrazor_only` and `refresh_textrazor` in `run.json` config.
+    - **Runtime paths not wired yet:** without `--stored-run`, `main()` still calls
+      `write_offline_artifacts()` (slice 25). Stored-run backfill is slice 24.
 
 22. **[x] Slice 22 — TextRazor ingest core**
     - Add `TEXTRAZOR_ENDPOINTS` registry in `src/seo_rank/textrazor.py` (`entities`
@@ -293,12 +297,13 @@ schema drift).
       `execute_textrazor_request`; `pages_missing_textrazor()` dedupe helper.
     - Unit tests with injected transport (no network).
 
-23. **[ ] Slice 23 — Raw lake merge for entities**
+23. **[x] Slice 23 — Raw lake merge for entities**
     - `merge_raw_response_records(run_dir, new_records, *, endpoint, refresh)`.
     - Dedupe key for `endpoint=entities`: `(target_keyword, url)`; default skip
       existing; `--refresh-textrazor` latest-wins replace.
     - Rewrite only the `entities` partition; leave `keyword_expansion`, `serp`,
       and `page_text` untouched; recompute catalog checksums.
+    - Tests: `tests/unit/test_raw_response_merge.py`.
 
 24. **[ ] Slice 24 — Stored-run TextRazor backfill**
     - `load_pages_for_textrazor(run_dir, target_keyword)` from authoritative
@@ -307,12 +312,15 @@ schema drift).
       not re-enter `build_live_keyword_result` (no DataForSEO network).
     - Merge entities into raw lake; refresh `textrazor_entities` in `run.json`;
       `materialize_run_tree(..., respect_dry_run=False)`.
+    - **Not started:** helpers and `replay_stored_run` / `main()` branch missing.
 
 25. **[ ] Slice 25 — Brand-new TextRazor-only run**
     - `write_textrazor_only_artifacts()`: offline keyword expansion + SERP +
       `page_text` fixtures, live TextRazor on parsed pages, fixture similarity.
     - Wire in `main()` when `--live-textrazor-only` without `--stored-run`.
     - Assert zero `dataforseo.*` entries in `network_calls`.
+    - **Not started:** function does not exist; `main()` branch missing (today
+      `--live-textrazor-only` alone falls through to `write_offline_artifacts()`).
 
 26. **[ ] Slice 26 — TextRazor-only tests and docs**
     - CLI tests: brand-new textrazor-only run, stored-run backfill, regression
@@ -324,7 +332,7 @@ schema drift).
 27. **[ ] Slice 27 — TextRazor signal registry and family contract**
     - Signal-family registry at `target_keyword × SERP URL` grain (see
       `ROADMAP.md` slice 27 for full contract).
-    - **Depends on slices 21–26** for live entity ingestion without DataForSEO.
+    - **Depends on slices 24–26** for live entity ingestion without DataForSEO.
 
 28. **[ ] Slice 28 — Materialize TextRazor page metrics**
     - Extend normalization beyond entities; separate TextRazor page-metrics mart.
@@ -356,7 +364,7 @@ schema drift).
   `stats_summary.json` and `stats_report.md`.
 - **Tests** — golden `analysis_mart`, schema contracts, guardrail skip path,
   BH boundaries, influence refit per `TESTING.md`.
-- **Relative similarity (slices 11–14)** — within-keyword rank, percentile, and
+- **Relative similarity (Phase 6.1)** — within-keyword rank, percentile, and
   z-score per backend in `analysis_mart.v2`; robustness-only stats path; CLI
   surfaces ranks alongside absolute scores. Primary confirmatory estimand stays
   on absolute `*_normalized_score`.
@@ -378,11 +386,14 @@ schema drift).
 - `seo-rank analyze --run RUN_ID` materialization and exit-code contract.
 - Unit tests and golden fixtures in `tests/unit/`.
 - Within-keyword relative similarity: `*_similarity_rank`, `*_similarity_pct`,
-  `*_similarity_z` in `analysis_mart.v2` (`src/seo_rank/data/ranks.py`).
-- Stats robustness appendix for relative predictors (Slice 13).
-- TextRazor-only ingestion: `seo-rank run --live-textrazor-only` for brand-new
-  runs (fixture DataForSEO structure) and `--stored-run` backfill from stored
-  `page_text` without DataForSEO network calls (slices 21–26).
+  `*_similarity_z` in `analysis_mart.v2` (`src/seo_rank/data/ranks.py`) — **Phase 6.1**.
+- Stats robustness appendix for relative predictors — **Phase 6.1** (Slice 13).
+- OLS / PL scaling polish and PL spec runtime wiring — **Phase 6.1** (FIXUPS
+  S5-14–S5-19; `ROADMAP.md` § Phase 6.1).
+- TextRazor-only ingestion (slices 21–23 shipped): CLI flags/gates, ingest core,
+  and raw-lake entity merge. **Still open:** brand-new `--live-textrazor-only`
+  run path (slice 25), `--stored-run` backfill (slice 24), tests and docs
+  (slice 26).
 
 ## Out Of Scope
 
@@ -392,7 +403,7 @@ schema drift).
 - Phase 5.1 DataForSEO live fail-fast (`ROADMAP.md` § 5.1).
 - Phase 5.2 Gemini/BGE empty-output fail-fast (`ROADMAP.md` § 5.2).
 - Phase 5.4 exploratory extensions (rank-decile segments, keyword holdout).
-- Expanded report sections beyond stats artifacts (Phase 6.1).
+- Expanded report sections and OLS/PL standardization (`ROADMAP.md` § Phase 6.1).
 - Custom URL/text manifest ingestion for TextRazor-only runs (no fixture SERP).
 - Direct page fetching outside DataForSEO (TextRazor receives parsed text only).
 - Causal claims about ranking factors.
@@ -402,7 +413,7 @@ schema drift).
 
 ## Phase 5 acceptance criteria
 
-**Status:** 11 of 31 slices shipped, 20 open.
+**Status:** 14 of 31 slices shipped, 1 partial, 16 open.
 
 | Acceptance item | Slice(s) | Status |
 | --------------- | -------- | ------ |
@@ -417,14 +428,18 @@ schema drift).
 | Limitations in JSON and Markdown | 9, 19 | Shipped (per depth) |
 | `seo-rank analyze` exit code + dry-run skip | 9 | Open |
 | Golden fixture ρ/slope within tolerance | 10 | Open |
-| Within-keyword rank/pct/z columns in `analysis_mart.v2` | 11, 12 | Open |
-| Relative similarity robustness in `stats_diagnostics.json` | 13 | Open |
-| CLI keyword report surfaces relative ranks | 14 | Open |
+| Within-keyword rank/pct/z columns in `analysis_mart.v2` | 11, 12 | Phase 6.1 |
+| Relative similarity robustness in `stats_diagnostics.json` | 13 | Phase 6.1 |
+| CLI keyword report surfaces relative ranks | 14 | Phase 6.1 |
+| Plackett-Luce estimand runtime wiring from YAML | 15 | Phase 6.1 (partial) |
+| OLS/PL shared `within_keyword_sd_rms` effect-size contract | 6.1 Slice 1 | Phase 6.1 |
 | Parallel confirmatory rank depths (20/10/5/3) | 16–20 | Shipped |
 | `actionable_association_by_rank_depth` in summary JSON | 19 | Shipped |
 | `rank_depths` nested JSON + four `## Rank depth:` report sections | 19 | Shipped |
-| `--live-textrazor-only` without `--live-providers` or DataForSEO network | 21, 25 | Open |
-| Stored-run backfill writes `endpoint=entities` without touching DFS partitions | 23, 24 | Open |
+| TextRazor-only CLI flags, gates, and `run.json` config persistence | 21 | Shipped |
+| `merge_raw_response_records` entities dedupe + partition rewrite | 23 | Shipped |
+| `--live-textrazor-only` brand-new run (fixture DFS + live TextRazor, zero `dataforseo.*` in `network_calls`) | 25 | Open |
+| Stored-run backfill writes `endpoint=entities` without touching DFS partitions | 24 | Open |
 | `parquet/entities/` populated after textrazor-only ingest + normalize | 24–26 | Open |
 | TextRazor signal registry and page-metrics mart | 27, 28 | Open |
 | Family-aware stats registry and combined artifacts | 29, 30 | Open |

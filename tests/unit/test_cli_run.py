@@ -8,9 +8,12 @@ import pyarrow.parquet as pq
 
 from seo_rank.dataforseo import DataForSeoClientError
 from seo_rank.dataforseo import fixture_keyword_expansion_response
+from seo_rank.cli import RAW_RESPONSE_SCHEMA
+from seo_rank.cli import build_raw_response_record
 from seo_rank.cli import main
 from seo_rank.cli import prepare_textrazor_only_context
 from seo_rank.cli import stored_serp_response_is_usable
+from seo_rank.textrazor import fixture_entity_response
 from seo_rank.textrazor import TextRazorCredentials
 
 
@@ -585,6 +588,151 @@ def test_run_stored_run_on_complete_tree_only_rematerializes_downstream_artifact
     payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
     assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 5
     assert payload["catalog"]["datasets"]["analysis_mart"]["row_count"] == 3
+    assert (output_dir / "stats" / "stats_summary.json").exists()
+
+
+def test_run_stored_run_refreshes_textrazor_entities_latest_wins_without_touching_other_raw_partitions(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
+    monkeypatch.setenv("SEO_RANK_ENABLE_TEXTRAZOR", "1")
+    monkeypatch.setenv("TEXTRAZOR_API_KEY", "textrazor-secret")
+
+    assert (
+        main(
+            [
+                "run",
+                "--seed",
+                "technical seo",
+                "--depth",
+                "1",
+                "--output-dir",
+                str(output_dir),
+                "--dry-run",
+                "--skip-textrazor",
+            ]
+        )
+        == 0
+    )
+
+    raw_responses_dir = output_dir / "parquet" / "raw_responses"
+    original_partition_bytes = {
+        path: path.read_bytes()
+        for path in [
+            raw_responses_dir / "endpoint=keyword_expansion" / "part-0.parquet",
+            raw_responses_dir / "endpoint=serp" / "part-0.parquet",
+            raw_responses_dir / "endpoint=page_text" / "part-0.parquet",
+        ]
+    }
+
+    existing_entity = build_raw_response_record(
+        "artifacts",
+        endpoint="entities",
+        provider="textrazor",
+        response=fixture_entity_response(
+            url="https://example.com/technical-seo/1",
+            text="Technical SEO helps crawlers discover the page.",
+        ),
+        target_keyword="technical seo",
+        request_metadata={
+            "target_keyword": "technical seo",
+            "url": "https://example.com/technical-seo/1",
+        },
+        recorded_at="2026-07-02T12:00:00+00:00",
+    )
+    existing_entity["response_id"] = "entity-existing"
+    entities_dir = raw_responses_dir / "endpoint=entities"
+    entities_dir.mkdir(parents=True, exist_ok=True)
+    pq.write_table(
+        pa.Table.from_pylist([existing_entity], schema=RAW_RESPONSE_SCHEMA),
+        entities_dir / "part-0.parquet",
+        compression="zstd",
+    )
+
+    def dataforseo_transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        del method, headers, body, timeout
+        raise AssertionError("stored-run refresh should not call DataForSEO")
+
+    def textrazor_transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        del method, url, headers, timeout
+        return {
+            "response": {
+                "entities": [
+                    {
+                        "entityId": "technical-seo-refresh",
+                        "matchedText": "Technical SEO",
+                        "confidenceScore": 10,
+                        "relevanceScore": 0.95,
+                        "type": ["Topic"],
+                    }
+                ],
+            }
+        }
+
+    monkeypatch.setattr("seo_rank.cli.DEFAULT_DATAFORSEO_TRANSPORT", dataforseo_transport)
+    monkeypatch.setattr("seo_rank.cli.DEFAULT_TEXTRAZOR_TRANSPORT", textrazor_transport)
+
+    def fail_if_keyword_refresh_requested(*args, **kwargs) -> None:
+        raise AssertionError("refresh-only stored run should not rebuild keywords")
+
+    monkeypatch.setattr("seo_rank.cli.build_live_keyword_result", fail_if_keyword_refresh_requested)
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--stored-run",
+            str(output_dir),
+            "--live-textrazor-only",
+            "--refresh-textrazor",
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
+    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 4
+    assert payload["textrazor_entities"] == [
+        {
+            "url": "https://example.com/technical-seo/1",
+            "entity_id": "technical-seo-refresh",
+            "matched_text": "Technical SEO",
+            "confidence": 10.0,
+            "relevance": 0.95,
+            "types": ["Topic"],
+            "target_keyword": "technical seo",
+        }
+    ]
+    assert payload["keyword_results"][0]["textrazor_entities"] == payload["textrazor_entities"]
+    assert (
+        raw_responses_dir / "endpoint=keyword_expansion" / "part-0.parquet"
+    ).read_bytes() == original_partition_bytes[
+        raw_responses_dir / "endpoint=keyword_expansion" / "part-0.parquet"
+    ]
+    assert (raw_responses_dir / "endpoint=serp" / "part-0.parquet").read_bytes() == original_partition_bytes[
+        raw_responses_dir / "endpoint=serp" / "part-0.parquet"
+    ]
+    assert (
+        raw_responses_dir / "endpoint=page_text" / "part-0.parquet"
+    ).read_bytes() == original_partition_bytes[
+        raw_responses_dir / "endpoint=page_text" / "part-0.parquet"
+    ]
     assert (output_dir / "stats" / "stats_summary.json").exists()
 
 

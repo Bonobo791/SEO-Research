@@ -134,14 +134,17 @@ golden fixtures, and final CLI expansion continue in slices 7–10 and 15.
   guardrails/panel prep, Spearman + BH, pooled OLS with clustered regression
   summaries, pooled OLS diagnostics, and parallel confirmatory rank-depth bundles
   at top 20 / 10 / 5 / 3. Multivariate sensitivity, influence robustness,
-  golden fixtures, and final CLI stats expansion remain in slices 7–10 and 15 —
+  golden fixtures, and final CLI stats expansion remain in slices 7–10 —
   see [Planned Per-Run Statistical Analysis](#planned-per-run-statistical-analysis).
+  OLS / Plackett-Luce standardization, `analysis_mart.v2` relative ranks, and
+  expanded reporting are **Phase 6.1** (`ROADMAP.md`).
 - **Reporters (shipped):** JSON + Markdown under the selected run root;
   `seo-rank run` defaults to `runs/{run_id}/` when `--output-dir` is omitted
   and still supports explicit overrides. Long runs emit `[seo-rank]` progress on
   stderr (run phase, per-keyword steps, progress bar, artifact writes). Phase 6
-  plans workflow-integrity guardrails across stage boundaries; Phase 6.1 expands
-  report narrative sections.
+  plans workflow-integrity guardrails across stage boundaries; Phase 6.1 covers
+  OLS/PL standardization polish, mart v2 relative ranks, robustness sensitivity,
+  Plackett-Luce spec runtime wiring, and expanded report narrative sections.
 - **Storage (planned, Phase 4.5):** run-scoped Parquet lake with three processing
   layers — see [Run-scoped Parquet lake](#run-scoped-parquet-lake-phase-45) and
   [Polars data layer](#polars-data-layer-phase-45).
@@ -481,10 +484,10 @@ backends may be null on individual rows).
 `gemini_semantic_similarity_normalized_score`, `serp_rank`, `page_text_length`,
 `target_keyword_id`, `canonical_url_hash`.
 
-**Mart columns (relative, `analysis_mart.v2`, slices 11–12):** per backend,
+**Mart columns (relative, `analysis_mart.v2`, Phase 6.1):** per backend,
 `*_similarity_rank`, `*_similarity_pct`, `*_similarity_z` — derived within each
-`target_keyword_id` from absolute scores (BGE ranks on `bge_raw_score`). Used in
-robustness appendix only (Slice 13); primary estimand stays on absolute scores.
+`target_keyword_id` from absolute scores (BGE ranks on `bge_raw_score`). Used in robustness appendix
+only (Phase 6.1 Slice 5); primary estimand stays on absolute scores.
 
 **Dependence:** cluster inference at `target_keyword_id`. The same URL may appear
 under multiple keywords; do not dedupe the panel in v1. Optional robustness:
@@ -515,8 +518,11 @@ with `bh_skipped_reason`. Do not BH-adjust diagnostic p-values.
 One univariate feature model per backend (not joint three-predictor as primary).
 Keyword-clustered robust SEs only in primary output; never naive IID SEs.
 
-**Effect size:** report approximate Δ rank per 1 SD increase in normalized
-similarity (derived from pooled coefficient and within-panel SD).
+**Effect size (shipped):** report approximate Δ rank per 1 SD increase in normalized
+similarity using `within_keyword_sd_rms()` (RMS of per-keyword SDs) times the
+pooled coefficient; Plackett-Luce reports `log_odds_per_1sd` / `odds_ratio_per_1sd`
+with the same spread measure. Full standardization track (mart v2 columns,
+robustness refits, spec-driven PL thresholds) is **Phase 6.1** (`ROADMAP.md`).
 
 **Actionable association (BGE only, v1):** `actionable_association: true` when
 median |ρ| ≥ 0.25, ≥ 60% same-sign ρ, and BGE pooled 95% CI excludes 0 (thresholds

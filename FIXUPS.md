@@ -471,21 +471,22 @@ passes. Remaining gaps: CLI live-run regression and normalize raw-lake path
 
 ## Phase 5 — Plackett-Luce + regression scaling (post-ship polish)
 
-Follow-ups from the Jul 2026 code review of page-level Plackett-Luce
-(`plackett_luce.py`), shared scaling (`scale.py`), regression per–within-keyword-RMS-SD
-reporting, fit-once wiring in `artifacts.run_phase5_stats`, and `normalize_run`
-`response_id` deduplication. None block merge unless marked **required**.
+**Active scope:** `ROADMAP.md` § Phase 6.1. Follow-ups from the Jul 2026 code review
+of page-level Plackett-Luce (`plackett_luce.py`), shared scaling (`scale.py`),
+regression per–within-keyword-RMS-SD reporting, fit-once wiring in
+`artifacts.run_phase5_stats`, and `normalize_run` `response_id` deduplication.
+None block merge unless marked **required**.
 
 | ID | Fix | Phase | Priority | Status |
 | --- | --- | --- | --- | --- |
 | S5-12 | Sync unit baseline in `TESTING.md` and `test_sdlc_docs.py`: suite is **212 collected / 212 passing / 0 skipped** today; docs still assert **211 passing / 1 skipped** (extends S5-01 / S476-22) | 5 docs | nice-to-have | open |
 | S5-13 | Plackett-Luce unstable fits: when `main_model.status == "unstable"` (optimizer non-convergence or Hessian condition number above threshold), promote backend-level `status` to `"unstable"` or document that consumers must check `convergence_confirmed` / `main_model.status`, not only `backends[*].status` | 5 stats | nice-to-have | open |
-| S5-14 | Update `analysis_spec.v1.yaml` `effect_size.note`: regression/PL now use `within_keyword_sd_rms()` (RMS of per-keyword SDs), not pooled panel standard deviation of the score column | 5 docs | nice-to-have | open |
-| S5-15 | `_two_way_cluster_sensitivity()` in `regression.py` assumes `feature_result.model.exog_names[1]` is the similarity column — pass `fit.score_column` from `BackendRegressionFit` instead of positional index | 5 Slice 5 | nice-to-have | open |
-| S5-16 | Document IIA subset refit scaling in `plackett_luce.py`: `_subset_refit_summary()` multiplies subset coefficients by the **main** fit's `similarity_within_keyword_sd` for drift comparison, not the subset's own within-keyword spread — add a code comment or diagnostics field so readers do not misread `log_odds_per_1sd` on refits | 5 stats | nice-to-have | open |
-| S5-17 | `scale.py`: add module docstring that `within_keyword_zscore` / `global_zscore` are prep for slices 11–13 (rank transform / analysis_mart v2); only `within_keyword_sd_rms` is wired in production paths today | 5 Slice 11 | nice-to-have | open |
-| S5-18 | Add `stats.scale` to `test_stats_package_exports_module_surface` (parity with `plackett_luce` export assertion) | 5 stats | nice-to-have | open |
-| S5-19 | Wire `analysis_spec.estimand.plackett_luce` into runtime (`plackett_luce.py` constants like `FORMULA`, `TOP_SERP_RANK_LIMIT`, IIA flags are hardcoded today; YAML block is validated in tests only) | 5 stats | nice-to-have | open |
+| S5-14 | Update `analysis_spec.v1.yaml` `effect_size.note`: regression/PL now use `within_keyword_sd_rms()` (RMS of per-keyword SDs), not pooled panel standard deviation of the score column | 6.1 Slice 1 | nice-to-have | open |
+| S5-15 | `_two_way_cluster_sensitivity()` in `regression.py` assumes `feature_result.model.exog_names[1]` is the similarity column — pass `fit.score_column` from `BackendRegressionFit` instead of positional index | 6.1 Slice 1 | nice-to-have | open |
+| S5-16 | Document IIA subset refit scaling in `plackett_luce.py`: `_subset_refit_summary()` multiplies subset coefficients by the **main** fit's `similarity_within_keyword_sd` for drift comparison, not the subset's own within-keyword spread — add a code comment or diagnostics field so readers do not misread `log_odds_per_1sd` on refits | 6.1 Slice 1 | nice-to-have | open |
+| S5-17 | `scale.py`: add module docstring that `within_keyword_zscore` / `global_zscore` are prep for slices 11–13 (rank transform / analysis_mart v2); only `within_keyword_sd_rms` is wired in production paths today | 6.1 Slice 1 | nice-to-have | open |
+| S5-18 | Add `stats.scale` to `test_stats_package_exports_module_surface` (parity with `plackett_luce` export assertion) | 6.1 Slice 1 | nice-to-have | open |
+| S5-19 | Wire `analysis_spec.estimand.plackett_luce` into runtime (`plackett_luce.py` constants like `FORMULA`, `TOP_SERP_RANK_LIMIT`, IIA flags are hardcoded today; YAML block is validated in tests only) | 6.1 Slice 2 | nice-to-have | open |
 
 ---
 

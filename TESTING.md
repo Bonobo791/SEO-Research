@@ -142,7 +142,8 @@ exist.
 
 ## Planned tests (not yet in suite) — Phase 5 active scope
 
-See `GOALS.md` and `ROADMAP.md` § Phase 5 slices 7–15.
+See `GOALS.md` and `ROADMAP.md` § Phase 5 slices 7–10; standardization and
+relative ranks are Phase 6.1.
 
 - Feature marts and `analysis_mart` join keys (`run_id`, `target_keyword_id`,
   `canonical_url_hash`, `response_id`, `passage_id`)
@@ -172,6 +173,24 @@ See `GOALS.md` and `ROADMAP.md` § Phase 5 slices 7–15.
   delta vs confirmatory model.
 - **Dry-run / fixture skip** — `seo-rank analyze` on documented fixture modes
   does not require full stats output.
+
+## Planned tests (not yet in suite) — Phase 6.1 standardization and reporting
+
+See `ROADMAP.md` § Phase 6.1.
+
+- **Scaling contract** — `test_stats_scaling_contract.py`: OLS and PL report the
+  same `similarity_within_keyword_sd` on an identical panel; `stats.scale` export.
+- **Within-keyword ranks** — `test_within_keyword_ranks.py`: ties, `n = 1`, null
+  scores, zero variance (`data/ranks.py`).
+- **Analysis mart v2** — `test_analysis_mart_ranks.py`: rank/pct/z columns,
+  bounded validation, rank invariants.
+- **Relative similarity sensitivity** — `test_stats_relative_similarity.py`:
+  Spearman on rank, OLS on z/pct, skip on `analysis_mart.v1`, excluded from
+  actionable flag.
+- **Plackett-Luce spec runtime** — spec threshold edits change convergence and
+  IIA enablement (`test_stats_plackett_luce.py`, `test_stats_spec.py`).
+- **CLI relative ranks** — keyword report shows rank/pct; sort by primary backend
+  similarity rank.
 
 ## Planned tests (not yet in suite) — Phase 6 workflow integrity
 

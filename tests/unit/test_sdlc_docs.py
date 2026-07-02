@@ -279,3 +279,18 @@ def test_phase_6_plans_workflow_integrity_guardrails() -> None:
     assert "artifact-derived reconciliation" in architecture
     assert "contract-schema tests" in testing
     assert "partial-write and commit-failure tests" in testing
+
+
+def test_phase_6_1_plans_ols_pl_standardization() -> None:
+    goals = (ROOT / "GOALS.md").read_text(encoding="utf-8")
+    roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
+    architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
+    testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
+    fixups = (ROOT / "FIXUPS.md").read_text(encoding="utf-8")
+
+    assert "Phase 6.1 — OLS / Plackett-Luce standardization and reporting" in roadmap
+    assert "within_keyword_sd_rms" in roadmap
+    assert "Phase 6.1" in goals
+    assert "Phase 6.1" in architecture
+    assert "test_stats_scaling_contract.py" in testing
+    assert "6.1 Slice 1" in fixups

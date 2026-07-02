@@ -6,6 +6,7 @@ import json
 import os
 import re
 import sys
+import shutil
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -468,11 +469,96 @@ def replay_stored_run(
             f"to {config.keyword_limit} keywords"
         )
 
+    if config.live_textrazor_only:
+        credentials = prepare_textrazor_only_context(os.environ)
+        backfill_textrazor_run(
+            stored_run,
+            config,
+            credentials=credentials,
+            progress=progress,
+        )
+        return
+
     expand_stored_run(
         stored_run,
         stored_payload,
         requested_keyword_limit=config.keyword_limit,
         progress=progress,
+    )
+
+
+def backfill_textrazor_run(
+    run_dir: Path,
+    config: RunConfig,
+    *,
+    credentials: TextRazorCredentials,
+    progress: RunProgress | None = None,
+) -> None:
+    stored_payload = load_run_payload(run_dir)
+    stored_keywords = stored_payload.get("keywords", [])
+    if not isinstance(stored_keywords, list):
+        stored_keywords = []
+
+    network_calls = list(
+        stored_payload.get("network_calls", [])
+        if isinstance(stored_payload.get("network_calls", []), list)
+        else []
+    )
+    textrazor_records: list[dict[str, object]] = []
+
+    for index, keyword in enumerate(
+        [keyword for keyword in stored_keywords if isinstance(keyword, str)],
+        start=1,
+    ):
+        pages = load_pages_for_textrazor(run_dir, keyword)
+        if progress is not None:
+            progress.keyword_step(index, len(stored_keywords), keyword, "done")
+        if not pages:
+            continue
+        if progress is not None:
+            progress.keyword_log(keyword, f"textrazor entities ({len(pages)} pages)")
+        responses = fetch_textrazor_entities_for_pages(
+            pages,
+            credentials=credentials,
+            transport=DEFAULT_TEXTRAZOR_TRANSPORT,
+        )
+        if responses:
+            network_calls.append("textrazor.entities")
+        for response in responses:
+            target_keyword = str(response.get("target_keyword") or keyword)
+            textrazor_records.append(
+                build_raw_response_record(
+                    run_dir.name,
+                    endpoint=TEXTRAZOR_ENDPOINTS["entities"].raw_response_endpoint,
+                    provider="textrazor",
+                    response=response,
+                    target_keyword=target_keyword,
+                    request_metadata={
+                        "target_keyword": target_keyword,
+                        "url": extract_response_url(response),
+                    },
+                    recorded_at=datetime.now(UTC).isoformat(),
+                )
+            )
+
+    if textrazor_records:
+        merge_raw_response_records(
+            run_dir,
+            textrazor_records,
+            endpoint=TEXTRAZOR_ENDPOINTS["entities"].raw_response_endpoint,
+            refresh=config.refresh_textrazor,
+        )
+
+    rewrite_run_json_textrazor_entities(
+        run_dir,
+        config=config,
+        network_calls=network_calls,
+    )
+    materialize_run_tree(
+        run_dir,
+        progress=progress,
+        phase_label="replay",
+        respect_dry_run=False,
     )
 
 
@@ -716,6 +802,167 @@ def load_stored_keyword_results_by_keyword(
             continue
         results[target_keyword.casefold()] = dict(keyword_result)
     return results
+
+
+def load_pages_for_textrazor(run_dir: Path, target_keyword: str) -> list[dict[str, object]]:
+    target_keyword_key = target_keyword.casefold().strip()
+    raw_pages = _load_raw_page_text_pages(run_dir, target_keyword_key, target_keyword)
+    if raw_pages:
+        return raw_pages
+    return _load_curated_pages_for_textrazor(run_dir, target_keyword_key, target_keyword)
+
+
+def _load_raw_page_text_pages(
+    run_dir: Path,
+    target_keyword_key: str,
+    target_keyword: str,
+) -> list[dict[str, object]]:
+    try:
+        rows = (
+            scan_raw_responses(run_dir)
+            .filter(pl.col("endpoint") == "page_text")
+            .select(["target_keyword", "response_body_bytes"])
+            .collect()
+            .to_dicts()
+        )
+    except STORAGE_COMMAND_EXCEPTIONS:
+        return []
+
+    pages: list[dict[str, object]] = []
+    for row in rows:
+        row_keyword = row.get("target_keyword")
+        response_body_bytes = row.get("response_body_bytes")
+        if not isinstance(row_keyword, str) or not isinstance(
+            response_body_bytes, (bytes, bytearray)
+        ):
+            continue
+        if row_keyword.casefold().strip() != target_keyword_key:
+            continue
+        response = json.loads(bytes(response_body_bytes).decode("utf-8"))
+        page = parsed_page_text(response)
+        if not page:
+            continue
+        pages.append(annotate_target_keyword(page, target_keyword))
+    return pages_missing_textrazor(pages)
+
+
+def _load_curated_pages_for_textrazor(
+    run_dir: Path,
+    target_keyword_key: str,
+    target_keyword: str,
+) -> list[dict[str, object]]:
+    try:
+        rows = (
+            scan_curated_table(run_dir, "pages")
+            .select(["target_keyword", "url", "title", "text"])
+            .collect()
+            .to_dicts()
+        )
+    except STORAGE_COMMAND_EXCEPTIONS:
+        return []
+
+    pages: list[dict[str, object]] = []
+    for row in rows:
+        row_keyword = row.get("target_keyword")
+        url = row.get("url")
+        title = row.get("title")
+        text = row.get("text")
+        if not isinstance(row_keyword, str) or not isinstance(url, str):
+            continue
+        if row_keyword.casefold().strip() != target_keyword_key:
+            continue
+        if not isinstance(title, str):
+            title = ""
+        if not isinstance(text, str):
+            text = ""
+        pages.append(
+            {
+                "target_keyword": target_keyword,
+                "url": url,
+                "title": title,
+                "text": text,
+            }
+        )
+    return pages_missing_textrazor(pages)
+
+
+def rewrite_run_json_textrazor_entities(
+    run_dir: Path,
+    *,
+    config: RunConfig | None = None,
+    network_calls: Sequence[str] | None = None,
+) -> None:
+    run_json_path = Path(run_dir) / "run.json"
+    run_payload = load_run_payload(run_dir)
+    if config is not None:
+        run_payload["config"] = serialized_config(config)
+    raw_response_records = load_raw_response_records(run_dir)
+    textrazor_entities_by_keyword = _load_textrazor_entities_by_keyword(raw_response_records)
+    textrazor_entities = [
+        entity
+        for keyword in run_payload.get("keywords", [])
+        if isinstance(keyword, str)
+        for entity in textrazor_entities_by_keyword.get(keyword.casefold().strip(), [])
+    ]
+    run_payload["textrazor_entities"] = textrazor_entities
+
+    keyword_results = run_payload.get("keyword_results", [])
+    if isinstance(keyword_results, list):
+        updated_keyword_results: list[dict[str, object]] = []
+        for keyword_result in keyword_results:
+            if not isinstance(keyword_result, Mapping):
+                continue
+            target_keyword = keyword_result.get("target_keyword")
+            keyword_key = (
+                target_keyword.casefold().strip()
+                if isinstance(target_keyword, str)
+                else ""
+            )
+            updated_keyword_result = dict(keyword_result)
+            updated_keyword_result["textrazor_entities"] = [
+                dict(entity)
+                for entity in textrazor_entities_by_keyword.get(keyword_key, [])
+            ]
+            updated_keyword_results.append(updated_keyword_result)
+        run_payload["keyword_results"] = updated_keyword_results
+
+    if network_calls is not None:
+        run_payload["network_calls"] = list(network_calls)
+    elif isinstance(run_payload.get("network_calls"), list):
+        run_payload["network_calls"] = list(run_payload["network_calls"])
+
+    catalog = run_payload.get("catalog", {})
+    if not isinstance(catalog, dict):
+        catalog = {}
+    dataset_catalog = catalog.setdefault("datasets", {})
+    assert isinstance(dataset_catalog, dict)
+    dataset_catalog["raw_responses"] = build_raw_response_catalog_from_disk(run_dir)
+    run_payload["catalog"] = catalog
+    run_json_path.write_text(
+        json.dumps(run_payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _load_textrazor_entities_by_keyword(
+    raw_response_records: Sequence[Mapping[str, object]],
+) -> dict[str, list[dict[str, object]]]:
+    grouped: dict[str, list[dict[str, object]]] = {}
+    for record in raw_response_records:
+        if record.get("endpoint") != TEXTRAZOR_ENDPOINTS["entities"].raw_response_endpoint:
+            continue
+        target_keyword = record.get("target_keyword")
+        response_body_bytes = record.get("response_body_bytes")
+        if not isinstance(target_keyword, str) or not isinstance(
+            response_body_bytes, (bytes, bytearray)
+        ):
+            continue
+        response = json.loads(bytes(response_body_bytes).decode("utf-8"))
+        for entity in normalize_entities(response, url=str(response.get("url", ""))):
+            grouped.setdefault(target_keyword.casefold().strip(), []).append(
+                annotate_target_keyword(entity, target_keyword)
+            )
+    return grouped
 
 
 def build_resumed_keyword_result(
@@ -977,6 +1224,42 @@ def replay_raw_response(run_dir: Path, response_id: str) -> None:
     raise CliCommandError(
         f"Stored response {response_id} does not contain raw bytes"
     )
+
+
+def merge_raw_response_records(
+    run_dir: Path,
+    new_records: Sequence[Mapping[str, object]],
+    *,
+    endpoint: str,
+    refresh: bool,
+) -> dict[str, object]:
+    if endpoint != "entities":
+        raise ValueError("merge_raw_response_records only supports endpoint='entities'")
+
+    run_dir = Path(run_dir)
+    existing_rows = load_raw_response_partition_rows(run_dir, endpoint)
+    merged_rows = merge_entity_raw_response_rows(
+        existing_rows,
+        list(new_records),
+        refresh=refresh,
+    )
+    if merged_rows != existing_rows:
+        rewrite_endpoint_partition(run_dir, endpoint, merged_rows)
+
+    run_json_path = run_dir / "run.json"
+    run_payload = json.loads(run_json_path.read_text(encoding="utf-8"))
+    catalog = run_payload.get("catalog", {})
+    if not isinstance(catalog, dict):
+        catalog = {}
+    dataset_catalog = catalog.setdefault("datasets", {})
+    assert isinstance(dataset_catalog, dict)
+    dataset_catalog["raw_responses"] = build_raw_response_catalog_from_disk(run_dir)
+    run_payload["catalog"] = catalog
+    run_json_path.write_text(
+        json.dumps(run_payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return catalog
 
 
 def run_manifest_is_dry_run(run_dir: Path) -> bool:
@@ -2042,6 +2325,105 @@ def extract_response_url(response: Mapping[str, object]) -> str | None:
     return parsed_url if isinstance(parsed_url, str) else None
 
 
+def load_raw_response_partition_rows(run_dir: Path, endpoint: str) -> list[dict[str, object]]:
+    partition_dir = Path(run_dir) / "parquet" / "raw_responses" / f"endpoint={endpoint}"
+    if not partition_dir.exists():
+        return []
+
+    rows: list[dict[str, object]] = []
+    for file_path in sorted(partition_dir.glob("part-*.parquet")):
+        rows.extend(pq.ParquetFile(file_path).read().to_pylist())
+    return rows
+
+
+def merge_entity_raw_response_rows(
+    existing_rows: Sequence[Mapping[str, object]],
+    new_records: Sequence[Mapping[str, object]],
+    *,
+    refresh: bool,
+) -> list[dict[str, object]]:
+    merged_rows: dict[tuple[str, str], dict[str, object]] = {}
+    for row in existing_rows:
+        normalized_row = validate_raw_response_record(row, endpoint="entities")
+        key = entity_raw_response_key(normalized_row)
+        if refresh or key not in merged_rows:
+            merged_rows[key] = normalized_row
+
+    for row in new_records:
+        normalized_row = validate_raw_response_record(row, endpoint="entities")
+        key = entity_raw_response_key(normalized_row)
+        if refresh or key not in merged_rows:
+            merged_rows[key] = normalized_row
+
+    return sorted(
+        merged_rows.values(),
+        key=lambda row: (
+            entity_raw_response_key(row)[0],
+            entity_raw_response_key(row)[1],
+            str(row["response_id"]),
+        ),
+    )
+
+
+def validate_raw_response_record(
+    record: Mapping[str, object],
+    *,
+    endpoint: str,
+) -> dict[str, object]:
+    if not isinstance(record, Mapping):
+        raise ValueError("raw response records must be mapping objects")
+    normalized = dict(record)
+    if normalized.get("endpoint") != endpoint:
+        raise ValueError(f"raw response record endpoint must be {endpoint!r}")
+    if not isinstance(normalized.get("response_body_bytes"), (bytes, bytearray)):
+        raise ValueError("raw response record is missing response_body_bytes")
+    if not isinstance(normalized.get("request_metadata_json"), str):
+        raise ValueError("raw response record is missing request_metadata_json")
+    return normalized
+
+
+def entity_raw_response_key(record: Mapping[str, object]) -> tuple[str, str]:
+    target_keyword = record.get("target_keyword")
+    if not isinstance(target_keyword, str) or not target_keyword.strip():
+        raise ValueError("raw response record is missing target_keyword")
+
+    metadata = json.loads(str(record["request_metadata_json"]))
+    url = metadata.get("url")
+    if not isinstance(url, str) or not url.strip():
+        response = json.loads(bytes(record["response_body_bytes"]).decode("utf-8"))
+        url = response.get("url")
+    if not isinstance(url, str) or not url.strip():
+        raise ValueError("raw response record is missing a usable url")
+
+    return target_keyword.casefold().strip(), url.strip()
+
+
+def rewrite_endpoint_partition(
+    run_dir: Path,
+    endpoint: str,
+    rows: Sequence[Mapping[str, object]],
+) -> None:
+    partition_dir = Path(run_dir) / "parquet" / "raw_responses" / f"endpoint={endpoint}"
+    if partition_dir.exists():
+        shutil.rmtree(partition_dir)
+    partition_dir.mkdir(parents=True, exist_ok=True)
+
+    sorted_rows = sorted(
+        (dict(row) for row in rows),
+        key=lambda row: (
+            entity_raw_response_key(row)[0],
+            entity_raw_response_key(row)[1],
+            str(row.get("response_id", "")),
+        ),
+    )
+    pq.write_table(
+        pa.Table.from_pylist(sorted_rows, schema=RAW_RESPONSE_SCHEMA),
+        partition_dir / "part-0.parquet",
+        compression="zstd",
+        write_statistics=True,
+    )
+
+
 def write_raw_response_catalog(
     output_dir: Path,
     *,
@@ -2121,6 +2503,26 @@ def write_raw_response_dataset(
 
 def file_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def build_raw_response_catalog_from_disk(output_dir: Path) -> dict[str, object]:
+    dataset_dir = Path(output_dir) / "parquet" / "raw_responses"
+    files = [
+        file_path.relative_to(output_dir).as_posix()
+        for file_path in sorted(dataset_dir.glob("endpoint=*/part-*.parquet"))
+    ]
+    rows = scan_raw_responses(output_dir).collect().to_dicts() if files else []
+    return {
+        "schema_version": RAW_RESPONSE_SCHEMA_VERSION,
+        "row_count": len(rows),
+        "source_response_ids": sorted(str(row["response_id"]) for row in rows),
+        "files": files,
+        "file_checksums": {
+            file_path: file_sha256(output_dir / file_path)
+            for file_path in files
+        },
+        "columns": sorted(rows[0].keys()) if rows else [],
+    }
 
 
 def build_run_json_payload(

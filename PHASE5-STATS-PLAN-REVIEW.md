@@ -209,11 +209,16 @@ prefer CIs over p-values alone.
 - Deterministic stats JSON schema for `seo-rank analyze`.
 - Minimum gates that skip or downgrade stats when guardrails fail.
 
-### 11. Relative similarity predictors (Phase 5 slices 11–14)
+### 11. Relative similarity predictors (Phase 6.1 — `ROADMAP.md`)
 
 Absolute `*_normalized_score` values answer "how similar is this page to the
 keyword?" Relative columns answer "how similar is this page **compared to the
 other top-20 SERP pages for this keyword**?"
+
+**Shipped scaling baseline (Jul 2026):** pooled OLS and page-level Plackett-Luce
+both report per-1-SD effects using `within_keyword_sd_rms()` in
+`src/seo_rank/stats/scale.py` (RMS of per-keyword SDs). Models still fit on raw
+scores; remaining polish and mart v2 work is Phase 6.1.
 
 **Planned mart columns (`analysis_mart.v2`):** per backend,
 `*_similarity_rank` (1 = highest), `*_similarity_pct` (`(rank - 1) / (n - 1)`),
@@ -223,7 +228,7 @@ on `*_normalized_score`. Derived at mart build time; absolute columns unchanged.
 **Primary estimand unchanged:** Spearman ρ and pooled OLS on absolute
 `*_normalized_score` remain confirmatory.
 
-**Robustness appendix (Slice 13):**
+**Robustness appendix (Phase 6.1 Slice 5):**
 
 1. Spearman ρ on `*_similarity_rank` — sanity check (should align with absolute
    path up to ties).
