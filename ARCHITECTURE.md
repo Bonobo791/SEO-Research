@@ -50,8 +50,10 @@ fixture when `--live-bge` is enabled — see
 Later phases add keyword-level Spearman inference with BH per backend, pooled
 OLS with clustered SEs, and OLS pre-analysis diagnostics on pooled models.
 
-TextRazor entities are captured in offline runs for schema validation; entity-derived
-model features remain out of scope.
+TextRazor entities are captured in offline runs for schema validation. Planned
+Phase 5 slices add a separate TextRazor page-signal mart and family-aware stats
+registry; the similarity mart stays unchanged and raw entity rows remain
+validation-only.
 
 Product architecture, scope, and phased backlog live in root markdown:
 `ARCHITECTURE.md` (this file), `GOALS.md`, and `ROADMAP.md`.
@@ -838,8 +840,9 @@ before proceeding to Benjamini-Hochberg correction and run reporting.
   edges; CLI `normalize`, `build-features`, `analyze`, `replay`, and
   `--stored-run`. No Parquet `Variant`; no nested provider schemas in curated
   tables; `raw_responses` excluded from normal analytical joins.
-- Capture TextRazor entities for future work but exclude entity-derived features
-  from the first ranking-variation model.
+- Capture TextRazor entities for future work. Planned Phase 5 TextRazor slices
+  add a separate page-signal mart and family-aware stats registry without
+  changing the similarity mart.
 - Continue filling in the real package under `src/seo_rank/` and add
   discoverable tests under `tests/`.
 - Record significant architecture decisions in this file's [Decisions](#decisions)

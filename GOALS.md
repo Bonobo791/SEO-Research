@@ -23,7 +23,9 @@ Completed: Phase 4.77 is recorded there as shipped work.
 ### Phase 5 objective
 
 Measure observational association between normalized similarity scores and SERP
-rank on the page-level panel (`target_keyword × SERP URL`, top 20 per keyword).
+rank on the page-level panel (`target_keyword × SERP URL`, top 20 per keyword),
+and add a separate TextRazor-derived page-signal mart at the same grain. The
+similarity mart stays unchanged; the TextRazor families are additive.
 **Primary inference:** keyword-level Spearman ρ per backend with Benjamini–Hochberg
 within each backend family when K ≥ 10 keywords. **Secondary inference:** pooled
 OLS with keyword fixed effects, length adjustment, and keyword-clustered robust
@@ -36,7 +38,7 @@ Plackett-Luce is deferred backlog work only and is not wired in code today.
 
 #### Progress
 
-**Slices:** 11 of 20 shipped, 9 open.
+**Slices:** 11 of 31 shipped, 20 open.
 
 | # | Slice | Layer | Status | Primary deliverable |
 | - | ----- | ----- | ------ | ------------------- |
@@ -60,13 +62,27 @@ Plackett-Luce is deferred backlog work only and is not wired in code today.
 | 18 | Per-depth Plackett-Luce | Stats | Shipped | Primary PL per depth |
 | 19 | Rank-depth artifacts and report | Stats | Shipped | `rank_depths` JSON + report sections |
 | 20 | Rank-depth fixtures and tests | Stats | Shipped | `test_stats_rank_depth.py` |
+| 21 | TextRazor-only flags and gates | CLI | Open | `--live-textrazor-only`, `--refresh-textrazor` |
+| 22 | TextRazor ingest core | Data | Open | `fetch_textrazor_entities_for_pages`, endpoint registry |
+| 23 | Raw lake merge for entities | Data | Open | `merge_raw_response_records` (keyword+url dedupe) |
+| 24 | Stored-run TextRazor backfill | CLI | Open | `backfill_textrazor_run` from stored `page_text` |
+| 25 | Brand-new TextRazor-only run | CLI | Open | Fixture DFS structure + live TextRazor only |
+| 26 | TextRazor-only tests and docs | CLI | Open | CLI tests, README, `ARCHITECTURE` cross-links |
+| 27 | TextRazor signal registry and family contract | Stats | Open | Signal-family contract at analysis_mart grain |
+| 28 | Materialize TextRazor page metrics | Data | Open | Separate mart from similarity `analysis_mart` |
+| 29 | Generalize the Phase 5 stats engine | Stats | Open | Registry-driven Spearman/OLS/PL per family |
+| 30 | Fold families into CLI output and artifacts | Stats | Open | Similarity + TextRazor in `stats_*` |
+| 31 | TextRazor signal golden fixtures and tests | Stats | Open | End-to-end fixture with known rank relationships |
 
-**Remaining to close Phase 5:** slices 7–15 (see `ROADMAP.md`). Slice 6 live E2E:
-**S5-11** in `FIXUPS.md` (`page_text` `tasks[].result: null` schema drift).
+**Remaining to close the core similarity delivery:** slices 7–15 (see
+`ROADMAP.md`). TextRazor-only ingestion slices are 21–26 (data plane prerequisite).
+TextRazor signal expansion slices are 27–31.
+Slice 6 live E2E: **S5-11** in `FIXUPS.md` (`page_text` `tasks[].result: null`
+schema drift).
 
 #### Dev slices
 
-**Progress:** 11 of 20 shipped, 9 open.
+**Progress:** 11 of 31 shipped, 20 open.
 
 1. **[x] Slice 1 — Estimand & analysis spec**
    - Add `analysis_spec.v1.yaml`: outcome (`-log(serp_rank)`), predictors,
@@ -247,6 +263,68 @@ Plackett-Luce is deferred backlog work only and is not wired in code today.
     - Acceptance: monotonic row counts, per-depth actionable map, PL choice-set
       bounds; see `TESTING.md`.
 
+21. **[ ] Slice 21 — TextRazor-only flags and gates**
+    - Add `--live-textrazor-only` and `--refresh-textrazor` to `seo-rank run`.
+    - Mutual exclusion: cannot combine with `--live-providers` or `--skip-textrazor`.
+    - Env gate: `SEO_RANK_ENABLE_TEXTRAZOR=1` + `TEXTRAZOR_API_KEY` only (no
+      `SEO_RANK_ENABLE_LIVE_PROVIDERS`).
+    - `prepare_textrazor_only_context(env)` returns `TextRazorCredentials` without
+      validating DataForSEO credentials.
+    - Persist `live_textrazor_only` and `refresh_textrazor` in `run.json` config.
+
+22. **[ ] Slice 22 — TextRazor ingest core**
+    - Add `TEXTRAZOR_ENDPOINTS` registry in `src/seo_rank/textrazor.py` (`entities`
+      now; future extractors get their own `raw_responses` endpoint partitions).
+    - `fetch_textrazor_entities_for_pages()` wraps `build_entity_request` +
+      `execute_textrazor_request`; `pages_missing_textrazor()` dedupe helper.
+    - Unit tests with injected transport (no network).
+
+23. **[ ] Slice 23 — Raw lake merge for entities**
+    - `merge_raw_response_records(run_dir, new_records, *, endpoint, refresh)`.
+    - Dedupe key for `endpoint=entities`: `(target_keyword, url)`; default skip
+      existing; `--refresh-textrazor` latest-wins replace.
+    - Rewrite only the `entities` partition; leave `keyword_expansion`, `serp`,
+      and `page_text` untouched; recompute catalog checksums.
+
+24. **[ ] Slice 24 — Stored-run TextRazor backfill**
+    - `load_pages_for_textrazor(run_dir, target_keyword)` from authoritative
+      `raw_responses` `endpoint=page_text` (fallback: curated `pages`).
+    - `backfill_textrazor_run()` for `--stored-run … --live-textrazor-only`; do
+      not re-enter `build_live_keyword_result` (no DataForSEO network).
+    - Merge entities into raw lake; refresh `textrazor_entities` in `run.json`;
+      `materialize_run_tree(..., respect_dry_run=False)`.
+
+25. **[ ] Slice 25 — Brand-new TextRazor-only run**
+    - `write_textrazor_only_artifacts()`: offline keyword expansion + SERP +
+      `page_text` fixtures, live TextRazor on parsed pages, fixture similarity.
+    - Wire in `main()` when `--live-textrazor-only` without `--stored-run`.
+    - Assert zero `dataforseo.*` entries in `network_calls`.
+
+26. **[ ] Slice 26 — TextRazor-only tests and docs**
+    - CLI tests: brand-new textrazor-only run, stored-run backfill, regression
+      on `--live-providers --live-textrazor`.
+    - Update `README.md`, `TESTING.md`, `ARCHITECTURE.md` with schema contract
+      (`endpoint=entities`, `provider=textrazor`, same `RAW_RESPONSE_SCHEMA`).
+    - Optional: TextRazor probe in `scripts/test_provider_connectivity.py`.
+
+27. **[ ] Slice 27 — TextRazor signal registry and family contract**
+    - Signal-family registry at `target_keyword × SERP URL` grain (see
+      `ROADMAP.md` slice 27 for full contract).
+    - **Depends on slices 21–26** for live entity ingestion without DataForSEO.
+
+28. **[ ] Slice 28 — Materialize TextRazor page metrics**
+    - Extend normalization beyond entities; separate TextRazor page-metrics mart.
+
+29. **[ ] Slice 29 — Generalize the Phase 5 stats engine**
+    - Registry-driven confirmatory bundles per signal family.
+
+30. **[ ] Slice 30 — Fold families into CLI output and artifacts**
+    - Combined `stats_*` report tree for similarity + TextRazor families.
+
+31. **[ ] Slice 31 — TextRazor signal golden fixtures and tests**
+    - End-to-end fixture proving similarity results unchanged when TextRazor
+      families are added.
+
 #### Phase 5 intent
 
 - **Estimand lock** — ship `analysis_spec.v1.yaml` (outcome `-log(serp_rank)`,
@@ -288,6 +366,9 @@ Plackett-Luce is deferred backlog work only and is not wired in code today.
 - Within-keyword relative similarity: `*_similarity_rank`, `*_similarity_pct`,
   `*_similarity_z` in `analysis_mart.v2` (`src/seo_rank/data/ranks.py`).
 - Stats robustness appendix for relative predictors (Slice 13).
+- TextRazor-only ingestion: `seo-rank run --live-textrazor-only` for brand-new
+  runs (fixture DataForSEO structure) and `--stored-run` backfill from stored
+  `page_text` without DataForSEO network calls (slices 21–26).
 
 ## Out Of Scope
 
@@ -298,8 +379,8 @@ Plackett-Luce is deferred backlog work only and is not wired in code today.
 - Phase 5.2 Gemini/BGE empty-output fail-fast (`ROADMAP.md` § 5.2).
 - Phase 5.4 exploratory extensions (rank-decile segments, keyword holdout).
 - Expanded report sections beyond stats artifacts (Phase 6.1).
-- Entity-derived ranking features.
-- Direct page fetching outside DataForSEO.
+- Custom URL/text manifest ingestion for TextRazor-only runs (no fixture SERP).
+- Direct page fetching outside DataForSEO (TextRazor receives parsed text only).
 - Causal claims about ranking factors.
 - IV / `PanelOLS`, URL fixed effects, per-keyword OLS as primary inference.
 - CI, deployment, production hosting.
@@ -307,7 +388,7 @@ Plackett-Luce is deferred backlog work only and is not wired in code today.
 
 ## Phase 5 acceptance criteria
 
-**Status:** 11 of 20 slices shipped, 9 open.
+**Status:** 11 of 31 slices shipped, 20 open.
 
 | Acceptance item | Slice(s) | Status |
 | --------------- | -------- | ------ |
@@ -328,6 +409,12 @@ Plackett-Luce is deferred backlog work only and is not wired in code today.
 | Parallel confirmatory rank depths (20/10/5/3) | 16–20 | Shipped |
 | `actionable_association_by_rank_depth` in summary JSON | 19 | Shipped |
 | `rank_depths` nested JSON + four `## Rank depth:` report sections | 19 | Shipped |
+| `--live-textrazor-only` without `--live-providers` or DataForSEO network | 21, 25 | Open |
+| Stored-run backfill writes `endpoint=entities` without touching DFS partitions | 23, 24 | Open |
+| `parquet/entities/` populated after textrazor-only ingest + normalize | 24–26 | Open |
+| TextRazor signal registry and page-metrics mart | 27, 28 | Open |
+| Family-aware stats registry and combined artifacts | 29, 30 | Open |
+| Similarity + TextRazor golden fixtures and CLI tests | 31 | Open |
 
 ---
 
