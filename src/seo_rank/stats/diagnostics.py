@@ -10,7 +10,11 @@ import polars as pl
 from scipy import stats
 from statsmodels.stats.diagnostic import het_breuschpagan, linear_reset
 
-from seo_rank.stats.regression import BackendRegressionFit, fit_backend_regression
+from seo_rank.stats.regression import (
+    BackendRegressionFit,
+    _regression_skip_reason,
+    fit_backend_regression,
+)
 
 SMALL_SAMPLE_SHAPIRO_CUTOFF = 50
 RESET_P_VALUE_THRESHOLD = 0.05
@@ -46,12 +50,7 @@ def summarize_backend_diagnostics(
         model_frame = analysis_mart.filter(pl.col(score_column).is_not_null()).drop_nulls(
             [score_column, "serp_rank", "page_text_length"]
         )
-        if model_frame.is_empty():
-            skipped_reason = "no_usable_rows"
-        elif model_frame["target_keyword_id"].n_unique() < 2:
-            skipped_reason = "insufficient_keyword_clusters"
-        else:
-            skipped_reason = "no_usable_rows"
+        skipped_reason = _regression_skip_reason(model_frame)
         return _skipped_backend_summary(
             backend=backend,
             score_column=score_column,

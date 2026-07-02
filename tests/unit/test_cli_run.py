@@ -200,6 +200,253 @@ def test_run_writes_offline_json_and_markdown_artifacts(
     assert "Gemini Semantic Similarity:" in report
 
 
+def test_run_materializes_feature_marts_analysis_and_stats_for_fresh_runs(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--depth",
+            "1",
+            "--output-dir",
+            str(output_dir),
+            "--skip-textrazor",
+        ]
+    )
+
+    assert exit_code == 0
+    assert (output_dir / "parquet" / "analysis_mart").exists()
+    assert (output_dir / "stats" / "stats_summary.json").exists()
+
+    payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
+    assert payload["catalog"]["datasets"]["analysis_mart"]["row_count"] == 1
+    assert payload["catalog"]["datasets"]["keyword_serp"]["row_count"] == 1
+
+
+def test_run_stored_run_finishes_existing_tree_with_stats(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
+
+    assert (
+        main(
+            [
+                "run",
+                "--seed",
+                "technical seo",
+                "--depth",
+                "1",
+                "--output-dir",
+                str(output_dir),
+                "--dry-run",
+                "--skip-textrazor",
+            ]
+        )
+        == 0
+    )
+
+    assert not (output_dir / "stats" / "stats_summary.json").exists()
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--stored-run",
+            str(output_dir),
+        ]
+    )
+
+    assert exit_code == 0
+    assert (output_dir / "stats" / "stats_summary.json").exists()
+
+
+def test_run_stored_run_expands_existing_tree_in_place(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
+
+    assert (
+        main(
+            [
+                "run",
+                "--seed",
+                "technical seo",
+                "--depth",
+                "1",
+                "--output-dir",
+                str(output_dir),
+                "--dry-run",
+                "--skip-textrazor",
+            ]
+        )
+        == 0
+    )
+
+    initial_payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
+    assert initial_payload["keywords"] == ["technical seo"]
+    assert not (output_dir / "stats" / "stats_summary.json").exists()
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--stored-run",
+            str(output_dir),
+            "--keyword-limit",
+            "3",
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
+
+    assert payload["config"]["keyword_limit"] == 3
+    assert payload["keywords"] == [
+        "technical seo",
+        "technical seo audit",
+        "technical seo checklist",
+    ]
+    assert len({keyword.casefold() for keyword in payload["keywords"]}) == len(
+        payload["keywords"]
+    )
+    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 7
+    assert payload["catalog"]["datasets"]["keyword_serp"]["row_count"] == 3
+    assert payload["catalog"]["datasets"]["analysis_mart"]["row_count"] == 3
+    assert (output_dir / "stats" / "stats_summary.json").exists()
+
+
+def test_run_stored_run_live_expansion_reports_serp_task_error(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.setenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", "1")
+    monkeypatch.setenv("DATAFORSEO_LOGIN", "analyst@example.com")
+    monkeypatch.setenv("DATAFORSEO_PASSWORD", "dataforseo-secret")
+
+    page_text_calls: list[bytes] = []
+
+    def dataforseo_transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        del method, headers, timeout
+        if url.endswith("/keywords_data/google_ads/keywords_for_keywords/live"):
+            return {
+                "tasks": [
+                    {
+                        "result": [
+                            {"keyword": "technical seo", "search_volume": 1000},
+                            {"keyword": "technical seo audit", "search_volume": 720},
+                        ],
+                    }
+                ],
+            }
+        if url.endswith("/serp/google/organic/live/advanced"):
+            request_body = json.loads(body.decode("utf-8"))
+            keyword = request_body[0]["keyword"]
+            if keyword == "technical seo":
+                return {
+                    "tasks": [
+                        {
+                            "result": [
+                                {
+                                    "items": [
+                                        {
+                                            "type": "organic",
+                                            "rank_group": 1,
+                                            "url": "https://example.com/live",
+                                            "title": "Live Result",
+                                            "description": "Live provider result.",
+                                        }
+                                    ]
+                                }
+                            ],
+                        }
+                    ],
+                }
+            if keyword == "technical seo audit":
+                return {
+                    "tasks": [
+                        {
+                            "result": None,
+                            "status_code": 40207,
+                            "status_message": (
+                                "Access denied. Your IP is not whitelisted."
+                            ),
+                        }
+                    ],
+                }
+            raise AssertionError(f"unexpected keyword: {keyword}")
+        if url.endswith("/on_page/content_parsing/live"):
+            page_text_calls.append(body)
+            return {
+                "tasks": [
+                    {
+                        "result": [
+                            {
+                                "url": "https://example.com/live",
+                                "title": "Parsed Page",
+                                "text": "Technical SEO helps crawlers find pages.",
+                            }
+                        ],
+                    }
+                ],
+            }
+        raise AssertionError(f"unexpected DataForSEO URL: {url}")
+
+    monkeypatch.setattr("seo_rank.cli.DEFAULT_DATAFORSEO_TRANSPORT", dataforseo_transport)
+
+    assert (
+        main(
+            [
+                "run",
+                "--seed",
+                "technical seo",
+                "--output-dir",
+                str(output_dir),
+                "--live-providers",
+            ]
+        )
+        == 0
+    )
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--stored-run",
+            str(output_dir),
+            "--keyword-limit",
+            "2",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "technical seo audit" in captured.err
+    assert "Access denied. Your IP is not whitelisted." in captured.err
+    assert len(page_text_calls) == 1
+
+
 def test_run_writes_raw_response_parquet_and_catalog_metadata(
     tmp_path: Path,
     monkeypatch,

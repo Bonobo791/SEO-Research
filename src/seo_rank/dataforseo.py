@@ -78,7 +78,7 @@ DATAFORSEO_RESPONSE_SCHEMAS: dict[str, tuple[DataForSeoFieldSchema, ...]] = {
     ),
     "serp": (
         DataForSeoFieldSchema(("tasks",), list),
-        DataForSeoFieldSchema(("tasks", "[]", "result"), list),
+        DataForSeoFieldSchema(("tasks", "[]", "result"), (list, type(None))),
         DataForSeoFieldSchema(("tasks", "[]", "result", "[]", "items"), list),
         DataForSeoFieldSchema(
             ("tasks", "[]", "result", "[]", "items", "[]", "type"),
@@ -91,7 +91,7 @@ DATAFORSEO_RESPONSE_SCHEMAS: dict[str, tuple[DataForSeoFieldSchema, ...]] = {
     ),
     "page_text": (
         DataForSeoFieldSchema(("tasks",), list),
-        DataForSeoFieldSchema(("tasks", "[]", "result"), list),
+        DataForSeoFieldSchema(("tasks", "[]", "result"), (list, type(None))),
     ),
 }
 
@@ -261,6 +261,11 @@ def _validate_dataforseo_field(
                     expected=_expected_type_name(schema.expected_type),
                     actual=current,
                 )
+            return
+
+        if current is None and (
+            rendered_path == "result" or rendered_path.endswith(".result")
+        ):
             return
 
         part = parts[0]

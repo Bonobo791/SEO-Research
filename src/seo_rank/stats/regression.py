@@ -20,6 +20,7 @@ SIMILARITY_SCORE_COLUMNS = {
     "gemini_semantic_similarity": "gemini_semantic_similarity_normalized_score",
 }
 BASELINE_FORMULA = "outcome ~ np.log(page_text_length + 1) + C(target_keyword_id)"
+SINGLE_KEYWORD_BASELINE_FORMULA = "outcome ~ np.log(page_text_length + 1)"
 REGRESSION_REQUIRED_COLUMNS = ("serp_rank", "page_text_length")
 
 
@@ -27,6 +28,7 @@ REGRESSION_REQUIRED_COLUMNS = ("serp_rank", "page_text_length")
 class BackendRegressionFit:
     backend: str
     score_column: str
+    baseline_formula: str
     model_data: pd.DataFrame
     baseline_result: RegressionResultsWrapper
     feature_result: RegressionResultsWrapper
@@ -58,12 +60,7 @@ def summarize_backend_regression(
     if fit is None:
         score_column = _score_column_for_backend(backend)
         model_frame = _prepare_regression_frame(analysis_mart, score_column)
-        if model_frame.is_empty():
-            skipped_reason = "no_usable_rows"
-        elif model_frame["target_keyword_id"].n_unique() < 2:
-            skipped_reason = "insufficient_keyword_clusters"
-        else:
-            skipped_reason = "no_usable_rows"
+        skipped_reason = _regression_skip_reason(model_frame)
         return _skipped_backend_summary(
             backend=backend,
             score_column=score_column,
@@ -74,6 +71,8 @@ def summarize_backend_regression(
             else 0,
         )
 
+    keyword_count = int(fit.model_data["target_keyword_id"].nunique())
+    inference = _inference_metadata(keyword_count)
     coefficient = _parameter_value(fit.clustered_result, fit.score_column)
     clustered_standard_error = _parameter_standard_error(fit.clustered_result, fit.score_column)
     clustered_confidence_interval = _parameter_confidence_interval(
@@ -86,9 +85,9 @@ def summarize_backend_regression(
         "backend": fit.backend,
         "score_column": fit.score_column,
         "row_count": int(len(fit.model_data)),
-        "keyword_count": int(fit.model_data["target_keyword_id"].nunique()),
+        "keyword_count": keyword_count,
         "baseline_model": {
-            "formula": BASELINE_FORMULA,
+            "formula": fit.baseline_formula,
             "adjusted_r_squared": float(fit.baseline_result.rsquared_adj),
             "aic": float(fit.baseline_result.aic),
         },
@@ -100,10 +99,7 @@ def summarize_backend_regression(
             "p_value": _parameter_p_value(fit.clustered_result, fit.score_column),
             "adjusted_r_squared": float(fit.feature_result.rsquared_adj),
             "aic": float(fit.feature_result.aic),
-            "covariance": {
-                "type": "cluster",
-                "clusters": ["target_keyword_id"],
-            },
+            "covariance": inference,
         },
         "descriptive_fit_delta": {
             "adjusted_r_squared": float(
@@ -141,23 +137,38 @@ def fit_backend_regression(
         return None
 
     model_data = model_frame.to_pandas().copy()
-    if model_data["target_keyword_id"].nunique() < 2:
+    keyword_count = int(model_data["target_keyword_id"].nunique())
+    if keyword_count < 1:
         return None
 
     model_data["outcome"] = -np.log(model_data["serp_rank"].astype(float))
 
-    baseline_result = smf.ols(BASELINE_FORMULA, data=model_data).fit()
-    feature_formula = (
-        f"outcome ~ {score_column} + np.log(page_text_length + 1) + C(target_keyword_id)"
-    )
-    feature_result = smf.ols(feature_formula, data=model_data).fit()
-    clustered_result = feature_result.get_robustcov_results(
-        cov_type="cluster",
-        groups=model_data["target_keyword_id"],
-    )
+    if keyword_count >= 2:
+        baseline_formula = BASELINE_FORMULA
+        feature_formula = (
+            f"outcome ~ {score_column} + np.log(page_text_length + 1) + C(target_keyword_id)"
+        )
+        baseline_result = smf.ols(baseline_formula, data=model_data).fit()
+        feature_result = smf.ols(feature_formula, data=model_data).fit()
+        if feature_result.df_resid <= 0:
+            return None
+        clustered_result = feature_result.get_robustcov_results(
+            cov_type="cluster",
+            groups=model_data["target_keyword_id"],
+        )
+    else:
+        baseline_formula = SINGLE_KEYWORD_BASELINE_FORMULA
+        feature_formula = f"outcome ~ {score_column} + np.log(page_text_length + 1)"
+        baseline_result = smf.ols(baseline_formula, data=model_data).fit()
+        feature_result = smf.ols(feature_formula, data=model_data).fit()
+        if feature_result.df_resid <= 0:
+            return None
+        clustered_result = feature_result.get_robustcov_results(cov_type="HC3")
+
     return BackendRegressionFit(
         backend=backend,
         score_column=score_column,
+        baseline_formula=baseline_formula,
         model_data=model_data,
         baseline_result=baseline_result,
         feature_result=feature_result,
@@ -179,6 +190,26 @@ def _prepare_regression_frame(
     return analysis_mart.filter(pl.col(score_column).is_not_null()).drop_nulls(
         [score_column, *REGRESSION_REQUIRED_COLUMNS]
     )
+
+
+def _regression_skip_reason(model_frame: pl.DataFrame) -> str:
+    if model_frame.is_empty():
+        return "no_usable_rows"
+    if model_frame.height < 3:
+        return "insufficient_rows"
+    return "no_usable_rows"
+
+
+def _inference_metadata(keyword_count: int) -> dict[str, object]:
+    if keyword_count >= 2:
+        return {
+            "type": "cluster",
+            "clusters": ["target_keyword_id"],
+        }
+    return {
+        "type": "HC3",
+        "clusters": [],
+    }
 
 
 def _skipped_backend_summary(

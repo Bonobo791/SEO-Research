@@ -32,9 +32,28 @@ Use these commands in order. Each step reads or extends the same run tree under
 | **Build feature marts** | `seo-rank build-features --run runs/RUN_ID` |
 | **Analysis mart + stats** | `seo-rank analyze --run runs/RUN_ID` |
 | **Inspect one keyword row** | `seo-rank analyze --run runs/RUN_ID --keyword "technical seo"` |
-| **Re-process stored run** (no provider calls) | `seo-rank run --seed "technical seo" --stored-run runs/RUN_ID` |
+| **Finish stored run** (no provider calls) | `seo-rank run --seed "technical seo" --stored-run runs/RUN_ID` |
+| **Expand existing run in place** | `seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --keyword-limit 25` |
 | **Audit one raw HTTP response** | `seo-rank replay --run runs/RUN_ID --response-id RESPONSE_ID` |
 | **Live provider smoke** (DataForSEO; optional Gemini/BGE/TextRazor) | See [Live providers](#live-providers) below |
+
+**Fresh data**
+
+```bash
+seo-rank run --seed "technical seo" --dry-run --output-dir artifacts
+```
+
+**Finish existing run**
+
+```bash
+seo-rank run --seed "technical seo" --stored-run runs/RUN_ID
+```
+
+**Expand existing run**
+
+```bash
+seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --keyword-limit 25
+```
 
 **Typical offline research path:**
 
@@ -61,11 +80,13 @@ On every `run` (offline or live), per expanded cluster keyword:
 5. **Page-level similarity scores** — three backends per URL (`compute_page_similarity_scores`
    or live overrides below)
 6. TextRazor entities (fixture unless `--live-providers --live-textrazor`)
-7. Artifacts: `run.json`, `report.md`, and `parquet/raw_responses/`
+7. Artifacts: `run.json`, `report.md`, `parquet/raw_responses/`, curated tables,
+   feature marts, `analysis_mart`, and Phase 5 stats unless `--dry-run` is set
 
-A plain `run` does **not** call `normalize`, `build-features`, or `analyze`. Use
-`--stored-run runs/RUN_ID` to re-materialize curated tables and marts from an
-existing run tree without provider calls.
+`seo-rank run` now performs the full postprocessing chain after writing raw
+artifacts. Use `--stored-run runs/RUN_ID` to finish an existing run tree
+without provider calls, or pair it with a higher `--keyword-limit` to expand
+the original seed in place. `--dry-run` still skips Phase 5 stats.
 
 By default, keyword expansion keeps **one** cluster keyword (the seed). Pass
 `--keyword-limit 25` for the full fixture expansion set used in lake round-trip
@@ -157,7 +178,9 @@ scripts still pass it.
 ### Storage layout 
 
 `seo-rank run` writes this layout under `runs/{run_id}/` when `--output-dir` is
-omitted. CLI subcommands materialize layers in place on an existing run tree.
+omitted. The command now chains raw artifact generation, normalization, feature
+materialization, `analysis_mart`, and Phase 5 stats. CLI subcommands still
+materialize layers in place on an existing run tree.
 
 ```text
 runs/{run_id}/
@@ -200,7 +223,7 @@ Fetch or fixture provider data, score pages, write `run.json`, `report.md`, and
 | `--model-name` | `fixture-similarity-v1` | Recorded in `run.json` |
 | `--dry-run` | off | Mark run as fixture/offline in config |
 | `--skip-textrazor` | off | Skip TextRazor entities (offline and live) |
-| `--stored-run` | — | Re-materialize marts from an existing run tree |
+| `--stored-run` | — | Finish or expand the chain on an existing run tree |
 | `--live-providers` | off | Live DataForSEO (requires env gate) |
 | `--live-bge` | off | Live BGE reranking (requires `--live-providers`) |
 | `--live-gemini` | off | Live Gemini embeddings (requires `--live-providers`) |
@@ -216,7 +239,7 @@ seo-rank run --seed "technical seo" --dry-run --keyword-limit 25 --depth 3 --ski
 # Explicit output directory
 seo-rank run --seed "technical seo" --dry-run --output-dir artifacts
 
-# Re-process stored lake (no network)
+# Re-process stored lake and finish downstream layers (no network)
 seo-rank run --seed "technical seo" --stored-run runs/RUN_ID
 ```
 

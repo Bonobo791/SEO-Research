@@ -219,6 +219,32 @@ def test_validate_dataforseo_response_accepts_non_organic_serp_rows_without_url(
     assert validate_dataforseo_response("serp", response) is response
 
 
+def test_validate_dataforseo_response_accepts_serp_task_with_null_result() -> None:
+    response = {
+        "tasks": [
+            {
+                "keyword": "technical seo",
+                "result": None,
+            }
+        ]
+    }
+
+    assert validate_dataforseo_response("serp", response) is response
+
+
+def test_validate_dataforseo_response_accepts_page_text_task_with_null_result() -> None:
+    response = {
+        "tasks": [
+            {
+                "data": {"url": "https://example.com/page"},
+                "result": None,
+            }
+        ]
+    }
+
+    assert validate_dataforseo_response("page_text", response) is response
+
+
 def test_validate_dataforseo_response_rejects_unknown_endpoint() -> None:
     with pytest.raises(DataForSeoParseError) as exc_info:
         validate_dataforseo_response("unknown", {})

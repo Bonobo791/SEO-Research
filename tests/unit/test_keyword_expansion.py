@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from seo_rank.cli import RunConfig, build_offline_payload
+from seo_rank.dataforseo import normalize_keyword_expansion
 
 
 def test_offline_payload_uses_single_keyword_default(tmp_path: Path) -> None:
@@ -30,3 +31,32 @@ def test_offline_payload_uses_single_keyword_default(tmp_path: Path) -> None:
     dataforseo = raw_provider_data["dataforseo"]
     assert isinstance(dataforseo, dict)
     assert dataforseo["keyword_expansion"]["provider"] == "dataforseo"
+
+
+def test_normalize_keyword_expansion_drops_duplicates_in_first_seen_order() -> None:
+    response = {
+        "tasks": [
+            {
+                "result": [
+                    {"keyword": "technical seo audit"},
+                    {"keyword": "technical seo checklist"},
+                    {"keyword": "technical seo audit"},
+                    {"keyword": "technical seo topic"},
+                    {"keyword": "technical seo checklist"},
+                ]
+            }
+        ]
+    }
+
+    keywords = normalize_keyword_expansion(
+        response,
+        seed="technical seo",
+        limit=10,
+    )
+
+    assert keywords == [
+        "technical seo",
+        "technical seo audit",
+        "technical seo checklist",
+        "technical seo topic",
+    ]

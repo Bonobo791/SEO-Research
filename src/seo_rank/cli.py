@@ -212,7 +212,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="seo-rank")
     subparsers = parser.add_subparsers(dest="command")
 
-    run = subparsers.add_parser("run", help="Run an offline SEO ranking analysis")
+    run = subparsers.add_parser(
+        "run",
+        help="Run or finish an SEO ranking analysis",
+    )
     run.add_argument("--seed", required=True)
     run.add_argument("--location", default="United States")
     run.add_argument("--language", default="en")
@@ -226,7 +229,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--stored-run",
         type=Path,
-        help="Replay a prior run tree instead of fetching provider data",
+        help="Finish or expand an existing run tree instead of fetching provider data",
     )
     run.add_argument(
         "--live-providers",
@@ -392,8 +395,12 @@ def write_offline_artifacts(
     if progress is not None:
         progress.log("run: writing artifacts")
     write_artifacts(config.output_dir, payload, progress=progress)
-    if progress is not None:
-        progress.log(f"run: finished -> {config.output_dir}")
+    materialize_run_tree(
+        config.output_dir,
+        progress=progress,
+        phase_label="run",
+        respect_dry_run=True,
+    )
 
 
 def write_live_artifacts(
@@ -413,8 +420,12 @@ def write_live_artifacts(
     if progress is not None:
         progress.log("run: writing artifacts")
     write_artifacts(config.output_dir, payload, progress=progress)
-    if progress is not None:
-        progress.log(f"run: finished -> {config.output_dir}")
+    materialize_run_tree(
+        config.output_dir,
+        progress=progress,
+        phase_label="run",
+        respect_dry_run=True,
+    )
 
 
 def replay_stored_run(
@@ -423,21 +434,231 @@ def replay_stored_run(
     *,
     progress: RunProgress | None = None,
 ) -> None:
-    del config
-    try:
-        if progress is not None:
-            progress.log(f"replay: normalizing {stored_run}")
-        normalize_run(stored_run)
-        if progress is not None:
-            progress.log("replay: building feature marts")
-        build_feature_marts(stored_run)
-        if progress is not None:
-            progress.log("replay: building analysis mart")
-        build_analysis_mart(stored_run)
-        if progress is not None:
-            progress.log(f"replay: finished -> {stored_run}")
-    except STORAGE_COMMAND_EXCEPTIONS as error:
-        raise CliCommandError(str(error)) from error
+    stored_payload = load_run_payload(stored_run)
+    stored_keywords = stored_payload.get("keywords", [])
+    if not isinstance(stored_keywords, list):
+        stored_keywords = []
+    deduped_keywords = dedupe_keywords(
+        [keyword for keyword in stored_keywords if isinstance(keyword, str)]
+    )
+    if config.keyword_limit <= len(deduped_keywords):
+        materialize_run_tree(
+            stored_run,
+            progress=progress,
+            phase_label="replay",
+            respect_dry_run=False,
+        )
+        return
+
+    if progress is not None:
+        progress.log(
+            f"replay: expanding stored run from {len(deduped_keywords)} "
+            f"to {config.keyword_limit} keywords"
+        )
+
+    expand_stored_run(
+        stored_run,
+        stored_payload,
+        requested_keyword_limit=config.keyword_limit,
+        progress=progress,
+    )
+
+
+def expand_stored_run(
+    stored_run: Path,
+    stored_payload: Mapping[str, object],
+    *,
+    requested_keyword_limit: int,
+    progress: RunProgress | None = None,
+) -> None:
+    stored_config = stored_payload.get("config", {})
+    if not isinstance(stored_config, Mapping):
+        raise CliCommandError("Stored run payload is missing config")
+
+    run_id = str(stored_payload.get("run_id") or stored_run.name)
+    base_config = run_config_from_payload(
+        stored_config,
+        output_dir=stored_run,
+        keyword_limit=requested_keyword_limit,
+    )
+    keyword_expansion = load_stored_keyword_expansion_response(stored_run)
+    expanded_keywords = normalize_keyword_expansion(
+        keyword_expansion,
+        seed=base_config.seed,
+        limit=requested_keyword_limit,
+    )
+    current_keywords = dedupe_keywords(
+        [keyword for keyword in stored_payload.get("keywords", []) if isinstance(keyword, str)]
+    )
+    current_keyword_keys = {keyword.casefold() for keyword in current_keywords}
+    new_keywords = [
+        keyword for keyword in expanded_keywords if keyword.casefold() not in current_keyword_keys
+    ]
+
+    if not new_keywords:
+        materialize_run_tree(
+            stored_run,
+            progress=progress,
+            phase_label="replay",
+            respect_dry_run=False,
+        )
+        return
+
+    network_calls = list(
+        stored_payload.get("network_calls", [])
+        if isinstance(stored_payload.get("network_calls", []), list)
+        else []
+    )
+    if base_config.live_providers:
+        live_context = prepare_live_run_context(
+            base_config,
+            env=os.environ,
+            progress=progress,
+        )
+        new_keyword_results: list[dict[str, object]] = []
+        for index, keyword in enumerate(new_keywords, start=1):
+            new_keyword_results.append(
+                build_live_keyword_result(
+                    base_config,
+                    target_keyword=keyword,
+                    credentials=live_context["credentials"],
+                    live_bge_enabled=bool(live_context["live_bge_enabled"]),
+                    bge_reranker=live_context["bge_reranker"],
+                    gemini_api_key=live_context["gemini_api_key"],
+                    textrazor_credentials=live_context["textrazor_credentials"],
+                    location_code=int(live_context["location_code"]),
+                    dataforseo_transport=DEFAULT_DATAFORSEO_TRANSPORT,
+                    textrazor_transport=DEFAULT_TEXTRAZOR_TRANSPORT,
+                    network_calls=network_calls,
+                    progress=progress,
+                )
+            )
+            if progress is not None:
+                progress.keyword_step(index, len(new_keywords), keyword, "done")
+    else:
+        new_keyword_results = []
+        for index, keyword in enumerate(new_keywords, start=1):
+            new_keyword_results.append(
+                build_offline_keyword_result(
+                    base_config,
+                    target_keyword=keyword,
+                    progress=progress,
+                )
+            )
+            if progress is not None:
+                progress.keyword_step(index, len(new_keywords), keyword, "done")
+
+    merged_payload = build_expanded_run_payload(
+        stored_payload,
+        config=base_config,
+        expanded_keywords=expanded_keywords,
+        new_keyword_results=new_keyword_results,
+        network_calls=network_calls,
+    )
+    existing_raw_response_records = scan_raw_responses(stored_run).collect().to_dicts()
+    new_raw_response_records = build_raw_response_records(
+        run_id,
+        {
+            "keyword_results": new_keyword_results,
+        },
+    )
+    if progress is not None:
+        progress.log(
+            "replay: writing expanded raw responses "
+            f"({len(existing_raw_response_records) + len(new_raw_response_records)} records)"
+        )
+    write_artifacts(
+        stored_run,
+        merged_payload,
+        progress=progress,
+        raw_response_records=[
+            *existing_raw_response_records,
+            *new_raw_response_records,
+        ],
+    )
+    materialize_run_tree(
+        stored_run,
+        progress=progress,
+        phase_label="replay",
+        respect_dry_run=False,
+    )
+
+
+def run_config_from_payload(
+    config: Mapping[str, object],
+    *,
+    output_dir: Path,
+    keyword_limit: int,
+) -> RunConfig:
+    return RunConfig(
+        seed=str(config.get("seed", "")),
+        location=str(config.get("location", "United States")),
+        language=str(config.get("language", "en")),
+        device=str(config.get("device", "desktop")),
+        depth=int(config.get("depth", 20)),
+        output_dir=output_dir,
+        model_name=str(config.get("model_name", "fixture-similarity-v1")),
+        dry_run=bool(config.get("dry_run", False)),
+        skip_textrazor=bool(config.get("skip_textrazor", False)),
+        keyword_limit=keyword_limit,
+        live_providers=bool(config.get("live_providers", False)),
+        live_bge=bool(config.get("live_bge", False)),
+        live_gemini=bool(config.get("live_gemini", False)),
+        live_textrazor=bool(config.get("live_textrazor", False)),
+    )
+
+
+def build_expanded_run_payload(
+    stored_payload: Mapping[str, object],
+    *,
+    config: RunConfig,
+    expanded_keywords: list[str],
+    new_keyword_results: Sequence[Mapping[str, object]],
+    network_calls: list[str],
+) -> dict[str, object]:
+    merged_payload = dict(stored_payload)
+    merged_payload["config"] = serialized_config(config)
+    merged_payload["keywords"] = expanded_keywords
+    existing_keyword_results = [
+        keyword_result
+        for keyword_result in stored_payload.get("keyword_results", [])
+        if isinstance(keyword_result, Mapping)
+    ]
+    merged_keyword_results = [*existing_keyword_results, *new_keyword_results]
+    merged_payload["keyword_results"] = merged_keyword_results
+    for key in (
+        "passages",
+        "serp_results",
+        "similarity_features",
+        "page_similarity",
+        "textrazor_entities",
+    ):
+        existing_values = stored_payload.get(key, [])
+        merged_payload[key] = (
+            list(existing_values) if isinstance(existing_values, list) else []
+        ) + flatten_keyword_result_values(new_keyword_results, key)
+    merged_payload["network_calls"] = network_calls
+    return merged_payload
+
+
+def load_stored_keyword_expansion_response(run_dir: Path) -> dict[str, object]:
+    rows = (
+        scan_raw_responses(run_dir)
+        .filter(pl.col("endpoint") == "keyword_expansion")
+        .select(["response_body_bytes"])
+        .collect()
+        .to_dicts()
+    )
+    if not rows:
+        raise CliCommandError(
+            f"Stored run {run_dir} does not contain a keyword_expansion response"
+        )
+    response_body_bytes = rows[0].get("response_body_bytes")
+    if not isinstance(response_body_bytes, (bytes, bytearray)):
+        raise CliCommandError(
+            f"Stored keyword_expansion response in {run_dir} does not contain raw bytes"
+        )
+    return json.loads(bytes(response_body_bytes).decode("utf-8"))
 
 
 def scan_analysis_mart(run_dir: Path) -> pl.LazyFrame:
@@ -510,14 +731,48 @@ def ensure_feature_marts_for_analysis(run_dir: Path) -> None:
     build_feature_marts(Path(run_dir))
 
 
+def materialize_run_tree(
+    run_dir: Path,
+    *,
+    progress: RunProgress | None = None,
+    phase_label: str,
+    respect_dry_run: bool,
+) -> None:
+    try:
+        if progress is not None:
+            progress.log(f"{phase_label}: normalizing {run_dir}")
+        normalize_run(run_dir)
+        if progress is not None:
+            progress.log(f"{phase_label}: building feature marts")
+        build_feature_marts(run_dir)
+        if progress is not None:
+            progress.log(f"{phase_label}: building analysis mart")
+        build_analysis_mart(run_dir)
+        should_run_stats = True
+        if respect_dry_run:
+            should_run_stats = not run_manifest_is_dry_run(run_dir)
+        if should_run_stats:
+            if progress is not None:
+                progress.log(f"{phase_label}: running phase 5 stats")
+            run_phase5_stats(run_dir)
+        elif progress is not None:
+            progress.log(f"{phase_label}: skipping phase 5 stats for dry run")
+        if progress is not None:
+            progress.log(f"{phase_label}: finished -> {run_dir}")
+    except STORAGE_COMMAND_EXCEPTIONS as error:
+        raise CliCommandError(str(error)) from error
+
+
 def write_artifacts(
     output_dir: Path,
     payload: dict[str, object],
     *,
     progress: RunProgress | None = None,
+    raw_response_records: list[dict[str, object]] | None = None,
 ) -> None:
     run_id = output_dir.name
-    raw_response_records = build_raw_response_records(run_id, payload)
+    if raw_response_records is None:
+        raw_response_records = build_raw_response_records(run_id, payload)
     if progress is not None:
         progress.log(f"run: writing raw responses ({len(raw_response_records)} records)")
     catalog = write_raw_response_catalog(
@@ -542,6 +797,35 @@ def write_artifacts(
         render_markdown_report(payload),
         encoding="utf-8",
     )
+
+
+def load_run_payload(run_dir: Path) -> dict[str, object]:
+    run_json_path = Path(run_dir) / "run.json"
+    return json.loads(run_json_path.read_text(encoding="utf-8"))
+
+
+def dedupe_keywords(keywords: Sequence[str]) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for keyword in keywords:
+        normalized = keyword.strip().casefold()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(keyword.strip())
+    return deduped
+
+
+def flatten_keyword_result_values(
+    keyword_results: Sequence[Mapping[str, object]],
+    key: str,
+) -> list[object]:
+    flattened: list[object] = []
+    for keyword_result in keyword_results:
+        values = keyword_result.get(key, [])
+        if isinstance(values, list):
+            flattened.extend(values)
+    return flattened
 
 
 def build_offline_payload(
@@ -603,6 +887,45 @@ def build_offline_payload(
         raw_provider_data=raw_provider_data,
         network_calls=[],
     )
+
+
+def prepare_live_run_context(
+    config: RunConfig,
+    *,
+    env: Mapping[str, str],
+    progress: RunProgress | None = None,
+) -> dict[str, object]:
+    credentials = validate_live_provider_gate(env)
+    if progress is not None:
+        progress.log("run: credentials validated")
+
+    live_bge_enabled = False
+    bge_reranker = None
+    if config.live_bge:
+        validate_live_bge_config(env)
+        if progress is not None:
+            progress.log("run: loading BGE reranker")
+        live_bge_enabled = True
+        bge_reranker = load_bge_reranker()
+
+    gemini_api_key = validate_live_gemini_config(env) if config.live_gemini else None
+    if config.live_gemini and progress is not None:
+        progress.log("run: Gemini embeddings enabled")
+
+    textrazor_credentials = (
+        validate_live_textrazor_config(env) if config.live_textrazor else None
+    )
+    if config.live_textrazor and progress is not None:
+        progress.log("run: TextRazor entities enabled")
+
+    return {
+        "credentials": credentials,
+        "live_bge_enabled": live_bge_enabled,
+        "bge_reranker": bge_reranker,
+        "gemini_api_key": gemini_api_key,
+        "textrazor_credentials": textrazor_credentials,
+        "location_code": dataforseo_location_code(config.location),
+    }
 
 
 def build_offline_keyword_result(
@@ -696,39 +1019,20 @@ def build_live_payload(
 ) -> dict[str, object]:
     if progress is not None:
         progress.log("run: starting live")
-    credentials = validate_live_provider_gate(env)
-    if progress is not None:
-        progress.log("run: credentials validated")
-    live_bge_enabled = False
-    bge_reranker = None
-    if config.live_bge:
-        validate_live_bge_config(env)
-        if progress is not None:
-            progress.log("run: loading BGE reranker")
-        live_bge_enabled = True
-        bge_reranker = load_bge_reranker()
-    gemini_api_key = validate_live_gemini_config(env) if config.live_gemini else None
-    if config.live_gemini and progress is not None:
-        progress.log("run: Gemini embeddings enabled")
-    textrazor_credentials = (
-        validate_live_textrazor_config(env) if config.live_textrazor else None
-    )
-    if config.live_textrazor and progress is not None:
-        progress.log("run: TextRazor entities enabled")
-    location_code = dataforseo_location_code(config.location)
+    live_context = prepare_live_run_context(config, env=env, progress=progress)
     network_calls: list[str] = []
 
     if progress is not None:
         progress.log("run: keyword expansion request")
     keyword_request = build_keyword_expansion_request(
         config.seed,
-        location_code=location_code,
+        location_code=int(live_context["location_code"]),
         language_code=config.language,
     )
     keyword_expansion = execute_validated_dataforseo_request(
         "keyword_expansion",
         keyword_request,
-        credentials=credentials.dataforseo,
+        credentials=live_context["credentials"].dataforseo,
         transport=dataforseo_transport,
     )
     network_calls.append("dataforseo.keyword_expansion")
@@ -745,12 +1049,12 @@ def build_live_payload(
             build_live_keyword_result(
                 config,
                 target_keyword=keyword,
-                credentials=credentials,
-                live_bge_enabled=live_bge_enabled,
-                bge_reranker=bge_reranker,
-                gemini_api_key=gemini_api_key,
-                textrazor_credentials=textrazor_credentials,
-                location_code=location_code,
+                credentials=live_context["credentials"],
+                live_bge_enabled=bool(live_context["live_bge_enabled"]),
+                bge_reranker=live_context["bge_reranker"],
+                gemini_api_key=live_context["gemini_api_key"],
+                textrazor_credentials=live_context["textrazor_credentials"],
+                location_code=int(live_context["location_code"]),
                 dataforseo_transport=dataforseo_transport,
                 textrazor_transport=textrazor_transport,
                 network_calls=network_calls,
@@ -823,6 +1127,11 @@ def build_live_keyword_result(
         ),
         credentials=credentials.dataforseo,
         transport=dataforseo_transport,
+    )
+    raise_for_failed_dataforseo_tasks(
+        "serp",
+        serp_response,
+        target_keyword=target_keyword,
     )
     network_calls.append("dataforseo.serp")
     serp_results = normalize_serp_results(
@@ -955,6 +1264,43 @@ def build_live_keyword_result(
         ],
         "textrazor_entities": textrazor_entities,
     }
+
+
+def raise_for_failed_dataforseo_tasks(
+    endpoint: str,
+    response: Mapping[str, object],
+    *,
+    target_keyword: str | None = None,
+) -> None:
+    tasks = response.get("tasks", [])
+    if not isinstance(tasks, list):
+        return
+    for task_index, task in enumerate(tasks):
+        if not isinstance(task, Mapping):
+            continue
+        status_code = task.get("status_code")
+        if not isinstance(status_code, int) or status_code == 20000:
+            continue
+        status_message = task.get("status_message")
+        rendered_message = (
+            status_message
+            if isinstance(status_message, str) and status_message.strip()
+            else "unknown task failure"
+        )
+        keyword = target_keyword
+        if keyword is None:
+            task_data = task.get("data")
+            if isinstance(task_data, Mapping) and isinstance(task_data.get("keyword"), str):
+                keyword = task_data["keyword"]
+        keyword_context = (
+            f" for target_keyword={keyword!r}"
+            if isinstance(keyword, str) and keyword
+            else ""
+        )
+        raise DataForSeoClientError(
+            f"DataForSEO {endpoint} task failed{keyword_context} "
+            f"at tasks[{task_index}] with status_code={status_code}: {rendered_message}"
+        )
 
 
 def execute_validated_dataforseo_request(

@@ -52,10 +52,13 @@ def test_readme_documents_cli_capabilities() -> None:
     assert "seo-rank normalize --run" in readme
     assert "stats_diagnostics.json" in readme
     assert "runs/{run_id}/" in readme
+    assert "Expand existing run" in readme
     assert "--live-bge" in readme
     assert "--live-gemini" in readme
     assert "--live-textrazor" in readme
-    assert "Phase " not in readme
+    assert "Phase 5 stats" in readme
+    assert "Fresh data" in readme
+    assert "Finish existing run" in readme
 
 
 def test_manifest_records_resolved_pytest_commands() -> None:

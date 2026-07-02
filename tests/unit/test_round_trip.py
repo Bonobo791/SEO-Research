@@ -69,7 +69,10 @@ def test_cli_round_trip_materializes_real_artifacts_without_network(
         output_dir,
         "keyword_serp",
     )
-    assert "analysis_mart" not in feature_payload["catalog"]["datasets"]
+    assert feature_payload["catalog"]["datasets"]["analysis_mart"]["row_count"] == _assert_dataset_materialized(
+        output_dir,
+        "analysis_mart",
+    )
 
     stdout = StringIO()
     with redirect_stdout(stdout):
