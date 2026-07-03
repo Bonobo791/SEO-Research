@@ -117,9 +117,15 @@ def test_fetch_textrazor_entities_for_pages_dedupes_requests_and_preserves_raw_s
         "Content-Type": "application/x-www-form-urlencoded",
         "X-TextRazor-Key": "textrazor-secret",
     }
-    assert sent_requests[0]["body"] == b"extractors=entities&text=Alpha"
+    assert (
+        sent_requests[0]["body"]
+        == b"extractors=entities%2Ctopics%2Ccategories%2Centailments%2Cwords%2Crelations%2Cproperties%2CnounPhrases&text=Alpha"
+    )
     assert sent_requests[0]["timeout"] == 12.5
-    assert sent_requests[1]["body"] == b"extractors=entities&text=Beta"
+    assert (
+        sent_requests[1]["body"]
+        == b"extractors=entities%2Ctopics%2Ccategories%2Centailments%2Cwords%2Crelations%2Cproperties%2CnounPhrases&text=Beta"
+    )
     assert responses == [
         {
             "response": {

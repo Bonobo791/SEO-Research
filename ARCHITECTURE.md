@@ -50,10 +50,13 @@ fixture when `--live-bge` is enabled — see
 Later phases add keyword-level Spearman inference with BH per backend, pooled
 OLS with clustered SEs, and OLS pre-analysis diagnostics on pooled models.
 
-TextRazor entities are captured in offline runs for schema validation. Planned
-Phase 5 slices add a separate TextRazor page-signal mart and family-aware stats
-registry; the similarity mart stays unchanged and raw entity rows remain
-validation-only.
+TextRazor page signals are captured per SERP URL (one TextRazor call per parsed
+page, up to `--depth` organic rows per keyword). Raw responses land in
+`raw_responses/endpoint=entities`; normalization emits entity rows plus a separate
+`textrazor_page_metrics_curated` table and `textrazor_page_metrics` feature mart
+at the same `target_keyword × SERP URL` grain as `analysis_mart`. The similarity
+mart stays unchanged; TextRazor families are additive for Phase 5 stats (slices
+27–28 shipped; confirmatory artifact wiring slices 29–30 open).
 
 Product architecture, scope, and phased backlog live in root markdown:
 `ARCHITECTURE.md` (this file), `GOALS.md`, and `ROADMAP.md`.
@@ -89,13 +92,14 @@ The repository contains an **offline-verifiable CLI scaffold** (Phase 1 shipped)
   `build-features`, `analyze`, `replay`, and `run --stored-run`, which resumes
   partial runs in place from the stored lake before re-materializing downstream
   marts
-- **Tests:** 253 tests under `tests/`; gate: `python -m pytest`; Phase 4.5 Slice 7
+- **Tests:** 261 unit tests under `tests/unit/`; full suite collects 262 tests
+  (1 opt-in integration); gate: `python -m pytest tests/unit`; Phase 4.5 Slice 7
   shipped the round-trip regression sweep in `test_sdlc_docs.py`
 - **Product docs:** `ARCHITECTURE.md`, `GOALS.md`, `ROADMAP.md`, `README.md`,
   `TESTING.md`
 - **Not yet:** multivariate sensitivity, influence robustness appendix, golden
   fixtures, and `--no-fail-on-guardrails` (Phase 5 slices 7–8, 10; slice 9 partial;
-  slice 26 partial for TextRazor cross-doc schema)
+  slice 26 shipped for TextRazor cross-doc schema)
 
 Module and artifact details are in [Application Surface](#application-surface)
 and [Key Product Components](#key-product-components) below. Phase 5 slices 1–6
@@ -181,6 +185,7 @@ current `run.json`, reuses existing raw responses and completed
 measurements, refreshes only missing work, and then re-materializes the
 downstream chain. `run --stored-run --live-textrazor-only` backfills live
 TextRazor entities from stored `page_text` without DataForSEO HTTP (slice 24).
+TextRazor-only ingestion writes the same `RAW_RESPONSE_SCHEMA` into the existing lake, partitioned only by `endpoint`.
 `analyze` backfills missing feature marts before writing `analysis_mart` and
 runs Phase 5 stats unless the run manifest is dry-run. `raw_responses` stays
 out of normal analytical joins (replay/re-normalization only). Live DataForSEO
@@ -224,11 +229,13 @@ runs/{run_id}/
     page_content_fields/part-*.parquet
     passages/part-*.parquet
     entities/part-*.parquet
+    textrazor_page_metrics_curated/part-*.parquet
     similarity_scores/part-*.parquet
     keyword_serp/part-*.parquet
     page_features/part-*.parquet
     passage_features/part-*.parquet
     domain_features/part-*.parquet
+    textrazor_page_metrics/part-*.parquet
     analysis_mart/part-*.parquet
 ```
 
@@ -236,8 +243,8 @@ runs/{run_id}/
 
 | Layer | Tables | Producer | Purpose |
 |-------|--------|----------|---------|
-| **Curated** | `keywords`, `serp_items`, `pages`, `page_content_fields`, `passages`, `entities`, `similarity_scores` | `normalize.py` | Parse `raw_responses` once into typed tables |
-| **Feature marts** | `keyword_serp`, `page_features`, `passage_features`, `domain_features` | `features.py` | Reusable similarity and ranking features |
+| **Curated** | `keywords`, `serp_items`, `pages`, `page_content_fields`, `passages`, `entities`, `textrazor_page_metrics_curated`, `similarity_scores` | `normalize.py` | Parse `raw_responses` once into typed tables |
+| **Feature marts** | `keyword_serp`, `page_features`, `passage_features`, `domain_features`, `textrazor_page_metrics` | `features.py` | Reusable similarity, ranking, and TextRazor page features |
 | **Analysis mart** | `analysis_mart` | `marts.py` | One row per `target_keyword × SERP URL` for Phase 5 |
 
 ### Layer 1 — `raw_responses` (authoritative)
@@ -286,7 +293,8 @@ sink. Every row includes join keys: `run_id`,
 | `pages` | Full parsed page text and page-level metadata (text lives here only) |
 | `page_content_fields` | One row per decoded `content_parsing/live` field with path metadata and stable ids |
 | `passages` | Passage splits with offsets; no duplicate full page bodies |
-| `entities` | TextRazor entity rows when present |
+| `entities` | TextRazor entity mention rows when present |
+| `textrazor_page_metrics_curated` | One row per `target_keyword × SERP URL` with aggregated TextRazor scalar and structural page metrics |
 | `similarity_scores` | Page-level `bge`, `gemini_doc_retrieval`, `gemini_semantic_similarity` (sourced from `run.json` `page_similarity`) |
 
 Planned follow-on: raw HTML persistence still needs a dedicated sink path, and
@@ -307,6 +315,7 @@ Derived from curated tables via `features.py`. Filter and select **before** join
 | `page_features` | Page-level similarity and text features |
 | `passage_features` | Passage-level features (Phase 5.5 expands scoring scope) |
 | `domain_features` | Domain-level aggregates (Phase 5.5 expands URL inventory) |
+| `textrazor_page_metrics` | TextRazor page-signal columns keyed like `analysis_mart` (not joined into similarity mart) |
 
 ### Layer 4 — analysis mart
 
@@ -389,7 +398,8 @@ src/seo_rank/data/
   validate.py     # schemas, keys, null/range checks before every sink
 
 src/seo_rank/stats/   # Phase 5 observational analysis (see ROADMAP.md)
-  spec.py         # load analysis_spec.v1.yaml
+  spec.py         # load analysis_spec.v1.yaml + signal_families registry
+  families.py     # declarative signal-family registry and lookups
   panel.py        # mart load, filter, guardrails
   rank_depth.py   # filter_panel_by_max_rank for confirmatory depths
   spearman.py     # per-keyword ρ + BH
@@ -410,12 +420,14 @@ src/seo_rank/stats/   # Phase 5 observational analysis (see ROADMAP.md)
 | `validate.py` | Schema contracts plus row-level uniqueness, null, and range audits; used before every mart write or at the sink edge |
 
 **Phase 5 stats package** (`src/seo_rank/stats/`): **slices 1–6 and 16–20
-shipped** — `spec.py` loads `analysis_spec.v1.yaml` (including `rank_depths` and
-`limitations_by_depth`); `rank_depth.py` filters panels by max SERP rank;
-`panel.py` prepares per-depth guardrails and limitations; `artifacts.py` runs
-`run_phase5_stats()` with nested `rank_depths` JSON, four `## Rank depth:`
-report sections, and a top-20 compat shim. `spearman.py`, `regression.py`,
-`plackett_luce.py`, and `diagnostics.py` each emit per-depth summaries.
+shipped** — `spec.py` loads `analysis_spec.v1.yaml` (including `rank_depths`,
+`limitations_by_depth`, and `signal_families`); `families.py` keeps the family
+registry ordered at the `target_keyword_id × canonical_url_hash` grain;
+`rank_depth.py` filters panels by max SERP rank; `panel.py` prepares per-depth
+guardrails and limitations; `artifacts.py` runs `run_phase5_stats()` with
+nested `rank_depths` JSON, four `## Rank depth:` report sections, and a top-20
+compat shim. `spearman.py`, `regression.py`, `plackett_luce.py`, and
+`diagnostics.py` each emit per-depth summaries.
 Multivariate sensitivity and influence robustness remain in slices 7–8; slice 9
 (partial) still needs `--no-fail-on-guardrails` and a `report.md` link to
 `stats/stats_report.md`.
@@ -864,9 +876,9 @@ before proceeding to Benjamini-Hochberg correction and run reporting.
   edges; CLI `normalize`, `build-features`, `analyze`, `replay`, and
   `--stored-run`. No Parquet `Variant`; no nested provider schemas in curated
   tables; `raw_responses` excluded from normal analytical joins.
-- Capture TextRazor entities for future work. Planned Phase 5 TextRazor slices
-  add a separate page-signal mart and family-aware stats registry without
-  changing the similarity mart.
+- Capture TextRazor page signals per SERP URL into curated and feature marts;
+  keep similarity `analysis_mart` unchanged. Family-aware confirmatory stats
+  (Spearman dispatch partial in slice 29; OLS/PL/artifacts slices 29–30 open).
 - Continue filling in the real package under `src/seo_rank/` and add
   discoverable tests under `tests/`.
 - Record significant architecture decisions in this file's [Decisions](#decisions)

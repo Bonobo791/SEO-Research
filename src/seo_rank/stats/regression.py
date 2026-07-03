@@ -11,6 +11,7 @@ import polars as pl
 import pandas as pd
 import statsmodels.formula.api as smf
 from scipy import stats
+from seo_rank.stats.families import SignalFamily, SignalFamilyRegistry, source_mart_for_family
 from seo_rank.stats.rank_depth import filter_panel_by_max_rank
 from seo_rank.stats.scale import within_keyword_sd_rms
 from seo_rank.stats.spec import AnalysisSpec
@@ -56,6 +57,24 @@ def summarize_regression_backends(
         backend_order,
         fits=fits,
     )
+
+
+def summarize_regression_families(
+    source_frames: dict[str, pl.DataFrame],
+    *,
+    registry: SignalFamilyRegistry,
+) -> dict[str, object]:
+    """Summarize the pooled regression path for every family in the registry."""
+
+    return {
+        "families": {
+            family.key: summarize_regression_family(
+                source_frames,
+                family=family,
+            )
+            for family in registry.families
+        }
+    }
 
 
 def fit_regression_backends(
@@ -132,6 +151,27 @@ def summarize_backend_regression(
     )
 
 
+def summarize_regression_for_score_column(
+    analysis_mart: pl.DataFrame,
+    *,
+    label: str,
+    score_column: str,
+) -> dict[str, object]:
+    """Fit and summarize the pooled regression path for an arbitrary signal column."""
+
+    fit = fit_regression_for_score_column(
+        analysis_mart,
+        label=label,
+        score_column=score_column,
+    )
+    return _summarize_backend_regression_result(
+        analysis_mart,
+        backend=label,
+        fit=fit,
+        score_column=score_column,
+    )
+
+
 def summarize_regression_backends_from_fits(
     analysis_mart: pl.DataFrame,
     backend_order: Sequence[str],
@@ -152,14 +192,63 @@ def summarize_regression_backends_from_fits(
     }
 
 
+def summarize_regression_family(
+    source_frames: dict[str, pl.DataFrame],
+    *,
+    family: SignalFamily,
+) -> dict[str, object]:
+    """Summarize the pooled regression path for one signal family."""
+
+    source_mart = source_mart_for_family(family)
+    source_frame = source_frames.get(source_mart)
+    if source_frame is None or source_frame.is_empty():
+        return {
+            "family": family.key,
+            "kind": family.kind,
+            "source_mart": source_mart,
+            "signal_columns": list(family.signal_columns),
+            "signals": {},
+            "backends": {},
+            "status": "skipped",
+            "skipped_reason": "no_usable_rows",
+        }
+
+    signal_summaries: dict[str, dict[str, object]] = {}
+    for signal_column in family.signal_columns:
+        signal_summaries[signal_column] = summarize_regression_for_score_column(
+            source_frame,
+            label=family.key,
+            score_column=signal_column,
+        )
+    status = (
+        "computed"
+        if any(summary.get("status") != "skipped" for summary in signal_summaries.values())
+        else "skipped"
+    )
+    family_summary: dict[str, object] = {
+        "family": family.key,
+        "kind": family.kind,
+        "source_mart": source_mart,
+        "signal_columns": list(family.signal_columns),
+        "signals": signal_summaries,
+        "backends": signal_summaries,
+        "status": status,
+    }
+    if status == "skipped":
+        family_summary["skipped_reason"] = "no_usable_rows"
+    return family_summary
+
+
 def _summarize_backend_regression_result(
     analysis_mart: pl.DataFrame,
     *,
     backend: str,
     fit: BackendRegressionFit | None,
+    score_column: str | None = None,
 ) -> dict[str, object]:
     if fit is None:
-        score_column = _score_column_for_backend(backend)
+        if score_column is None:
+            score_column = _score_column_for_backend(backend)
         model_frame = _prepare_regression_frame(analysis_mart, score_column)
         skipped_reason = _regression_skip_reason(model_frame)
         row_count = model_frame.height
@@ -253,17 +342,29 @@ def fit_backend_regression(
     *,
     backend: str,
 ) -> BackendRegressionFit | None:
-    logger.debug("fitting regression backend=%s", backend)
-    score_column = _score_column_for_backend(backend)
+    return fit_regression_for_score_column(
+        analysis_mart,
+        label=backend,
+        score_column=_score_column_for_backend(backend),
+    )
+
+
+def fit_regression_for_score_column(
+    analysis_mart: pl.DataFrame,
+    *,
+    label: str,
+    score_column: str,
+) -> BackendRegressionFit | None:
+    logger.debug("fitting regression backend=%s", label)
     model_frame = _prepare_regression_frame(analysis_mart, score_column)
     if model_frame.is_empty():
-        logger.debug("regression backend=%s skipped: no usable rows", backend)
+        logger.debug("regression backend=%s skipped: no usable rows", label)
         return None
 
     model_data = model_frame.to_pandas().copy()
     keyword_count = int(model_data["target_keyword_id"].nunique())
     if keyword_count < 1:
-        logger.debug("regression backend=%s skipped: no keywords", backend)
+        logger.debug("regression backend=%s skipped: no keywords", label)
         return None
 
     similarity_within_keyword_sd = within_keyword_sd_rms(model_data, score_column)
@@ -275,7 +376,7 @@ def fit_backend_regression(
         baseline_result = smf.ols(baseline_formula, data=model_data).fit()
         feature_result = smf.ols(feature_formula, data=model_data).fit()
         if feature_result.df_resid <= 0:
-            logger.debug("regression backend=%s skipped: non-positive residual df", backend)
+            logger.debug("regression backend=%s skipped: non-positive residual df", label)
             return None
         clustered_result = feature_result.get_robustcov_results(
             cov_type="cluster",
@@ -287,12 +388,12 @@ def fit_backend_regression(
         baseline_result = smf.ols(baseline_formula, data=model_data).fit()
         feature_result = smf.ols(feature_formula, data=model_data).fit()
         if feature_result.df_resid <= 0:
-            logger.debug("regression backend=%s skipped: non-positive residual df", backend)
+            logger.debug("regression backend=%s skipped: non-positive residual df", label)
             return None
         clustered_result = feature_result.get_robustcov_results(cov_type="HC3")
 
     return BackendRegressionFit(
-        backend=backend,
+        backend=label,
         score_column=score_column,
         baseline_formula=baseline_formula,
         feature_formula=feature_formula,

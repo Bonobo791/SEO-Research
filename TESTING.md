@@ -14,7 +14,7 @@ Pytest configuration and verification contract for SEO-Research.
   interpreter
 - Lint / type-check / build / coverage: not configured
 - Expected test duration: fast (< 1s)
-- **Current verification status:** 253 tests collected; 253 passing
+- **Current verification status:** 261 unit tests pass (`python -m pytest tests/unit`); full suite collects 262 tests including 1 opt-in integration test
 
 ## Active Verification Command
 
@@ -53,7 +53,7 @@ placeholders only.
 | `test_cli_run.py` | CLI writes grouped per-keyword artifacts, including BGE, Gemini Doc Retrieval, and Gemini Semantic Similarity rows; run-scoped `raw_responses` Parquet + `run.json` catalog metadata; offline TextRazor include/skip; TextRazor-only flags (`--live-textrazor-only`, `--refresh-textrazor`), env gates, and mutual-exclusion errors; explicit live-provider gates; stored-run partial resume/backfill, stale SERP refresh, and no-op replay coverage; opt-in live Gemini, BGE, and TextRazor orchestration |
 | `test_run_progress.py` | `seo-rank run` stderr progress: run phases, per-keyword substeps, progress bar, artifact-write logs |
 | `test_cli_surfaces.py` | Phase 4.5 storage CLI: subcommand parser wiring, `normalize` / `build-features` / `analyze` / `replay` dispatch, missing feature-mart backfill on `analyze`, `run --stored-run` routing, exit code `2` on storage errors and unknown keyword/response |
-| `test_run_normalize.py` | Stored `raw_responses` normalize into curated Parquet tables (including `similarity_scores` copied from `run.json` `page_similarity`, `page_content_fields`) via lazy scan + batch UDFs; refresh the run catalog |
+| `test_run_normalize.py` | Stored `raw_responses` normalize into curated Parquet tables (including `similarity_scores` copied from `run.json` `page_similarity`, `page_content_fields`, and `textrazor_page_metrics_curated` from TextRazor page-metrics responses) via lazy scan + batch UDFs; refresh the run catalog |
 | `test_data_scans_validate.py` | Raw-response scans use `pl.scan_parquet()`, lazy curated frames are built, schema-only validation rejects missing columns, and materialized row-rule checks stay off the lazy edge |
 | `test_data_marts.py` | Analysis mart lazy join lives in `seo_rank.data.marts` and preserves the feature-mart contract |
 | `test_feature_marts.py` | Feature marts materialize lazy joins, validate before sink, sink feature marts lazily with Parquet statistics, audit the written parquet row rules, and refresh the run catalog |
@@ -63,6 +63,8 @@ placeholders only.
 | `test_stats_diagnostics.py` | Pooled OLS diagnostics, small-sample Shapiro handling, diagnostic artifact emission on passing panels, and skipped-backend diagnostics behavior |
 | `test_stats_regression.py` | Pooled baseline and per-backend feature regressions with keyword-clustered SEs, effect-size translation, two-way-cluster sensitivity, and regression artifact emission on passing panels |
 | `test_stats_plackett_luce.py` | Page-level Plackett-Luce rank-ordered logit summaries, partial-ranking handling, optimizer / leave-one-out IIA diagnostics, and PL artifact emission on passing panels |
+| `test_stats_families.py` | Declarative signal-family registry loading, ordered enumeration, panel-grain preservation, and malformed-entry rejection |
+| `test_stats_family_dispatch.py` | Family-aware Spearman summaries with BH scoped per signal family (similarity vs TextRazor source marts) |
 | `test_stats_rank_depth.py` | Rank-depth confirmatory slices: spec accessors, panel filtering, per-depth Spearman/OLS/PL, monotonic row counts, `rank_depths` JSON + report sections |
 | `test_stats_scale.py` | Within-keyword and global z-score helpers (`stats.scale`) for OLS/PL effect-size contract |
 | `test_textrazor_ingest.py` | TextRazor endpoint registry, page entity fetch, and dedupe helpers with injected transport |
@@ -77,7 +79,7 @@ placeholders only.
 | `test_passage_normalization.py` | Passage split, short-text filter |
 | `test_similarity_features.py` | Fixture passage aggregation plus BGE, Gemini Doc Retrieval, and Gemini Semantic Similarity page scoring |
 | `test_analysis_gemini_nwh_similarity.py` | Analysis script block scoring with BGE, Gemini document relevance, and Gemini semantic similarity plus provider error handling |
-| `test_textrazor_normalization.py` | Entity schema normalization |
+| `test_textrazor_normalization.py` | Entity schema normalization and TextRazor page-metrics aggregation into `textrazor_page_metrics_curated` |
 | `test_textrazor_requests.py` | TextRazor parsed-text request construction, credential validation, HTTP execution |
 | `test_sdlc_docs.py` | GOALS/ROADMAP/README/TESTING/ARCHITECTURE guards, manifest pytest commands, and the Slice 7 round-trip regression sweep |
 | `test_live_provider_smoke.py` | Env-gated DataForSEO smoke path with optional live TextRazor, Gemini, and BGE opt-ins |
@@ -111,13 +113,14 @@ exist.
   and cross-links in `ARCHITECTURE.md`, `ROADMAP.md`, and
   `PHASE5-STATS-PLAN-REVIEW.md`.
 - **Spec loader and output metadata** — `tests/unit/test_stats_spec.py` loads
-  `analysis_spec.v1.yaml` via `load_analysis_spec()`, verifies backend order and
-  estimand outcome, and asserts `build_stats_output_metadata()` exposes
-  `analysis_spec_version` / `estimand_version`.
+  `analysis_spec.v1.yaml` via `load_analysis_spec()`, verifies backend order,
+  panel grain, signal-family ordering, and estimand outcome, and asserts
+  `build_stats_output_metadata()` exposes `analysis_spec_version` /
+  `estimand_version`.
 - **Stats package surface** — `tests/unit/test_stats_spec.py::
   test_stats_package_exports_module_surface` asserts `seo_rank.stats` exports
   `spec`, `panel`, `rank_depth`, `spearman`, `regression`, `plackett_luce`,
-  `diagnostics`, `bh`, and `artifacts`.
+  `diagnostics`, `bh`, `families`, and `artifacts`.
 - **Guardrail evaluation and hard-fail artifacts** —
   `tests/unit/test_stats_panel.py` covers top-20 filtering, primary-backend
   null dropping, SERP-rank variance hard-fail, similarity-variance warn, full
@@ -164,6 +167,23 @@ exist.
   `load_pages_for_textrazor()` (raw `page_text` authoritative over curated
   `pages`) and the `--stored-run --live-textrazor-only` CLI path with zero
   DataForSEO network calls.
+- **Shared raw-response schema contract** — the TextRazor-only CLI tests verify
+  `raw_responses/endpoint=entities` rows use `provider=textrazor` and the
+  shared `RAW_RESPONSE_SCHEMA`. This is the shared raw-response schema contract.
+
+## Shipped tests — TextRazor signal expansion (slices 27–29 partial)
+
+- **Signal-family registry** — `tests/unit/test_stats_families.py` and
+  `test_stats_spec.py` load `signal_families` from `analysis_spec.v1.yaml`,
+  preserve panel grain, and derive similarity `backend_order` from the registry.
+- **Page-metrics curation** — `tests/unit/test_textrazor_normalization.py`
+  covers `normalize_page_metrics()` / `build_textrazor_page_metrics_frame()`.
+- **Page-metrics feature mart** — `tests/unit/test_feature_marts.py` materializes
+  `textrazor_page_metrics` from curated page metrics.
+- **Family-aware Spearman (partial slice 29)** —
+  `tests/unit/test_stats_family_dispatch.py` covers
+  `summarize_spearman_families()` with per-family BH boundaries. OLS/PL/diagnostics
+  per family and CLI artifact wiring remain open (slices 29–30).
 
 ## Planned tests (not yet in suite) — Phase 5 active scope
 

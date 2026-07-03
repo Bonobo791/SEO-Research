@@ -15,15 +15,19 @@ from statsmodels.stats.diagnostic import het_breuschpagan, linear_reset
 from seo_rank.stats.regression import (
     BackendRegressionFit,
     _regression_skip_reason,
+    fit_regression_for_score_column,
     fit_regression_backends,
     fit_backend_regression,
 )
+from seo_rank.stats.families import SignalFamily, SignalFamilyRegistry, source_mart_for_family
 
 
 logger = logging.getLogger(__name__)
 
 SMALL_SAMPLE_SHAPIRO_CUTOFF = 50
 RESET_P_VALUE_THRESHOLD = 0.05
+RESET_POWER = 2
+MIN_DF_RESID_FOR_RESET = RESET_POWER
 BREUSCH_PAGAN_P_VALUE_THRESHOLD = 0.05
 STUDENTIZED_RESIDUAL_THRESHOLD = 3.0
 
@@ -41,6 +45,24 @@ def summarize_diagnostics_backends(
         backend_order,
         fits=fits,
     )
+
+
+def summarize_diagnostics_families(
+    source_frames: dict[str, pl.DataFrame],
+    *,
+    registry: SignalFamilyRegistry,
+) -> dict[str, object]:
+    """Summarize pooled OLS diagnostics for every family in the registry."""
+
+    return {
+        "families": {
+            family.key: summarize_diagnostics_family(
+                source_frames,
+                family=family,
+            )
+            for family in registry.families
+        }
+    }
 
 
 def summarize_diagnostics_backends_from_fits(
@@ -79,14 +101,84 @@ def summarize_backend_diagnostics(
     )
 
 
+def summarize_diagnostics_for_score_column(
+    analysis_mart: pl.DataFrame,
+    *,
+    label: str,
+    score_column: str,
+) -> dict[str, object]:
+    """Fit and summarize pooled diagnostics for an arbitrary signal column."""
+
+    fit = fit_regression_for_score_column(
+        analysis_mart,
+        label=label,
+        score_column=score_column,
+    )
+    return _summarize_backend_diagnostics_result(
+        analysis_mart,
+        backend=label,
+        fit=fit,
+        score_column=score_column,
+    )
+
+
+def summarize_diagnostics_family(
+    source_frames: dict[str, pl.DataFrame],
+    *,
+    family: SignalFamily,
+) -> dict[str, object]:
+    """Summarize pooled diagnostics for one signal family."""
+
+    source_mart = source_mart_for_family(family)
+    source_frame = source_frames.get(source_mart)
+    if source_frame is None or source_frame.is_empty():
+        return {
+            "family": family.key,
+            "kind": family.kind,
+            "source_mart": source_mart,
+            "signal_columns": list(family.signal_columns),
+            "signals": {},
+            "backends": {},
+            "status": "skipped",
+            "skipped_reason": "no_usable_rows",
+        }
+
+    signal_summaries: dict[str, dict[str, object]] = {}
+    for signal_column in family.signal_columns:
+        signal_summaries[signal_column] = summarize_diagnostics_for_score_column(
+            source_frame,
+            label=family.key,
+            score_column=signal_column,
+        )
+    status = (
+        "computed"
+        if any(summary.get("status") != "skipped" for summary in signal_summaries.values())
+        else "skipped"
+    )
+    family_summary: dict[str, object] = {
+        "family": family.key,
+        "kind": family.kind,
+        "source_mart": source_mart,
+        "signal_columns": list(family.signal_columns),
+        "signals": signal_summaries,
+        "backends": signal_summaries,
+        "status": status,
+    }
+    if status == "skipped":
+        family_summary["skipped_reason"] = "no_usable_rows"
+    return family_summary
+
+
 def _summarize_backend_diagnostics_result(
     analysis_mart: pl.DataFrame,
     *,
     backend: str,
     fit: BackendRegressionFit | None,
+    score_column: str | None = None,
 ) -> dict[str, object]:
     if fit is None:
-        score_column = _score_column_for_backend(backend)
+        if score_column is None:
+            score_column = _score_column_for_backend(backend)
         model_frame = analysis_mart.filter(pl.col(score_column).is_not_null()).drop_nulls(
             [score_column, "serp_rank", "page_text_length"]
         )
@@ -155,12 +247,7 @@ def summarize_backend_diagnostics_from_fit(
         for row_index in np.flatnonzero(row_flags)
     ]
 
-    reset_result = linear_reset(
-        fit.feature_result,
-        power=2,
-        use_f=True,
-        cov_type="nonrobust",
-    )
+    reset_summary = _reset_summary(fit.feature_result)
     breusch_pagan = het_breuschpagan(
         residuals,
         fit.feature_result.model.exog,
@@ -186,14 +273,7 @@ def summarize_backend_diagnostics_from_fit(
         "model_formula": fit.feature_result.model.formula,
         "baseline_formula": fit.baseline_result.model.formula,
         "residuals_vs_fitted": _residuals_vs_fitted_summary(residuals, fitted),
-        "reset": {
-            "status": "computed",
-            "statistic": _finite_float(reset_result.statistic),
-            "p_value": _finite_float(reset_result.pvalue),
-            "df_denom": _finite_float(getattr(reset_result, "df_denom", None)),
-            "flagged": _finite_float(reset_result.pvalue) is not None
-            and _finite_float(reset_result.pvalue) < RESET_P_VALUE_THRESHOLD,
-        },
+        "reset": reset_summary,
         "breusch_pagan": _breusch_pagan_summary(
             breusch_pagan,
             flagged=_breusch_pagan_flagged(breusch_pagan),
@@ -220,6 +300,43 @@ def summarize_backend_diagnostics_from_fit(
             "rows": influential_rows,
         },
     } | ({"shapiro": shapiro} if shapiro is not None else {})
+
+
+def _reset_summary(feature_result) -> dict[str, object]:
+    df_resid = float(feature_result.df_resid)
+    if df_resid < MIN_DF_RESID_FOR_RESET:
+        return {
+            "status": "skipped",
+            "skipped_reason": "insufficient_df_resid",
+            "df_resid": df_resid,
+            "min_df_resid": MIN_DF_RESID_FOR_RESET,
+        }
+
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            reset_result = linear_reset(
+                feature_result,
+                power=RESET_POWER,
+                use_f=True,
+                cov_type="nonrobust",
+            )
+    except ValueError as error:
+        return {
+            "status": "skipped",
+            "skipped_reason": "reset_test_failed",
+            "df_resid": df_resid,
+            "error": str(error),
+        }
+
+    return {
+        "status": "computed",
+        "statistic": _finite_float(reset_result.statistic),
+        "p_value": _finite_float(reset_result.pvalue),
+        "df_denom": _finite_float(getattr(reset_result, "df_denom", None)),
+        "flagged": _finite_float(reset_result.pvalue) is not None
+        and _finite_float(reset_result.pvalue) < RESET_P_VALUE_THRESHOLD,
+    }
 
 
 def _safe_influence_arrays(

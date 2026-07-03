@@ -1,4 +1,9 @@
-from seo_rank.textrazor import fixture_entity_response, normalize_entities
+import json
+
+import polars as pl
+
+from seo_rank.data.normalize import build_textrazor_page_metrics_frame, stable_id
+from seo_rank.textrazor import fixture_entity_response, fixture_page_metrics_response, normalize_entities
 
 
 def test_normalize_entities_preserves_textrazor_schema_for_page_text() -> None:
@@ -29,4 +34,55 @@ def test_normalize_entities_preserves_textrazor_schema_for_page_text() -> None:
             "relevance": 0.71,
             "types": ["SoftwareAgent"],
         },
+    ]
+
+
+def test_build_textrazor_page_metrics_frame_materializes_page_level_signals() -> None:
+    response = fixture_page_metrics_response(
+        url="https://example.com/technical-seo/1",
+        text="Technical SEO helps crawlers discover important pages.",
+    )
+    frame = pl.DataFrame(
+        [
+            {
+                "run_id": "run-1",
+                "response_id": "page-resp-1",
+                "target_keyword": "Technical SEO",
+                "response_body_bytes": json.dumps(response).encode("utf-8"),
+            }
+        ]
+    )
+
+    metrics = build_textrazor_page_metrics_frame(frame, run_id="run-1")
+
+    assert metrics.to_dicts() == [
+        {
+            "run_id": "run-1",
+            "target_keyword_id": stable_id("Technical SEO"),
+            "target_keyword": "Technical SEO",
+            "response_id": "page-resp-1",
+            "canonical_url_hash": stable_id("https://example.com/technical-seo/1"),
+            "url": "https://example.com/technical-seo/1",
+            "page_metrics_row_id": stable_id(
+                "run-1",
+                "Technical SEO",
+                "https://example.com/technical-seo/1",
+            ),
+            "textrazor_entity_confidence_score": 7.5,
+            "textrazor_entity_relevance_score": 0.92,
+            "textrazor_topic_score": 0.66,
+            "textrazor_category_score": 0.83,
+            "textrazor_classifier_score": 0.74,
+            "textrazor_entailment_score": 0.61,
+            "textrazor_entailment_prior": 0.34,
+            "textrazor_entailment_context": 0.27,
+            "textrazor_word_count": 2,
+            "textrazor_grammar_count": 1,
+            "textrazor_sense_count": 1,
+            "textrazor_spelling_count": 1,
+            "textrazor_relation_count": 2,
+            "textrazor_property_count": 1,
+            "textrazor_noun_phrase_count": 3,
+            "schema_version": "curated.v1",
+        }
     ]

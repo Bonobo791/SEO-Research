@@ -9,9 +9,19 @@ import pyarrow.parquet as pq
 
 from seo_rank.cli import load_pages_for_textrazor
 from seo_rank.cli import main
+from seo_rank.cli import RAW_RESPONSE_SCHEMA
 from seo_rank.data.normalize import CURATED_SCHEMAS
 from seo_rank.dataforseo import fixture_page_text_response
 from seo_rank.dataforseo import parsed_page_text
+
+
+def _assert_textrazor_entities_raw_response_contract(parquet_path: Path) -> None:
+    table = pq.ParquetFile(parquet_path).read()
+    assert table.schema == RAW_RESPONSE_SCHEMA
+    rows = table.to_pylist()
+    assert rows
+    assert {row["endpoint"] for row in rows} == {"entities"}
+    assert {row["provider"] for row in rows} == {"textrazor"}
 
 
 def _write_curated_pages_partition(
@@ -255,4 +265,7 @@ def test_run_stored_run_live_textrazor_only_backfills_entities_without_dataforse
         }
     ]
     assert payload["keyword_results"][0]["textrazor_entities"] == payload["textrazor_entities"]
+    _assert_textrazor_entities_raw_response_contract(
+        run_dir / "parquet" / "raw_responses" / "endpoint=entities" / "part-0.parquet"
+    )
     assert (run_dir / "stats" / "stats_summary.json").exists()

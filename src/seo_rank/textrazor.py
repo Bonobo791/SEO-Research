@@ -8,6 +8,16 @@ from dataclasses import dataclass
 from typing import Any
 
 TEXTRAZOR_BASE_URL = "https://api.textrazor.com"
+TEXTRAZOR_PAGE_METRIC_EXTRACTORS = (
+    "entities",
+    "topics",
+    "categories",
+    "entailments",
+    "words",
+    "relations",
+    "properties",
+    "nounPhrases",
+)
 
 
 @dataclass(frozen=True)
@@ -20,6 +30,11 @@ class TextRazorEndpoint:
 TEXTRAZOR_ENDPOINTS = {
     "entities": TextRazorEndpoint(
         extractor="entities",
+        raw_response_endpoint="entities",
+        request_path="/",
+    ),
+    "page_metrics": TextRazorEndpoint(
+        extractor=",".join(TEXTRAZOR_PAGE_METRIC_EXTRACTORS),
         raw_response_endpoint="entities",
         request_path="/",
     ),
@@ -50,7 +65,7 @@ class TextRazorClientError(RuntimeError):
 def build_entity_request(page_text: Mapping[str, str]) -> TextRazorRequest:
     """Build a TextRazor entity extraction request from parsed page text."""
 
-    endpoint = TEXTRAZOR_ENDPOINTS["entities"]
+    endpoint = TEXTRAZOR_ENDPOINTS["page_metrics"]
     return TextRazorRequest(
         method="POST",
         path=endpoint.request_path,
@@ -206,6 +221,61 @@ def fixture_entity_response(url: str, text: str) -> dict[str, object]:
     }
 
 
+def fixture_page_metrics_response(url: str, text: str) -> dict[str, object]:
+    """Return a deterministic TextRazor-shaped page metrics fixture."""
+
+    return {
+        "provider": "textrazor",
+        "url": url,
+        "response": {
+            "language": "eng",
+            "entities": [
+                {
+                    "entityId": "technical-seo",
+                    "matchedText": "Technical SEO",
+                    "confidenceScore": 7.5,
+                    "relevanceScore": 0.92,
+                    "type": ["Topic", "SEO"],
+                },
+                {
+                    "entityId": "crawler",
+                    "matchedText": "crawlers",
+                    "confidenceScore": 5.5,
+                    "relevanceScore": 0.71,
+                    "type": ["SoftwareAgent"],
+                },
+            ],
+            "topics": [
+                {"label": "Technical SEO", "score": 0.66},
+                {"label": "Search crawling", "score": 0.41},
+            ],
+            "categories": [
+                {"label": "Search engine optimization", "score": 0.83, "classifierScore": 0.74},
+            ],
+            "entailments": [
+                {"term": "crawlers", "score": 0.61, "priorScore": 0.34, "contextScore": 0.27},
+            ],
+            "words": [
+                {"text": "Technical", "isGrammar": True, "isSense": False, "isSpelling": False},
+                {"text": "SEO", "isGrammar": False, "isSense": True, "isSpelling": True},
+            ],
+            "relations": [
+                {"subject": "Technical SEO", "object": "crawlers"},
+                {"subject": "crawlers", "object": "pages"},
+            ],
+            "properties": [
+                {"name": "crawlability"},
+            ],
+            "nounPhrases": [
+                {"text": "Technical SEO"},
+                {"text": "important pages"},
+                {"text": "search crawlers"},
+            ],
+        },
+        "source_text": text,
+    }
+
+
 def normalize_entities(
     response: Mapping[str, Any],
     *,
@@ -249,3 +319,76 @@ def normalize_entities(
             }
         )
     return normalized
+
+
+def normalize_page_metrics(
+    response: Mapping[str, Any],
+    *,
+    url: str,
+) -> dict[str, object]:
+    """Normalize page-level TextRazor metrics into stable scalar signals."""
+
+    payload = response.get("response", {})
+    if not isinstance(payload, Mapping):
+        payload = {}
+
+    entities = _mapping_list(payload.get("entities"))
+    topics = _mapping_list(payload.get("topics"))
+    categories = _mapping_list(payload.get("categories"))
+    entailments = _mapping_list(payload.get("entailments"))
+    words = _mapping_list(payload.get("words"))
+    relations = _mapping_list(payload.get("relations"))
+    properties = _mapping_list(payload.get("properties"))
+    noun_phrases = _mapping_list(payload.get("nounPhrases"))
+
+    return {
+        "url": url,
+        "textrazor_entity_confidence_score": _max_numeric(entities, ("confidenceScore",)),
+        "textrazor_entity_relevance_score": _max_numeric(entities, ("relevanceScore",)),
+        "textrazor_topic_score": _max_numeric(topics, ("score",)),
+        "textrazor_category_score": _max_numeric(categories, ("score",)),
+        "textrazor_classifier_score": _max_numeric(categories, ("classifierScore",)),
+        "textrazor_entailment_score": _max_numeric(entailments, ("score",)),
+        "textrazor_entailment_prior": _max_numeric(entailments, ("priorScore",)),
+        "textrazor_entailment_context": _max_numeric(entailments, ("contextScore",)),
+        "textrazor_word_count": len(words),
+        "textrazor_grammar_count": _count_truthy(words, ("isGrammar",)),
+        "textrazor_sense_count": _count_truthy(words, ("isSense",)),
+        "textrazor_spelling_count": _count_truthy(words, ("isSpelling",)),
+        "textrazor_relation_count": len(relations),
+        "textrazor_property_count": len(properties),
+        "textrazor_noun_phrase_count": len(noun_phrases),
+    }
+
+
+def _mapping_list(value: object) -> list[Mapping[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, Mapping)]
+
+
+def _max_numeric(
+    rows: list[Mapping[str, Any]],
+    candidate_keys: tuple[str, ...],
+) -> float:
+    values: list[float] = []
+    for row in rows:
+        for key in candidate_keys:
+            value = row.get(key)
+            if isinstance(value, int | float):
+                values.append(float(value))
+                break
+    return max(values) if values else 0.0
+
+
+def _count_truthy(
+    rows: list[Mapping[str, Any]],
+    candidate_keys: tuple[str, ...],
+) -> int:
+    count = 0
+    for row in rows:
+        for key in candidate_keys:
+            if bool(row.get(key)):
+                count += 1
+                break
+    return count

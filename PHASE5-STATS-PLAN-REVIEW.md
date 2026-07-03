@@ -368,6 +368,32 @@ fixtures):
 | `GOALS.md` | When Phase 5 becomes active scope, move stats items from Out Of Scope | Done |
 | Phase 5 slices 1–2 | `analysis_spec.v1.yaml` + `src/seo_rank/stats/` scaffold | Done (2026-07-01) |
 | Phase 5 slices 16–20 | Rank-depth confirmatory paths (`rank_depths`, nested JSON, report sections) | Done (2026-07-02) |
+| Phase 5 slices 27–28 | TextRazor `signal_families` registry + `textrazor_page_metrics` mart at URL grain | Done (2026-07-02) |
+| Phase 5 slice 29 | Family-aware Spearman dispatch (`summarize_spearman_families`); OLS/PL/artifacts open | Partial (2026-07-02) |
+
+---
+
+## TextRazor signal families (slices 27–29)
+
+Phase 5 adds TextRazor-derived predictors **without widening** the similarity
+`analysis_mart`. Each SERP URL gets one TextRazor page-metrics response during
+`seo-rank run`; normalization aggregates scalar and structural summaries into
+`textrazor_page_metrics_curated` and the `textrazor_page_metrics` feature mart at
+`target_keyword_id × canonical_url_hash` grain.
+
+`analysis_spec.v1.yaml` registers nine signal families: three similarity backends
+(BGE, Gemini Doc Retrieval, Gemini Semantic Similarity) plus six TextRazor families
+(entity confidence/relevance, topic score, category/classifier, entailment
+score/prior/context, word/grammar/sense/spelling counts, relation/property/noun-phrase
+counts). `src/seo_rank/stats/families.py` loads the registry; `spec.py` derives
+similarity `backend_order` from it.
+
+**Stats status (2026-07-02):** `summarize_spearman_families()` runs keyword-level
+Spearman + BH per family with BH boundaries scoped per family (not globally across
+all signals). Confirmatory pooled OLS, diagnostics, Plackett-Luce, rank-depth
+bundles, and `stats_*` artifact wiring for TextRazor families remain open (slices
+29–30). `seo-rank analyze` today still runs similarity-only confirmatory paths on
+`analysis_mart`.
 
 ---
 

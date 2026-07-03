@@ -72,6 +72,14 @@ seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-textrazor-on
 Pass `--refresh-textrazor` to replace existing `endpoint=entities` rows for the
 same `(target_keyword, url)` keys.
 
+TextRazor responses are stored under `raw_responses/endpoint=entities`, use
+`provider=textrazor`, and share the same `RAW_RESPONSE_SCHEMA` as the other
+raw-response rows. Normalization also materializes `parquet/entities/` (entity
+mentions) and `parquet/textrazor_page_metrics_curated/` (one aggregated row per
+`target_keyword × SERP URL`). The feature mart
+`parquet/textrazor_page_metrics/` feeds Phase 5 TextRazor signal families; the
+similarity `analysis_mart` stays similarity-only.
+
 **Brand-new run with live TextRazor only** uses offline DataForSEO fixtures for
 keyword expansion, SERP, and page text, then calls live TextRazor for entities.
 No DataForSEO HTTP and no `dataforseo.*` entries in `network_calls`:
@@ -104,7 +112,9 @@ On every `run` (offline or live), per expanded cluster keyword:
    fixture embeddings (`compute_page_similarity_features`)
 5. **Page-level similarity scores** — three backends per URL (`compute_page_similarity_scores`
    or live overrides below)
-6. TextRazor entities (fixture unless `--live-providers --live-textrazor`)
+6. TextRazor page metrics (fixture unless `--live-providers --live-textrazor`):
+   one call per parsed SERP URL with extractors
+   `entities,topics,categories,entailments,words,relations,properties,nounPhrases`
 7. Artifacts: `run.json`, `report.md`, `parquet/raw_responses/`, curated tables,
    feature marts, `analysis_mart`, and Phase 5 stats unless `--dry-run` is set
 
@@ -141,8 +151,10 @@ see `ROADMAP.md` (BGE hybrid / retrieve-then-rerank backlog).
 ### `seo-rank analyze` today
 
 `analyze` writes `parquet/analysis_mart/` (SERP rank plus the three similarity
-columns and page text length). If feature marts are missing, it materializes
-them first from the curated tables. It does **not** re-fetch pages or re-run
+columns and page text length). TextRazor page metrics live in separate marts
+(`textrazor_page_metrics_curated`, `textrazor_page_metrics`) at the same URL
+grain; they are not columns on `analysis_mart` today. If feature marts are
+missing, it materializes them first from the curated tables. It does **not** re-fetch pages or re-run
 embeddings. The current stats path runs guardrails, Spearman summaries,
 pooled regression summaries, and page-level Plackett-Luce summaries at four
 confirmatory rank depths (`top_20`, `top_10`, `top_5`, `top_3`) into
@@ -224,11 +236,13 @@ runs/{run_id}/
     pages/part-*.parquet
     passages/part-*.parquet
     entities/part-*.parquet
+    textrazor_page_metrics_curated/part-*.parquet
     similarity_scores/part-*.parquet
     keyword_serp/part-*.parquet
     page_features/part-*.parquet
     passage_features/part-*.parquet
     domain_features/part-*.parquet
+    textrazor_page_metrics/part-*.parquet
     analysis_mart/part-*.parquet
 ```
 
@@ -309,7 +323,7 @@ response.
 |------|---------|
 | `src/seo_rank/` | CLI, provider boundaries, `progress.py` (stderr run logging) |
 | `src/seo_rank/data/` | Polars lake transforms: `scans`, `normalize`, `features`, `marts`, `validate` |
-| `src/seo_rank/stats/` | Phase 5 observational analysis (`spec`, `panel`, `rank_depth`, `spearman`, `regression`, `plackett_luce`, `diagnostics`, `scale`, `artifacts`) |
+| `src/seo_rank/stats/` | Phase 5 observational analysis (`spec`, `families`, `panel`, `rank_depth`, `spearman`, `regression`, `plackett_luce`, `diagnostics`, `scale`, `artifacts`) |
 | `tests/unit/` | pytest unit tests |
 | `ARCHITECTURE.md` | Product architecture, data flow, planned pipeline |
 | `GOALS.md` | Active-scope contract |

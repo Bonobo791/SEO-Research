@@ -38,7 +38,7 @@ Plackett-Luce is deferred backlog work only and is not wired in code today.
 
 #### Progress
 
-**Slices:** 16 of 31 shipped, 2 partial, 13 open.
+**Slices:** 19 of 31 shipped, 2 partial, 10 open.
 
 | # | Slice | Layer | Status | Primary deliverable |
 | - | ----- | ----- | ------ | ------------------- |
@@ -67,24 +67,24 @@ Plackett-Luce is deferred backlog work only and is not wired in code today.
 | 23 | Raw lake merge for entities | Data | Shipped | `merge_raw_response_records` (keyword+url dedupe) |
 | 24 | Stored-run TextRazor backfill | CLI | Shipped | `backfill_textrazor_run` from stored `page_text` |
 | 25 | Brand-new TextRazor-only run | CLI | Shipped | `write_textrazor_only_artifacts` + fixture DFS + live TextRazor |
-| 26 | TextRazor-only tests and docs | CLI | Partial | CLI tests shipped; cross-doc schema contract open |
-| 27 | TextRazor signal registry and family contract | Stats | Open | Signal-family contract at analysis_mart grain |
-| 28 | Materialize TextRazor page metrics | Data | Open | Separate mart from similarity `analysis_mart` |
-| 29 | Generalize the Phase 5 stats engine | Stats | Open | Registry-driven Spearman/OLS/PL per family |
+| 26 | TextRazor-only tests and docs | CLI | Shipped | CLI tests and docs; shared raw-response schema contract |
+| 27 | TextRazor signal registry and family contract | Stats | Shipped | `signal_families` in spec + `families.py` registry |
+| 28 | Materialize TextRazor page metrics | Data | Shipped | `textrazor_page_metrics_curated` + feature mart |
+| 29 | Generalize the Phase 5 stats engine | Stats | Partial | Spearman family dispatch shipped; OLS/PL/diagnostics open |
 | 30 | Fold families into CLI output and artifacts | Stats | Open | Similarity + TextRazor in `stats_*` |
 | 31 | TextRazor signal golden fixtures and tests | Stats | Open | End-to-end fixture with known rank relationships |
 
 **Remaining to close the core similarity delivery:** slices 7–10 (see
 `ROADMAP.md`). OLS / Plackett-Luce standardization and relative-rank work (former
 Phase 5 slices 11–15) is **Phase 6.1** in `ROADMAP.md`. TextRazor-only ingestion:
-slices 21–25 shipped; cross-doc schema contract (slice 26) remains open.
-TextRazor signal expansion slices are 27–31.
+slices 21–26 shipped; shared raw-response schema contract (slice 26) is shipped.
+TextRazor signal expansion: slices 27–28 shipped; slice 29 partial (Spearman family dispatch only); slices 30–31 open.
 Slice 6 live E2E: **S5-11** in `FIXUPS.md` (`page_text` `tasks[].result: null`
 schema drift).
 
 #### Dev slices
 
-**Progress:** 16 of 31 shipped, 2 partial, 13 open.
+**Progress:** 19 of 31 shipped, 2 partial, 10 open.
 
 1. **[x] Slice 1 — Estimand & analysis spec**
    - Add `analysis_spec.v1.yaml`: outcome (`-log(serp_rank)`), predictors,
@@ -321,23 +321,33 @@ schema drift).
     - Covered by `tests/unit/test_cli_run.py` (dedicated writer dispatch + end-to-end
       fixture/live TextRazor path).
 
-26. **[~] Slice 26 — TextRazor-only tests and docs**
+26. **[x] Slice 26 — TextRazor-only tests and docs**
     - **Done:** stored-run backfill (`test_textrazor_backfill.py`); CLI flag/gate
       and brand-new textrazor-only run tests (`test_cli_run.py`).
-    - **Remaining:** cross-doc schema contract in `README.md`, `TESTING.md`,
-      `ARCHITECTURE.md` (`endpoint=entities`, `provider=textrazor`,
-      `RAW_RESPONSE_SCHEMA`); optional TextRazor connectivity probe.
+    - **Remaining:** optional TextRazor connectivity probe.
 
-27. **[ ] Slice 27 — TextRazor signal registry and family contract**
+27. **[x] Slice 27 — TextRazor signal registry and family contract**
     - Signal-family registry at `target_keyword × SERP URL` grain (see
       `ROADMAP.md` slice 27 for full contract).
     - **Depends on slices 24–26** for live entity ingestion without DataForSEO.
 
-28. **[ ] Slice 28 — Materialize TextRazor page metrics**
-    - Extend normalization beyond entities; separate TextRazor page-metrics mart.
+28. **[x] Slice 28 — Materialize TextRazor page metrics**
+    - `build_textrazor_page_metrics_frame()` in `normalize.py`; curated table
+      `textrazor_page_metrics_curated` (one row per `target_keyword × SERP URL`).
+    - Feature mart `textrazor_page_metrics` in `features.py`; join keys match
+      `analysis_mart` (`run_id`, `target_keyword_id`, `canonical_url_hash`).
+    - TextRazor requests use the full page-metrics extractor set
+      (`entities`, `topics`, `categories`, `entailments`, `words`, `relations`,
+      `properties`, `nounPhrases`); raw bodies still land in
+      `raw_responses/endpoint=entities`.
+    - Covered by `tests/unit/test_textrazor_normalization.py` and
+      `tests/unit/test_feature_marts.py`.
 
-29. **[ ] Slice 29 — Generalize the Phase 5 stats engine**
-    - Registry-driven confirmatory bundles per signal family.
+29. **[~] Slice 29 — Generalize the Phase 5 stats engine**
+    - **Shipped:** `summarize_spearman_families()` scopes BH per signal family;
+      `test_stats_family_dispatch.py` covers similarity vs TextRazor frames.
+    - **Open:** pooled OLS, diagnostics, Plackett-Luce, and rank-depth bundles
+      per family; wiring into `artifacts.py` / `seo-rank analyze` (slice 30).
 
 30. **[ ] Slice 30 — Fold families into CLI output and artifacts**
     - Combined `stats_*` report tree for similarity + TextRazor families.
@@ -371,8 +381,11 @@ schema drift).
 ## In Scope (current and near-term)
 
 - `analysis_spec.v1.yaml` and runtime spec loader.
-- `src/seo_rank/stats/` package (`spec`, `panel`, `rank_depth`, `spearman`,
-  `regression`, `diagnostics`, `bh`, `artifacts`, `plackett_luce`).
+- `src/seo_rank/stats/` package (`spec`, `families`, `panel`, `rank_depth`,
+  `spearman`, `regression`, `diagnostics`, `bh`, `artifacts`, `plackett_luce`).
+- TextRazor page-signal curation and feature mart (`textrazor_page_metrics_curated`,
+  `textrazor_page_metrics`) at `target_keyword × SERP URL` grain; similarity
+  `analysis_mart` unchanged.
 - Parallel confirmatory rank depths (`top_20`, `top_10`, `top_5`, `top_3`) with
   per-depth guardrails, Spearman, pooled OLS, Plackett-Luce, and
   `actionable_association_by_rank_depth` in `stats_summary.json`.
@@ -389,11 +402,10 @@ schema drift).
 - Stats robustness appendix for relative predictors — **Phase 6.1** (Slice 13).
 - OLS / PL scaling polish and PL spec runtime wiring — **Phase 6.1** (FIXUPS
   S5-14–S5-19; `ROADMAP.md` § Phase 6.1).
-- TextRazor-only ingestion (slices 21–25 shipped): CLI flags/gates, ingest core,
-  raw-lake entity merge, stored-run backfill, and brand-new
-  `--live-textrazor-only` runs (fixture DataForSEO structure + live TextRazor,
-  zero `dataforseo.*` in `network_calls`). **Still open:** cross-doc schema
-  contract (slice 26).
+- TextRazor-only ingestion (slices 21–26 shipped): CLI flags/gates, ingest core,
+  raw-lake entity merge, stored-run backfill, brand-new `--live-textrazor-only`
+  runs (fixture DataForSEO structure + live TextRazor, zero `dataforseo.*` in
+  `network_calls`), and the shared raw-response schema contract.
 
 ## Out Of Scope
 
@@ -413,7 +425,7 @@ schema drift).
 
 ## Phase 5 acceptance criteria
 
-**Status:** 16 of 31 slices shipped, 2 partial, 13 open.
+**Status:** 19 of 31 slices shipped, 2 partial, 10 open.
 
 | Acceptance item | Slice(s) | Status |
 | --------------- | -------- | ------ |
@@ -441,9 +453,10 @@ schema drift).
 | Stored-run backfill writes `endpoint=entities` without touching DFS partitions | 24 | Shipped |
 | `--live-textrazor-only` brand-new run (fixture DFS + live TextRazor, zero `dataforseo.*` in `network_calls`) | 25 | Shipped |
 | `parquet/entities/` populated after textrazor-only ingest + normalize | 21–25 | Shipped |
-| TextRazor cross-doc schema contract | 26 | Partial |
-| TextRazor signal registry and page-metrics mart | 27, 28 | Open |
-| Family-aware stats registry and combined artifacts | 29, 30 | Open |
+| TextRazor cross-doc schema contract | 26 | Shipped |
+| TextRazor signal registry and page-metrics mart | 27, 28 | Shipped |
+| Family-aware Spearman dispatch (Spearman only) | 29 | Partial |
+| Family-aware OLS/PL/diagnostics + combined artifacts | 29, 30 | Open |
 | Similarity + TextRazor golden fixtures and CLI tests | 31 | Open |
 
 ---

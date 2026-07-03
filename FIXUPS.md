@@ -18,7 +18,10 @@ Slices 3–4 code review (guardrails, Spearman/BH, `analyze` wiring), and the Ju
 code review of stored-run stale SERP replay (`expand_stored_run`, `merge_keyword_results`,
 `load_stored_serp_statuses`), and the Jul 2026 code review of Phase 5 page-level
 Plackett-Luce, regression coefficient scaling (`within_keyword_sd_rms`), fit-once
-artifact wiring, and `normalize_run` `response_id` deduplication. Each item names
+artifact wiring, and `normalize_run` `response_id` deduplication, and the Jul 2026
+code review of Phase 5 TextRazor-only ingestion (slices 21–26:
+`backfill_textrazor_run`, `merge_raw_response_records`, textrazor-only CLI paths).
+Each item names
 the **phase/slice** where it should land. Nothing here blocks Slice 10 sign-off
 unless marked **required**.
 
@@ -466,6 +469,21 @@ passes. Remaining gaps: CLI live-run regression and normalize raw-lake path
 | S5-11 | Accept `page_text` responses where `tasks[].result` is `null` (task-level crawl failure) instead of raising `DataForSEO page_text response schema drift at tasks[0].result: expected list, got NoneType`. Align `DATAFORSEO_RESPONSE_SCHEMAS` `tasks[].result` with `_validate_content_parsing_response` (already `continue`s when `result` is not a list); CLI live path should skip the URL and continue the run. Repro: `seo-rank run --seed "seo company columbus" --live-providers --live-gemini --live-bge`. Unit test for `result: null` pass-through is shipped; see S5-11a and S5-11b for remaining acceptance tests | 5 Slice 6 | required | partial |
 | S5-11a | **CLI regression:** `seo-rank run --live-providers` must not abort when one `page_text` task returns `tasks[].result: null` (crawl failure); skip the URL and continue the run. Add test in `tests/unit/test_cli_run.py` (mock provider or fixture raw response with null `result` amid successful tasks). Parent: S5-11 | 5 Slice 6 | required | open |
 | S5-11b | **Normalize path:** `normalize_run` must tolerate `endpoint=page_text` raw rows whose response body has `tasks[].result: null` — no `DataForSeoParseError`, curated tables materialize for surviving URLs. Add test in `tests/unit/test_run_normalize.py` with null-result `page_text` parquet in the raw lake. Parent: S5-11 | 5 Slice 6 | required | open |
+
+---
+
+## Phase 5 — TextRazor-only ingestion (slices 21–26 — post-ship polish)
+
+Follow-ups from the Jul 2026 code review of shipped TextRazor-only ingestion
+(`--live-textrazor-only`, `--refresh-textrazor`, `fetch_textrazor_entities_for_pages`,
+`merge_raw_response_records`, `backfill_textrazor_run`, `write_textrazor_only_artifacts`).
+None block slices 27–31 unless marked **required**.
+
+| ID | Fix | Phase | Priority | Status |
+| --- | --- | --- | --- | --- |
+| S5-20 | **Stored-run backfill re-fetches every page:** `backfill_textrazor_run()` calls `fetch_textrazor_entities_for_pages()` for all loaded pages even when `(target_keyword, url)` keys already exist in `endpoint=entities`; dedupe happens only at merge time (`refresh=False` skips writes). Re-running backfill on a complete run still burns TextRazor API quota. Before fetching, filter pages whose keys already exist in the entities partition unless `--refresh-textrazor` | 5 Slices 23–24 | nice-to-have | open |
+| S5-21 | **`network_calls` semantics differ between paths:** brand-new textrazor-only runs record `["textrazor.entities"]` once; stored-run backfill appends `"textrazor.entities"` per keyword with responses, so multi-keyword runs can produce duplicate entries. Deduplicate when appending, or document that `network_calls` is append-only accounting, not a unique call list | 5 Slices 21, 24 | nice-to-have | open |
+| S5-22 | **Raw-lake merge logic lives in `cli.py`:** `merge_raw_response_records`, `merge_entity_raw_response_rows`, `load_raw_response_partition_rows`, and `rewrite_endpoint_partition` (~2.7k-line CLI module) are data-layer concerns from Slice 23. Move to something like `src/seo_rank/data/raw_responses.py` when touching this area again | 5 Slice 23 | nice-to-have | open |
 
 ---
 

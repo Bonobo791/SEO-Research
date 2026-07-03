@@ -24,7 +24,7 @@ def test_build_entity_request_posts_parsed_text_without_source_url() -> None:
         "Content-Type": "application/x-www-form-urlencoded",
     }
     assert request.body == {
-        "extractors": "entities",
+        "extractors": "entities,topics,categories,entailments,words,relations,properties,nounPhrases",
         "text": "Technical SEO helps crawlers discover important pages.",
     }
     assert "https://example.com/technical-seo/1" not in request.body.values()
@@ -85,5 +85,8 @@ def test_execute_textrazor_request_posts_form_with_api_key_header() -> None:
         "Content-Type": "application/x-www-form-urlencoded",
         "X-TextRazor-Key": "textrazor-secret",
     }
-    assert sent["body"] == b"extractors=entities&text=Technical+SEO+helps+crawlers."
+    assert (
+        sent["body"]
+        == b"extractors=entities%2Ctopics%2Ccategories%2Centailments%2Cwords%2Crelations%2Cproperties%2CnounPhrases&text=Technical+SEO+helps+crawlers."
+    )
     assert sent["timeout"] == 9.0

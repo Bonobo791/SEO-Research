@@ -80,6 +80,7 @@ def test_build_feature_marts_validates_each_feature_frame_before_sinking(
             "page_features": pl.DataFrame([{"run_id": "run-1"}]).lazy(),
             "passage_features": pl.DataFrame([{"run_id": "run-1"}]).lazy(),
             "domain_features": pl.DataFrame([{"run_id": "run-1"}]).lazy(),
+            "textrazor_page_metrics": pl.DataFrame([{"run_id": "run-1"}]).lazy(),
         }
 
     def fake_validate_frame_contract(frame, **kwargs):
@@ -180,6 +181,35 @@ def test_build_feature_marts_validates_each_feature_frame_before_sinking(
             ),
         ),
         ("write", "domain_features"),
+        (
+            "validate",
+            (
+                "run_id",
+                "target_keyword_id",
+                "target_keyword",
+                "response_id",
+                "canonical_url_hash",
+                "url",
+                "page_metrics_row_id",
+                "textrazor_entity_confidence_score",
+                "textrazor_entity_relevance_score",
+                "textrazor_topic_score",
+                "textrazor_category_score",
+                "textrazor_classifier_score",
+                "textrazor_entailment_score",
+                "textrazor_entailment_prior",
+                "textrazor_entailment_context",
+                "textrazor_word_count",
+                "textrazor_grammar_count",
+                "textrazor_sense_count",
+                "textrazor_spelling_count",
+                "textrazor_relation_count",
+                "textrazor_property_count",
+                "textrazor_noun_phrase_count",
+                "schema_version",
+            ),
+        ),
+        ("write", "textrazor_page_metrics"),
     ]
 
 

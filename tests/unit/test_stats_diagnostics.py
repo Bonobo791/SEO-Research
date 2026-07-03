@@ -87,16 +87,8 @@ def test_summarize_backend_diagnostics_marks_small_sample_shapiro_as_information
 
 def test_summarize_backend_diagnostics_handles_top_3_without_runtime_warnings() -> None:
     spec = load_analysis_spec()
-    run_frame = pl.read_parquet(
-        Path(__file__).resolve().parents[2]
-        / "runs"
-        / "seo-company-columbus-e26107bade78"
-        / "parquet"
-        / "analysis_mart"
-        / "part-0.parquet"
-    )
     top_3_frame = filter_panel_by_max_rank(
-        run_frame,
+        _diagnostics_analysis_mart_frame(),
         max_rank=spec.rank_depth_limit("top_3"),
     )
 
@@ -106,7 +98,33 @@ def test_summarize_backend_diagnostics_handles_top_3_without_runtime_warnings() 
 
     assert captured_warnings == []
     assert summary["status"] == "computed"
+    assert summary["reset"]["status"] == "computed"
     assert summary["influence"]["influential_count"] > 0
+
+
+def test_summarize_backend_diagnostics_skips_reset_when_df_resid_is_too_small() -> None:
+    spec = load_analysis_spec()
+    run_frame = pl.read_parquet(
+        Path(__file__).resolve().parents[2]
+        / "runs"
+        / "seo-company-columbus-e26107bade78"
+        / "parquet"
+        / "analysis_mart"
+        / "part-0.parquet"
+    )
+    top_5_frame = filter_panel_by_max_rank(
+        run_frame,
+        max_rank=spec.rank_depth_limit("top_5"),
+    )
+
+    with warnings.catch_warnings(record=True) as captured_warnings:
+        warnings.simplefilter("always")
+        summary = summarize_backend_diagnostics(top_5_frame, backend="bge")
+
+    assert captured_warnings == []
+    assert summary["status"] == "computed"
+    assert summary["reset"]["status"] == "skipped"
+    assert summary["reset"]["skipped_reason"] == "insufficient_df_resid"
 
 
 def test_run_phase5_stats_writes_stats_diagnostics_json_and_report_section(

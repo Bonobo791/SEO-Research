@@ -367,11 +367,20 @@ def _format_diagnostics_lines(diagnostics: dict[str, object]) -> list[str]:
         reset = backend_summary["reset"]
         breusch_pagan = backend_summary["breusch_pagan"]
         influence = backend_summary["influence"]
+        if reset.get("status") == "skipped":
+            reset_details = (
+                f"reset_status=skipped, "
+                f"reset_skipped_reason={reset.get('skipped_reason', 'unknown')}"
+            )
+        else:
+            reset_details = (
+                f"reset_status={reset['status']}, "
+                f"reset_p_value={reset['p_value']}, "
+                f"reset_flagged={reset['flagged']}"
+            )
         line = (
             "- "
-            f"{backend}: reset_status={reset['status']}, "
-            f"reset_p_value={reset['p_value']}, "
-            f"reset_flagged={reset['flagged']}, "
+            f"{backend}: {reset_details}, "
             f"breusch_pagan_p_value={breusch_pagan['lm_p_value']}, "
             f"breusch_pagan_flagged={breusch_pagan['flagged']}, "
             f"recommended_se_type={breusch_pagan['recommended_se_type']}, "

@@ -17,6 +17,7 @@ def test_stats_package_exports_module_surface() -> None:
     assert stats.regression.__name__ == "seo_rank.stats.regression"
     assert stats.diagnostics.__name__ == "seo_rank.stats.diagnostics"
     assert stats.bh.__name__ == "seo_rank.stats.bh"
+    assert stats.families.__name__ == "seo_rank.stats.families"
     assert stats.artifacts.__name__ == "seo_rank.stats.artifacts"
 
 
@@ -32,6 +33,21 @@ def test_load_analysis_spec_reads_repo_root_yaml() -> None:
         "gemini_doc_retrieval",
         "gemini_semantic_similarity",
     )
+    assert analysis_spec.panel_grain == (
+        "target_keyword_id",
+        "canonical_url_hash",
+    )
+    assert analysis_spec.signal_family_keys == (
+        "bge",
+        "gemini_doc_retrieval",
+        "gemini_semantic_similarity",
+        "textrazor_entity_confidence_relevance",
+        "textrazor_topic_score",
+        "textrazor_category_classifier_score",
+        "textrazor_entailment_score_prior_context",
+        "textrazor_word_grammar_sense_spelling",
+        "textrazor_relation_property_noun_phrase",
+    )
     assert analysis_spec.estimand["outcome"] == "-log(serp_rank)"
 
 
@@ -46,6 +62,23 @@ def test_load_analysis_spec_includes_plackett_luce_secondary_estimand() -> None:
     assert plackett_luce["iia_sensitivity"] == {
         "leave_one_out_top_rank": True,
     }
+
+
+def test_load_analysis_spec_exposes_signal_family_metadata() -> None:
+    analysis_spec = load_analysis_spec()
+
+    assert analysis_spec.signal_family("bge").kind == "similarity"
+    assert analysis_spec.signal_family("bge").signal_columns == ("bge_normalized_score",)
+    assert analysis_spec.signal_family("textrazor_topic_score").kind == "textrazor_scalar"
+    assert analysis_spec.signal_family("textrazor_topic_score").signal_columns == (
+        "textrazor_topic_score",
+    )
+    assert analysis_spec.signal_family("textrazor_word_grammar_sense_spelling").kind == "textrazor_structural"
+    assert analysis_spec.signal_families.similarity_keys == (
+        "bge",
+        "gemini_doc_retrieval",
+        "gemini_semantic_similarity",
+    )
 
 
 def test_load_analysis_spec_logs_version_and_rank_depths(
@@ -72,6 +105,17 @@ def test_build_stats_output_metadata_exposes_estimand_version() -> None:
             "bge",
             "gemini_doc_retrieval",
             "gemini_semantic_similarity",
+        ],
+        "signal_family_order": [
+            "bge",
+            "gemini_doc_retrieval",
+            "gemini_semantic_similarity",
+            "textrazor_entity_confidence_relevance",
+            "textrazor_topic_score",
+            "textrazor_category_classifier_score",
+            "textrazor_entailment_score_prior_context",
+            "textrazor_word_grammar_sense_spelling",
+            "textrazor_relation_property_noun_phrase",
         ],
         "primary_rank_depth": "top_20",
         "confirmatory_rank_depths": ["top_20", "top_10", "top_5", "top_3"],

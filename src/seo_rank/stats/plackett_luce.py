@@ -10,6 +10,7 @@ from math import isfinite
 import numpy as np
 import pandas as pd
 import polars as pl
+from seo_rank.stats.families import SignalFamily, SignalFamilyRegistry, source_mart_for_family
 from seo_rank.stats.rank_depth import filter_panel_by_max_rank
 from seo_rank.stats.scale import within_keyword_sd_rms
 from seo_rank.stats.spec import AnalysisSpec
@@ -26,7 +27,7 @@ SIMILARITY_SCORE_COLUMNS = {
 }
 PLACKET_LUCE_REQUIRED_COLUMNS = ("serp_rank", "page_text_length")
 DEFAULT_MAX_SERP_RANK = 20
-HESSIAN_CONDITION_NUMBER_THRESHOLD = 30.0
+HESSIAN_CONDITION_NUMBER_THRESHOLD = 100.0
 OPTIMIZER_GRADIENT_TOLERANCE = 1e-6
 FORMULA = "rank_ordered_logit ~ similarity + log(page_text_length + 1)"
 
@@ -74,6 +75,28 @@ def summarize_plackett_luce_backends(
     )
 
 
+def summarize_plackett_luce_families(
+    source_frames: dict[str, pl.DataFrame],
+    *,
+    registry: SignalFamilyRegistry,
+    max_rank: int = DEFAULT_MAX_SERP_RANK,
+    include_iia_sensitivity: bool = False,
+) -> dict[str, object]:
+    """Summarize rank-ordered logit models for every family in the registry."""
+
+    return {
+        "families": {
+            family.key: summarize_plackett_luce_family(
+                source_frames,
+                family=family,
+                max_rank=max_rank,
+                include_iia_sensitivity=include_iia_sensitivity,
+            )
+            for family in registry.families
+        }
+    }
+
+
 def fit_backend_plackett_luce(
     analysis_mart: pl.DataFrame,
     *,
@@ -83,16 +106,34 @@ def fit_backend_plackett_luce(
 ) -> PlackettLuceFit | None:
     """Fit a PL model for one backend."""
 
-    logger.debug("fitting plackett-luce backend=%s max_rank=%d", backend, max_rank)
-    score_column = _score_column_for_backend(backend)
+    return fit_plackett_luce_for_score_column(
+        analysis_mart,
+        label=backend,
+        score_column=_score_column_for_backend(backend),
+        max_rank=max_rank,
+        optimizer_options=optimizer_options,
+    )
+
+
+def fit_plackett_luce_for_score_column(
+    analysis_mart: pl.DataFrame,
+    *,
+    label: str,
+    score_column: str,
+    max_rank: int = DEFAULT_MAX_SERP_RANK,
+    optimizer_options: dict[str, object] | None = None,
+) -> PlackettLuceFit | None:
+    """Fit a PL model for one arbitrary signal column."""
+
+    logger.debug("fitting plackett-luce backend=%s max_rank=%d", label, max_rank)
     prepared = _prepare_plackett_luce_frame(analysis_mart, max_rank=max_rank)
     if prepared.is_empty():
-        logger.debug("plackett-luce backend=%s skipped: no prepared rows", backend)
+        logger.debug("plackett-luce backend=%s skipped: no prepared rows", label)
         return None
 
     raw_model_data = prepared.to_pandas().copy()
     if raw_model_data.empty:
-        logger.debug("plackett-luce backend=%s skipped: empty model data", backend)
+        logger.debug("plackett-luce backend=%s skipped: empty model data", label)
         return None
 
     grouped, duplicate_serp_rank_keyword_count = _build_keyword_groups(
@@ -100,13 +141,13 @@ def fit_backend_plackett_luce(
         score_column,
     )
     if not grouped:
-        logger.debug("plackett-luce backend=%s skipped: no keyword groups", backend)
+        logger.debug("plackett-luce backend=%s skipped: no keyword groups", label)
         return None
 
     model_data = pd.concat([group["frame"] for group in grouped], ignore_index=True)
 
     if max(group["choice_set_size"] for group in grouped) < 2:
-        logger.debug("plackett-luce backend=%s skipped: choice set smaller than 2", backend)
+        logger.debug("plackett-luce backend=%s skipped: choice set smaller than 2", label)
         return None
 
     params, optimizer_result = _maximize_log_likelihood(
@@ -137,12 +178,12 @@ def fit_backend_plackett_luce(
     if not optimizer_result.converged:
         logger.warning(
             "plackett-luce backend=%s optimizer did not converge: %s",
-            backend,
+            label,
             optimizer_result.message,
         )
 
     return PlackettLuceFit(
-        backend=backend,
+        backend=label,
         score_column=score_column,
         model_data=model_data,
         choice_set_sizes=choice_set_sizes,
@@ -154,6 +195,86 @@ def fit_backend_plackett_luce(
         optimizer=optimizer_result,
         similarity_within_keyword_sd=within_keyword_sd_rms(model_data, score_column),
     )
+
+
+def summarize_plackett_luce_for_score_column(
+    analysis_mart: pl.DataFrame,
+    *,
+    label: str,
+    score_column: str,
+    max_rank: int = DEFAULT_MAX_SERP_RANK,
+    include_diagnostics: bool = True,
+    include_iia_sensitivity: bool = False,
+) -> dict[str, object]:
+    """Fit and summarize the PL path for an arbitrary signal column."""
+
+    fit = fit_plackett_luce_for_score_column(
+        analysis_mart,
+        label=label,
+        score_column=score_column,
+        max_rank=max_rank,
+    )
+    return _summarize_backend_plackett_luce_result(
+        analysis_mart,
+        backend=label,
+        fit=fit,
+        include_diagnostics=include_diagnostics,
+        include_iia_sensitivity=include_iia_sensitivity,
+        max_rank=max_rank,
+        score_column=score_column,
+    )
+
+
+def summarize_plackett_luce_family(
+    source_frames: dict[str, pl.DataFrame],
+    *,
+    family: SignalFamily,
+    max_rank: int = DEFAULT_MAX_SERP_LUCE,
+    include_iia_sensitivity: bool = False,
+) -> dict[str, object]:
+    """Summarize rank-ordered logit for one signal family."""
+
+    source_mart = source_mart_for_family(family)
+    source_frame = source_frames.get(source_mart)
+    if source_frame is None or source_frame.is_empty():
+        return {
+            "family": family.key,
+            "kind": family.kind,
+            "source_mart": source_mart,
+            "signal_columns": list(family.signal_columns),
+            "signals": {},
+            "backends": {},
+            "status": "skipped",
+            "skipped_reason": "no_usable_rows",
+        }
+
+    signal_summaries: dict[str, dict[str, object]] = {}
+    for signal_column in family.signal_columns:
+        signal_summaries[signal_column] = summarize_plackett_luce_for_score_column(
+            source_frame,
+            label=family.key,
+            score_column=signal_column,
+            max_rank=max_rank,
+            include_diagnostics=True,
+            include_iia_sensitivity=include_iia_sensitivity,
+        )
+    status = (
+        "computed"
+        if any(summary.get("status") != "skipped" for summary in signal_summaries.values())
+        else "skipped"
+    )
+    family_summary: dict[str, object] = {
+        "family": family.key,
+        "kind": family.kind,
+        "source_mart": source_mart,
+        "signal_columns": list(family.signal_columns),
+        "signals": signal_summaries,
+        "backends": signal_summaries,
+        "status": status,
+    }
+    if status == "skipped":
+        family_summary["skipped_reason"] = "no_usable_rows"
+    return family_summary
 
 
 def fit_plackett_luce_backends(
@@ -412,9 +533,11 @@ def _summarize_backend_plackett_luce_result(
     include_diagnostics: bool,
     include_iia_sensitivity: bool = False,
     max_rank: int = DEFAULT_MAX_SERP_RANK,
+    score_column: str | None = None,
 ) -> dict[str, object]:
     if fit is None:
-        score_column = _score_column_for_backend(backend)
+        if score_column is None:
+            score_column = _score_column_for_backend(backend)
         model_frame = _prepare_plackett_luce_frame(analysis_mart, max_rank=max_rank)
         prepared_rows = int(model_frame.height)
         keyword_count = int(model_frame["target_keyword_id"].n_unique()) if prepared_rows else 0

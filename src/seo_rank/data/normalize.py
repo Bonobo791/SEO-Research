@@ -24,7 +24,7 @@ from seo_rank.dataforseo import (
     validate_dataforseo_response,
 )
 from seo_rank.text import normalize_page_text
-from seo_rank.textrazor import TEXTRAZOR_ENDPOINTS, normalize_entities
+from seo_rank.textrazor import TEXTRAZOR_ENDPOINTS, normalize_entities, normalize_page_metrics
 
 CURATED_SCHEMA_VERSION = "curated.v1"
 
@@ -131,6 +131,33 @@ CURATED_SCHEMAS = {
             ("confidence", pa.float64()),
             ("relevance", pa.float64()),
             ("types", pa.list_(pa.string())),
+            ("schema_version", pa.string()),
+        ]
+    ),
+    "textrazor_page_metrics_curated": pa.schema(
+        [
+            ("run_id", pa.string()),
+            ("target_keyword_id", pa.string()),
+            ("target_keyword", pa.string()),
+            ("response_id", pa.string()),
+            ("canonical_url_hash", pa.string()),
+            ("url", pa.string()),
+            ("page_metrics_row_id", pa.string()),
+            ("textrazor_entity_confidence_score", pa.float64()),
+            ("textrazor_entity_relevance_score", pa.float64()),
+            ("textrazor_topic_score", pa.float64()),
+            ("textrazor_category_score", pa.float64()),
+            ("textrazor_classifier_score", pa.float64()),
+            ("textrazor_entailment_score", pa.float64()),
+            ("textrazor_entailment_prior", pa.float64()),
+            ("textrazor_entailment_context", pa.float64()),
+            ("textrazor_word_count", pa.int64()),
+            ("textrazor_grammar_count", pa.int64()),
+            ("textrazor_sense_count", pa.int64()),
+            ("textrazor_spelling_count", pa.int64()),
+            ("textrazor_relation_count", pa.int64()),
+            ("textrazor_property_count", pa.int64()),
+            ("textrazor_noun_phrase_count", pa.int64()),
             ("schema_version", pa.string()),
         ]
     ),
@@ -362,6 +389,76 @@ CURATED_VALIDATION_RULES = {
         ),
         "bounded_columns": {"confidence": (0, None), "relevance": (0, 1)},
     },
+    "textrazor_page_metrics_curated": {
+        "expected_schema": {
+            "run_id": pl.Utf8,
+            "target_keyword_id": pl.Utf8,
+            "target_keyword": pl.Utf8,
+            "response_id": pl.Utf8,
+            "canonical_url_hash": pl.Utf8,
+            "url": pl.Utf8,
+            "page_metrics_row_id": pl.Utf8,
+            "textrazor_entity_confidence_score": pl.Float64,
+            "textrazor_entity_relevance_score": pl.Float64,
+            "textrazor_topic_score": pl.Float64,
+            "textrazor_category_score": pl.Float64,
+            "textrazor_classifier_score": pl.Float64,
+            "textrazor_entailment_score": pl.Float64,
+            "textrazor_entailment_prior": pl.Float64,
+            "textrazor_entailment_context": pl.Float64,
+            "textrazor_word_count": pl.Int64,
+            "textrazor_grammar_count": pl.Int64,
+            "textrazor_sense_count": pl.Int64,
+            "textrazor_spelling_count": pl.Int64,
+            "textrazor_relation_count": pl.Int64,
+            "textrazor_property_count": pl.Int64,
+            "textrazor_noun_phrase_count": pl.Int64,
+            "schema_version": pl.Utf8,
+        },
+        "unique_columns": ("page_metrics_row_id",),
+        "non_null_columns": (
+            "run_id",
+            "target_keyword_id",
+            "target_keyword",
+            "response_id",
+            "canonical_url_hash",
+            "url",
+            "page_metrics_row_id",
+            "textrazor_entity_confidence_score",
+            "textrazor_entity_relevance_score",
+            "textrazor_topic_score",
+            "textrazor_category_score",
+            "textrazor_classifier_score",
+            "textrazor_entailment_score",
+            "textrazor_entailment_prior",
+            "textrazor_entailment_context",
+            "textrazor_word_count",
+            "textrazor_grammar_count",
+            "textrazor_sense_count",
+            "textrazor_spelling_count",
+            "textrazor_relation_count",
+            "textrazor_property_count",
+            "textrazor_noun_phrase_count",
+            "schema_version",
+        ),
+        "bounded_columns": {
+            "textrazor_entity_confidence_score": (0, None),
+            "textrazor_entity_relevance_score": (0, 1),
+            "textrazor_topic_score": (0, 1),
+            "textrazor_category_score": (0, 1),
+            "textrazor_classifier_score": (0, 1),
+            "textrazor_entailment_score": (0, 1),
+            "textrazor_entailment_prior": (0, 1),
+            "textrazor_entailment_context": (0, 1),
+            "textrazor_word_count": (0, None),
+            "textrazor_grammar_count": (0, None),
+            "textrazor_sense_count": (0, None),
+            "textrazor_spelling_count": (0, None),
+            "textrazor_relation_count": (0, None),
+            "textrazor_property_count": (0, None),
+            "textrazor_noun_phrase_count": (0, None),
+        },
+    },
     "similarity_scores": {
         "expected_schema": {
             "run_id": pl.Utf8,
@@ -581,6 +678,10 @@ def build_curated_lazyframes_from_raw_responses(
         lambda frame: build_entities_frame(frame, run_id=run_id),
         schema=CURATED_VALIDATION_RULES["entities"]["expected_schema"],
     )
+    textrazor_page_metrics = entity_responses.map_batches(
+        lambda frame: build_textrazor_page_metrics_frame(frame, run_id=run_id),
+        schema=CURATED_VALIDATION_RULES["textrazor_page_metrics_curated"]["expected_schema"],
+    )
     similarity_scores = pages.group_by("target_keyword").map_groups(
         lambda frame: build_similarity_scores_frame(
             frame,
@@ -601,6 +702,7 @@ def build_curated_lazyframes_from_raw_responses(
         "page_content_fields": page_content_field_rows,
         "passages": passages,
         "entities": entities,
+        "textrazor_page_metrics_curated": textrazor_page_metrics,
         "similarity_scores": similarity_scores,
     }
 
@@ -871,6 +973,41 @@ def build_entities_frame(frame: pl.DataFrame, *, run_id: str) -> pl.DataFrame:
     if not rows:
         return pl.DataFrame(
             schema=CURATED_VALIDATION_RULES["entities"]["expected_schema"]
+        )
+    return pl.DataFrame(rows)
+
+
+def build_textrazor_page_metrics_frame(
+    frame: pl.DataFrame,
+    *,
+    run_id: str,
+) -> pl.DataFrame:
+    rows: list[dict[str, object]] = []
+    for record in frame.to_dicts():
+        response_id = str(record["response_id"])
+        target_keyword = str(record["target_keyword"])
+        target_keyword_id = stable_id(target_keyword)
+        body = json.loads(bytes(record["response_body_bytes"]).decode("utf-8"))
+        url = str(body.get("url", "")).strip()
+        if not url:
+            continue
+        metrics = normalize_page_metrics(body, url=url)
+        rows.append(
+            {
+                "run_id": run_id,
+                "target_keyword_id": target_keyword_id,
+                "target_keyword": target_keyword,
+                "response_id": response_id,
+                "canonical_url_hash": stable_id(url),
+                "url": url,
+                "page_metrics_row_id": stable_id(run_id, target_keyword, url),
+                **metrics,
+                "schema_version": CURATED_SCHEMA_VERSION,
+            }
+        )
+    if not rows:
+        return pl.DataFrame(
+            schema=CURATED_VALIDATION_RULES["textrazor_page_metrics_curated"]["expected_schema"]
         )
     return pl.DataFrame(rows)
 

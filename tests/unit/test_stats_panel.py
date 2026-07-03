@@ -159,6 +159,7 @@ def _analysis_spec_with_primary_rank_depth(depth_key: str) -> AnalysisSpec:
         path=spec.path,
         source_path=spec.source_path,
         data=MappingProxyType(data),
+        _signal_families=spec.signal_families,
     )
 
 

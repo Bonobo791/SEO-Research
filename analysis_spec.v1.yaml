@@ -43,6 +43,57 @@ panel:
   keyword_clustered_se: target_keyword_id
   url_two_way_cluster_sensitivity: canonical_url_hash
 
+signal_families:
+  panel_grain:
+    - target_keyword_id
+    - canonical_url_hash
+  families:
+    - key: bge
+      kind: similarity
+      signal_columns:
+        - bge_normalized_score
+    - key: gemini_doc_retrieval
+      kind: similarity
+      signal_columns:
+        - gemini_doc_retrieval_normalized_score
+    - key: gemini_semantic_similarity
+      kind: similarity
+      signal_columns:
+        - gemini_semantic_similarity_normalized_score
+    - key: textrazor_entity_confidence_relevance
+      kind: textrazor_scalar
+      signal_columns:
+        - textrazor_entity_confidence_score
+        - textrazor_entity_relevance_score
+    - key: textrazor_topic_score
+      kind: textrazor_scalar
+      signal_columns:
+        - textrazor_topic_score
+    - key: textrazor_category_classifier_score
+      kind: textrazor_scalar
+      signal_columns:
+        - textrazor_category_score
+        - textrazor_classifier_score
+    - key: textrazor_entailment_score_prior_context
+      kind: textrazor_scalar
+      signal_columns:
+        - textrazor_entailment_score
+        - textrazor_entailment_prior
+        - textrazor_entailment_context
+    - key: textrazor_word_grammar_sense_spelling
+      kind: textrazor_structural
+      signal_columns:
+        - textrazor_word_count
+        - textrazor_grammar_count
+        - textrazor_sense_count
+        - textrazor_spelling_count
+    - key: textrazor_relation_property_noun_phrase
+      kind: textrazor_structural
+      signal_columns:
+        - textrazor_relation_count
+        - textrazor_property_count
+        - textrazor_noun_phrase_count
+
 estimand:
   outcome: -log(serp_rank)
   primary_metric: keyword_level_spearman_rho

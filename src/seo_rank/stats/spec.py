@@ -10,6 +10,8 @@ from typing import Any, Mapping
 
 import yaml
 
+from seo_rank.stats.families import SignalFamily, SignalFamilyRegistry
+from seo_rank.stats.families import load_signal_family_registry
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +25,7 @@ class AnalysisSpec:
     path: Path
     source_path: Path
     data: Mapping[str, Any]
+    _signal_families: SignalFamilyRegistry
 
     @property
     def version(self) -> str:
@@ -38,8 +41,22 @@ class AnalysisSpec:
 
     @property
     def backend_order(self) -> tuple[str, ...]:
-        backend_order = self.data["decision"]["backend_order"]
-        return tuple(str(backend) for backend in backend_order)
+        return self.signal_families.similarity_keys
+
+    @property
+    def panel_grain(self) -> tuple[str, ...]:
+        return self.signal_families.panel_grain
+
+    @property
+    def signal_families(self) -> SignalFamilyRegistry:
+        return self._signal_families
+
+    @property
+    def signal_family_keys(self) -> tuple[str, ...]:
+        return self.signal_families.keys
+
+    def signal_family(self, family_key: str) -> SignalFamily:
+        return self.signal_families.family(family_key)
 
     @property
     def estimand(self) -> Mapping[str, Any]:
@@ -72,10 +89,18 @@ def load_analysis_spec(path: Path | str | None = None) -> AnalysisSpec:
         loaded = yaml.safe_load(handle)
     if not isinstance(loaded, dict):
         raise ValueError("analysis spec must load as a mapping")
+    signal_families = _load_signal_families(loaded)
+    backend_order = tuple(str(backend) for backend in loaded["decision"]["backend_order"])
+    if backend_order != signal_families.similarity_keys:
+        raise ValueError("decision.backend_order must match similarity signal families")
+    primary_backend = str(loaded["decision"]["primary_backend"])
+    if primary_backend != signal_families.similarity_keys[0]:
+        raise ValueError("decision.primary_backend must match the first similarity signal family")
     analysis_spec = AnalysisSpec(
         path=requested_path,
         source_path=source_path,
         data=MappingProxyType(dict(loaded)),
+        _signal_families=signal_families,
     )
     logger.info(
         "loaded analysis spec version=%s source=%s primary_rank_depth=%s depths=%s",
@@ -85,6 +110,21 @@ def load_analysis_spec(path: Path | str | None = None) -> AnalysisSpec:
         list(analysis_spec.confirmatory_rank_depths),
     )
     return analysis_spec
+
+
+def _load_signal_families(loaded: Mapping[str, Any]) -> SignalFamilyRegistry:
+    panel = loaded.get("panel")
+    if not isinstance(panel, Mapping):
+        raise ValueError("analysis spec panel must be a mapping")
+    panel_grain = panel.get("grain")
+    signal_families = loaded.get("signal_families")
+    if not isinstance(signal_families, Mapping):
+        raise ValueError("analysis spec must define signal_families")
+    registry = load_signal_family_registry(
+        panel_grain=panel_grain,
+        raw_spec=signal_families,
+    )
+    return registry
 
 
 def _resolve_analysis_spec_path(requested_path: Path) -> Path:

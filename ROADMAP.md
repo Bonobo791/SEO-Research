@@ -97,7 +97,7 @@ confirmatory keyword holdout (Phase 5.4), passage-level Plackett-Luce analysis.
 
 #### Dev slices
 
-**Progress:** 16 of 31 shipped, 2 partial, 13 open.
+**Progress:** 19 of 31 shipped, 2 partial, 10 open.
 
 1. **[x] Slice 1 — Estimand & analysis spec**
    - Add `analysis_spec.v1.yaml`: outcome (`-log(serp_rank)`), predictors,
@@ -317,12 +317,13 @@ the existing `raw_responses` lake using `endpoint=entities`, `provider=textrazor
     - `main()` dispatches when `--live-textrazor-only` without `--stored-run`.
     - Zero `dataforseo.*` in `network_calls`; covered by `test_cli_run.py`.
 
-26. **[~] Slice 26 — TextRazor-only tests and docs**
+26. **[x] Slice 26 — TextRazor-only tests and docs**
     - **Done:** stored-run backfill (`test_textrazor_backfill.py`); CLI
-      flag/gate and brand-new textrazor-only run tests (`test_cli_run.py`).
-    - **Remaining:** cross-doc schema contract in `README.md`, `TESTING.md`,
+      flag/gate, brand-new textrazor-only run tests (`test_cli_run.py`), and
+      the shared raw-response schema contract in `README.md`, `TESTING.md`, and
       `ARCHITECTURE.md`.
-    - Optional TextRazor connectivity probe in `test_provider_connectivity.py`.
+    - **Remaining:** optional TextRazor connectivity probe in
+      `test_provider_connectivity.py`.
 
 **Example usage:**
 
@@ -339,34 +340,33 @@ seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-textrazor-on
 
 #### TextRazor signal expansion (stats plane — depends on slices 21–26)
 
-27. **[ ] Slice 27 — TextRazor signal registry and family contract**
-    - Define a signal-family registry at the same `target_keyword × SERP URL`
-      grain as `analysis_mart`.
-    - Cover similarity backends plus TextRazor scalar families: entity
-      confidence/relevance, topic score, category/classifier score, and
-      entailment score/prior/context.
-    - Cover TextRazor structural families with derived numeric summaries for
-      word/grammar/sense/spelling and relation/property/noun-phrase counts or
-      densities.
-    - Keep the existing similarity rules intact; TextRazor families are
-      additive, not a replacement.
+27. **[x] Slice 27 — TextRazor signal registry and family contract**
+    - `analysis_spec.v1.yaml` `signal_families` block: three similarity families
+      plus six TextRazor scalar/structural families at
+      `target_keyword_id × canonical_url_hash` grain.
+    - `src/seo_rank/stats/families.py` loads the registry; `spec.py` derives
+      `backend_order` from similarity-family keys and validates against
+      `decision.backend_order`.
+    - Covered by `tests/unit/test_stats_families.py` and
+      `tests/unit/test_stats_spec.py`.
 
-28. **[ ] Slice 28 — Materialize TextRazor page metrics**
-    - Extend TextRazor normalization so the raw response can emit the required
-      extractors beyond entities.
-    - Add a separate TextRazor page-metrics mart at the same page grain as
-      `analysis_mart`, with one row per `target_keyword × SERP URL`.
-    - Derive stable page-level numeric summaries from the curated TextRazor
-      tables so downstream stats can consume them without widening the current
-      similarity mart.
+28. **[x] Slice 28 — Materialize TextRazor page metrics**
+    - `build_textrazor_page_metrics_frame()` aggregates entity/topic/category/
+      entailment/structural counts from TextRazor page-metrics responses.
+    - Curated `textrazor_page_metrics_curated` and feature mart
+      `textrazor_page_metrics` (same grain as `analysis_mart`; not joined into
+      the similarity mart).
+    - TextRazor HTTP uses the full extractor set; responses still partition under
+      `raw_responses/endpoint=entities`.
+    - Covered by `tests/unit/test_textrazor_normalization.py` and
+      `tests/unit/test_feature_marts.py`.
 
-29. **[ ] Slice 29 — Generalize the Phase 5 stats engine**
-    - Replace hard-coded backend lists in the stats modules with a
-      signal-family registry.
-    - Run the same Spearman/BH, pooled OLS, diagnostics, optional
-      Plackett-Luce, and rank-depth bundles per signal family.
-    - Keep Benjamini–Hochberg family boundaries per signal family rather than
-      globally across all signals.
+29. **[~] Slice 29 — Generalize the Phase 5 stats engine**
+    - **Shipped:** `summarize_spearman_families()` runs Spearman + BH per
+      registered family with per-family BH boundaries; covered by
+      `tests/unit/test_stats_family_dispatch.py`.
+    - **Open:** pooled OLS, diagnostics, Plackett-Luce, and rank-depth bundles
+      per family; artifact emission (slice 30).
 
 30. **[ ] Slice 30 — Fold families into CLI output and artifacts**
     - Extend `stats_summary.json`, `stats_diagnostics.json`, and
@@ -411,9 +411,10 @@ seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-textrazor-on
 | `--live-textrazor-only` brand-new run (fixture structure + live TextRazor) | 25 | Shipped |
 | Stored-run entity backfill merges `endpoint=entities` only | 23, 24 | Shipped |
 | `parquet/entities/` after textrazor-only ingest + normalize | 21–25 | Shipped |
-| TextRazor cross-doc schema contract | 26 | Partial |
-| TextRazor signal registry and page-metrics mart | 27, 28 | Open |
-| Family-aware stats registry and combined artifacts | 29, 30 | Open |
+| TextRazor cross-doc schema contract | 26 | Shipped |
+| TextRazor signal registry and page-metrics mart | 27, 28 | Shipped |
+| Family-aware Spearman dispatch (Spearman only) | 29 | Partial |
+| Family-aware OLS/PL/diagnostics + combined artifacts | 29, 30 | Open |
 | Similarity + TextRazor golden fixtures and CLI tests | 31 | Open |
 
 ### Phase 5.1 — Live provider fail-fast on DataForSEO denial
@@ -1048,14 +1049,23 @@ Slice 4. Slice 7 last.
   `## Rank depth:` sections in `stats_report.md`,
   `actionable_association_by_rank_depth`, leave-one-out IIA on `top_20` only;
   covered by `tests/unit/test_stats_rank_depth.py`.
-- **Phase 5 Slices 21–25 shipped (2026-07-02):** TextRazor-only ingestion path —
+- **Phase 5 Slices 27–28 shipped (2026-07-02):** TextRazor signal-family registry
+  in `analysis_spec.v1.yaml` and `families.py`; curated
+  `textrazor_page_metrics_curated` plus feature mart `textrazor_page_metrics`
+  at `target_keyword × SERP URL` grain; full page-metrics TextRazor extractors;
+  similarity `analysis_mart` unchanged. Covered by `test_stats_families.py`,
+  `test_textrazor_normalization.py`, and `test_feature_marts.py`.
+- **Phase 5 Slice 29 partial (2026-07-02):** `summarize_spearman_families()`
+  scopes BH per signal family; `test_stats_family_dispatch.py`. OLS/PL/diagnostics
+  per family and CLI artifact wiring remain open (slices 29–30).
+- **Phase 5 Slices 21–26 shipped (2026-07-02):** TextRazor-only ingestion path —
   `--live-textrazor-only` / `--refresh-textrazor` CLI flags and gates,
   `TEXTRAZOR_ENDPOINTS` registry, `fetch_textrazor_entities_for_pages()`,
   `merge_raw_response_records()` for `endpoint=entities`, stored-run backfill
   via `backfill_textrazor_run()`, and brand-new runs via
   `write_textrazor_only_artifacts()` (fixture DataForSEO structure + live
   TextRazor, zero `dataforseo.*` in `network_calls`). Cross-doc schema contract
-  (slice 26) remains open.
+  (slice 26) is shipped.
 - **Phase 5.1 planned (2026-07-02):** live provider fail-fast on fatal DataForSEO
   task errors (`40207` IP whitelist, auth failures) — shared classifier, abort on
   all live endpoints, optional preflight, CLI flag override on stored-run replay,

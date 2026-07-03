@@ -20,6 +20,15 @@ from seo_rank.textrazor import fixture_entity_response
 from seo_rank.textrazor import TextRazorCredentials
 
 
+def _assert_textrazor_entities_raw_response_contract(parquet_path: Path) -> None:
+    table = pq.ParquetFile(parquet_path).read()
+    assert table.schema == RAW_RESPONSE_SCHEMA
+    rows = table.to_pylist()
+    assert rows
+    assert {row["endpoint"] for row in rows} == {"entities"}
+    assert {row["provider"] for row in rows} == {"textrazor"}
+
+
 def test_run_without_output_dir_writes_stable_default_run_directory(
     tmp_path: Path,
     monkeypatch,
@@ -377,7 +386,9 @@ def test_run_live_textrazor_only_uses_offline_dataforseo_fixtures_and_live_textr
     ]
     assert len(textrazor_requests) == 3
     assert all(
-        request["body"].startswith(b"extractors=entities&text=")
+        request["body"].startswith(
+            b"extractors=entities%2Ctopics%2Ccategories%2Centailments%2Cwords%2Crelations%2Cproperties%2CnounPhrases&text="
+        )
         and b"Fixture+Page" in request["body"]
         for request in textrazor_requests
     )
@@ -420,6 +431,9 @@ def test_run_live_textrazor_only_uses_offline_dataforseo_fixtures_and_live_textr
             "target_keyword": "technical seo",
         },
     ]
+    _assert_textrazor_entities_raw_response_contract(
+        output_dir / "parquet" / "raw_responses" / "endpoint=entities" / "part-0.parquet"
+    )
 
 
 def test_run_materializes_feature_marts_analysis_and_stats_for_fresh_runs(
@@ -918,6 +932,9 @@ def test_run_stored_run_refreshes_textrazor_entities_latest_wins_without_touchin
     ).read_bytes() == original_partition_bytes[
         raw_responses_dir / "endpoint=page_text" / "part-0.parquet"
     ]
+    _assert_textrazor_entities_raw_response_contract(
+        raw_responses_dir / "endpoint=entities" / "part-0.parquet"
+    )
     assert (output_dir / "stats" / "stats_summary.json").exists()
 
 
@@ -2187,6 +2204,9 @@ def test_run_live_providers_writes_artifacts_with_injected_transports(
     assert (
         payload["keyword_results"][0]["textrazor_entities"][0]["target_keyword"]
         == "technical seo"
+    )
+    _assert_textrazor_entities_raw_response_contract(
+        output_dir / "parquet" / "raw_responses" / "endpoint=entities" / "part-0.parquet"
     )
 
 
