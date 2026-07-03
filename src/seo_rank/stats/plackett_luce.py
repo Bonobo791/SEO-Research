@@ -229,7 +229,7 @@ def summarize_plackett_luce_family(
     source_frames: dict[str, pl.DataFrame],
     *,
     family: SignalFamily,
-    max_rank: int = DEFAULT_MAX_SERP_LUCE,
+    max_rank: int = DEFAULT_MAX_SERP_RANK,
     include_iia_sensitivity: bool = False,
 ) -> dict[str, object]:
     """Summarize rank-ordered logit for one signal family."""

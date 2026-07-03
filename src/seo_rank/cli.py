@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import logging
 import os
 import re
 import sys
@@ -20,7 +21,7 @@ from seo_rank.env import ensure_project_env_loaded
 from seo_rank.data import build_analysis_mart, build_feature_marts, normalize_run
 from seo_rank.data.scans import scan_curated_table, scan_raw_responses
 from seo_rank.progress import RunProgress
-from seo_rank.stats.artifacts import run_phase5_stats
+from seo_rank.stats.artifacts import merge_keyword_analysis_frame, run_phase5_stats
 from seo_rank.dataforseo import (
     DataForSeoClientError,
     DataForSeoCredentialError,
@@ -60,8 +61,9 @@ from seo_rank.textrazor import (
     TextRazorCredentialError,
     TextRazorCredentials,
     fetch_textrazor_entities_for_pages,
-    fixture_entity_response,
+    fixture_page_metrics_response,
     normalize_entities,
+    normalize_page_metrics,
     pages_missing_textrazor,
     validate_textrazor_credentials,
 )
@@ -70,6 +72,7 @@ LIVE_PROVIDER_ENV_FLAG = "SEO_RANK_ENABLE_LIVE_PROVIDERS"
 LIVE_BGE_ENV_FLAG = "SEO_RANK_ENABLE_BGE"
 LIVE_GEMINI_ENV_FLAG = "SEO_RANK_ENABLE_GEMINI"
 LIVE_TEXTRAZOR_ENV_FLAG = "SEO_RANK_ENABLE_TEXTRAZOR"
+TEXTRAZOR_LOG_LEVEL_ENV_FLAG = "SEO_RANK_TEXTRAZOR_LOG_LEVEL"
 DEFAULT_DATAFORSEO_TRANSPORT = None
 DEFAULT_TEXTRAZOR_TRANSPORT = None
 DATAFORSEO_LIVE_REQUEST_TIMEOUT = 120.0
@@ -140,10 +143,36 @@ class LiveProviderCredentials:
     dataforseo: DataForSeoCredentials
 
 
+def configure_textrazor_logging() -> None:
+    """Enable stderr logging for TextRazor fetch/normalize diagnostics."""
+
+    level_name = os.environ.get(TEXTRAZOR_LOG_LEVEL_ENV_FLAG, "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(logging.Formatter("[seo-rank] %(message)s"))
+    textrazor_logger = logging.getLogger("seo_rank.textrazor")
+    textrazor_logger.handlers.clear()
+    textrazor_logger.addHandler(handler)
+    textrazor_logger.setLevel(level)
+    textrazor_logger.propagate = False
+
+
+def normalize_textrazor_response(
+    response: Mapping[str, object],
+    *,
+    url: str,
+) -> list[dict[str, object]]:
+    """Normalize entity rows and page-level metrics for one TextRazor response."""
+
+    normalize_page_metrics(response, url=url)
+    return normalize_entities(response, url=url)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the command-line interface."""
 
     ensure_project_env_loaded()
+    configure_textrazor_logging()
     parser = build_parser()
     try:
         args = parser.parse_args(argv)
@@ -983,7 +1012,8 @@ def _load_textrazor_entities_by_keyword(
         ):
             continue
         response = json.loads(bytes(response_body_bytes).decode("utf-8"))
-        for entity in normalize_entities(response, url=str(response.get("url", ""))):
+        url = str(response.get("url", ""))
+        for entity in normalize_textrazor_response(response, url=url):
             grouped.setdefault(target_keyword.casefold().strip(), []).append(
                 annotate_target_keyword(entity, target_keyword)
             )
@@ -1099,7 +1129,7 @@ def build_resumed_keyword_result(
         textrazor_responses.append(response)
         textrazor_entities.extend(
             annotate_target_keyword(entity, target_keyword)
-            for entity in normalize_entities(response, url=str(response["url"]))
+            for entity in normalize_textrazor_response(response, url=str(response["url"]))
         )
 
     stored_page_similarity = []
@@ -1210,12 +1240,24 @@ def scan_analysis_mart(run_dir: Path) -> pl.LazyFrame:
     return scan_curated_table(run_dir, "analysis_mart")
 
 
+def _load_textrazor_page_metrics_for_keyword_analysis(run_dir: Path) -> pl.DataFrame | None:
+    textrazor_path = Path(run_dir) / "parquet" / "textrazor_page_metrics"
+    if not textrazor_path.exists():
+        return None
+    try:
+        return scan_curated_table(run_dir, "textrazor_page_metrics").collect()
+    except STORAGE_COMMAND_EXCEPTIONS:
+        return None
+
+
 def emit_keyword_analysis(run_dir: Path, keyword: str) -> None:
     try:
+        analysis_mart = scan_analysis_mart(run_dir).filter(pl.col("target_keyword") == keyword).collect()
+        textrazor_page_metrics = _load_textrazor_page_metrics_for_keyword_analysis(run_dir)
+        merged_frame = merge_keyword_analysis_frame(analysis_mart, textrazor_page_metrics)
         rows = (
-            scan_analysis_mart(run_dir)
-            .filter(pl.col("target_keyword") == keyword)
-            .collect()
+            merged_frame.select(_keyword_analysis_output_columns(merged_frame))
+            .sort(_keyword_analysis_sort_columns(merged_frame))
             .to_dicts()
         )
     except STORAGE_COMMAND_EXCEPTIONS as error:
@@ -1223,8 +1265,32 @@ def emit_keyword_analysis(run_dir: Path, keyword: str) -> None:
     if not rows:
         raise CliCommandError(
             f"Stored run {run_dir} does not contain target_keyword={keyword!r}"
-        )
-    print(json.dumps(rows, separators=(",", ":"), sort_keys=True))
+    )
+    print(json.dumps(rows, separators=(",", ":")))
+
+
+def _keyword_analysis_sort_columns(frame: pl.DataFrame) -> list[str]:
+    preferred_columns = [
+        "target_keyword_id",
+        "canonical_url_hash",
+        "serp_rank",
+        "serp_item_id",
+    ]
+    return [column for column in preferred_columns if column in frame.columns]
+
+
+def _keyword_analysis_output_columns(frame: pl.DataFrame) -> list[str]:
+    textrazor_columns = [
+        column
+        for column in frame.columns
+        if column == "page_metrics_row_id" or column.startswith("textrazor_")
+    ]
+    analysis_columns = [
+        column
+        for column in frame.columns
+        if column not in textrazor_columns
+    ]
+    return sorted(analysis_columns) + textrazor_columns
 
 
 def replay_raw_response(run_dir: Path, response_id: str) -> None:
@@ -1631,7 +1697,7 @@ def build_textrazor_only_keyword_result(
     textrazor_entities = [
         annotate_target_keyword(entity, target_keyword)
         for response in textrazor_responses
-        for entity in normalize_entities(response, url=str(response["url"]))
+        for entity in normalize_textrazor_response(response, url=str(response["url"]))
     ]
 
     raw_provider_data = keyword_result.get("raw_provider_data", {})
@@ -1695,7 +1761,7 @@ def build_offline_keyword_result(
         if progress is not None:
             progress.keyword_log(target_keyword, "textrazor entities")
         textrazor_responses = [
-            fixture_entity_response(
+            fixture_page_metrics_response(
                 url=str(page_text["url"]),
                 text=str(page_text["text"]),
             )
@@ -1704,7 +1770,7 @@ def build_offline_keyword_result(
         textrazor_entities = [
             annotate_target_keyword(entity, target_keyword)
             for response in textrazor_responses
-            for entity in normalize_entities(response, url=str(response["url"]))
+            for entity in normalize_textrazor_response(response, url=str(response["url"]))
         ]
     return build_keyword_result_from_responses(
         target_keyword,
@@ -1942,11 +2008,15 @@ def build_live_keyword_result(
         )
         if textrazor_responses:
             network_calls.append("textrazor.entities")
-        textrazor_entities = [
-            annotate_target_keyword(entity, target_keyword)
-            for response in textrazor_responses
-            for entity in normalize_entities(response, url=str(response["url"]))
-        ]
+        textrazor_entities = []
+        for response in textrazor_responses:
+            textrazor_entities.extend(
+                annotate_target_keyword(entity, target_keyword)
+                for entity in normalize_textrazor_response(
+                    response,
+                    url=str(response["url"]),
+                )
+            )
 
     return build_keyword_result_from_responses(
         target_keyword,

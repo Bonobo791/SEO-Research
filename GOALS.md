@@ -38,7 +38,7 @@ Plackett-Luce is deferred backlog work only and is not wired in code today.
 
 #### Progress
 
-**Slices:** 19 of 31 shipped, 2 partial, 10 open.
+**Slices:** 23 of 33 shipped, 2 partial, 8 open.
 
 | # | Slice | Layer | Status | Primary deliverable |
 | - | ----- | ----- | ------ | ------------------- |
@@ -70,21 +70,23 @@ Plackett-Luce is deferred backlog work only and is not wired in code today.
 | 26 | TextRazor-only tests and docs | CLI | Shipped | CLI tests and docs; shared raw-response schema contract |
 | 27 | TextRazor signal registry and family contract | Stats | Shipped | `signal_families` in spec + `families.py` registry |
 | 28 | Materialize TextRazor page metrics | Data | Shipped | `textrazor_page_metrics_curated` + feature mart |
-| 29 | Generalize the Phase 5 stats engine | Stats | Partial | Spearman family dispatch shipped; OLS/PL/diagnostics open |
-| 30 | Fold families into CLI output and artifacts | Stats | Open | Similarity + TextRazor in `stats_*` |
+| 29 | Generalize the Phase 5 stats engine | Stats | Shipped | Family-aware Spearman, OLS, diagnostics, PL |
+| 30 | Fold families into CLI output and artifacts | Stats | Shipped | Combined `stats_*` tree for all signal families |
 | 31 | TextRazor signal golden fixtures and tests | Stats | Open | End-to-end fixture with known rank relationships |
+| 32 | TextRazor page-metrics completeness | Data | Shipped | `textrazor_page_metrics_complete` + null-not-zero counts |
+| 33 | Small-K exploratory status | Stats | Shipped | `keyword_count` + `inference_mode` in `stats_*` |
 
 **Remaining to close the core similarity delivery:** slices 7–10 (see
 `ROADMAP.md`). OLS / Plackett-Luce standardization and relative-rank work (former
 Phase 5 slices 11–15) is **Phase 6.1** in `ROADMAP.md`. TextRazor-only ingestion:
 slices 21–26 shipped; shared raw-response schema contract (slice 26) is shipped.
-TextRazor signal expansion: slices 27–28 shipped; slice 29 partial (Spearman family dispatch only); slices 30–31 open.
+TextRazor signal expansion: slices 27–30 and 32–33 shipped; slice 31 (golden fixtures) open.
 Slice 6 live E2E: **S5-11** in `FIXUPS.md` (`page_text` `tasks[].result: null`
 schema drift).
 
 #### Dev slices
 
-**Progress:** 19 of 31 shipped, 2 partial, 10 open.
+**Progress:** 23 of 33 shipped, 2 partial, 8 open.
 
 1. **[x] Slice 1 — Estimand & analysis spec**
    - Add `analysis_spec.v1.yaml`: outcome (`-log(serp_rank)`), predictors,
@@ -343,18 +345,38 @@ schema drift).
     - Covered by `tests/unit/test_textrazor_normalization.py` and
       `tests/unit/test_feature_marts.py`.
 
-29. **[~] Slice 29 — Generalize the Phase 5 stats engine**
-    - **Shipped:** `summarize_spearman_families()` scopes BH per signal family;
-      `test_stats_family_dispatch.py` covers similarity vs TextRazor frames.
-    - **Open:** pooled OLS, diagnostics, Plackett-Luce, and rank-depth bundles
-      per family; wiring into `artifacts.py` / `seo-rank analyze` (slice 30).
+29. **[x] Slice 29 — Generalize the Phase 5 stats engine**
+    - Family-aware Spearman, pooled OLS, diagnostics, and Plackett-Luce per
+      registered signal family; BH scoped per family.
+    - Covered by `tests/unit/test_stats_family_dispatch.py` and
+      `tests/unit/test_stats_family_artifacts.py`.
 
-30. **[ ] Slice 30 — Fold families into CLI output and artifacts**
-    - Combined `stats_*` report tree for similarity + TextRazor families.
+30. **[x] Slice 30 — Fold families into CLI output and artifacts**
+    - Combined `stats_summary.json`, `stats_diagnostics.json`, and
+      `stats_report.md` tree with nested `rank_depths.*.families` for similarity
+      and TextRazor families; top-level similarity blocks kept for compatibility.
+    - Hard-fail still skips confirmatory inference but writes family blocks as
+      `skipped`.
+    - Covered by `tests/unit/test_stats_family_artifacts.py`.
 
 31. **[ ] Slice 31 — TextRazor signal golden fixtures and tests**
     - End-to-end fixture proving similarity results unchanged when TextRazor
       families are added.
+
+32. **[x] Slice 32 — TextRazor page-metrics completeness**
+    - `textrazor.py` tracks per-section presence; missing extractors yield
+      `null` counts, not silent zeros.
+    - `textrazor_page_metrics_complete` on curated and feature marts records
+      whether all page-metrics sections were present in the upstream response.
+    - Covered by `tests/unit/test_textrazor_normalization.py` and
+      `tests/unit/test_feature_marts.py`.
+
+33. **[x] Slice 33 — Small-K exploratory status**
+    - `stats_*` artifacts surface `keyword_count` and `inference_mode` per rank
+      depth and backend (`confirmatory` when K ≥ 10, `exploratory` when 2 ≤ K < 10,
+      `underpowered` when K = 1).
+    - Report wording suppresses confirmatory language on underpowered runs.
+    - Covered by `tests/unit/test_stats_family_artifacts.py`.                          
 
 #### Phase 5 intent
 
@@ -406,6 +428,12 @@ schema drift).
   raw-lake entity merge, stored-run backfill, brand-new `--live-textrazor-only`
   runs (fixture DataForSEO structure + live TextRazor, zero `dataforseo.*` in
   `network_calls`), and the shared raw-response schema contract.
+- Family-aware confirmatory stats across similarity and TextRazor signal
+  families in `stats_*` artifacts (slices 29–30 shipped); golden fixtures
+  (slice 31) open.
+- TextRazor page-metrics completeness flag (`textrazor_page_metrics_complete`;
+  slice 32 shipped).
+- Small-K inference labeling (`keyword_count`, `inference_mode`; slice 33 shipped).
 
 ## Out Of Scope
 
@@ -425,7 +453,7 @@ schema drift).
 
 ## Phase 5 acceptance criteria
 
-**Status:** 19 of 31 slices shipped, 2 partial, 10 open.
+**Status:** 23 of 33 slices shipped, 2 partial, 8 open.
 
 | Acceptance item | Slice(s) | Status |
 | --------------- | -------- | ------ |
@@ -455,8 +483,10 @@ schema drift).
 | `parquet/entities/` populated after textrazor-only ingest + normalize | 21–25 | Shipped |
 | TextRazor cross-doc schema contract | 26 | Shipped |
 | TextRazor signal registry and page-metrics mart | 27, 28 | Shipped |
-| Family-aware Spearman dispatch (Spearman only) | 29 | Partial |
-| Family-aware OLS/PL/diagnostics + combined artifacts | 29, 30 | Open |
+| Family-aware Spearman, OLS, diagnostics, and PL per signal family | 29 | Shipped |
+| Combined `stats_*` artifact tree for all signal families | 30 | Shipped |
+| `textrazor_page_metrics_complete` on curated and feature marts | 32 | Shipped |
+| `keyword_count` and `inference_mode` on underpowered runs | 33 | Shipped |
 | Similarity + TextRazor golden fixtures and CLI tests | 31 | Open |
 
 ---

@@ -304,7 +304,8 @@ def summarize_backend_diagnostics_from_fit(
 
 def _reset_summary(feature_result) -> dict[str, object]:
     df_resid = float(feature_result.df_resid)
-    if df_resid < MIN_DF_RESID_FOR_RESET:
+    nobs = float(feature_result.nobs)
+    if df_resid < MIN_DF_RESID_FOR_RESET or (nobs > 50 and df_resid < 40):
         return {
             "status": "skipped",
             "skipped_reason": "insufficient_df_resid",

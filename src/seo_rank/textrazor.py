@@ -1,14 +1,16 @@
 """Offline TextRazor fixture boundaries."""
 
 import json
+import logging
 import urllib.parse
 import urllib.request
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-TEXTRAZOR_BASE_URL = "https://api.textrazor.com"
-TEXTRAZOR_PAGE_METRIC_EXTRACTORS = (
+logger = logging.getLogger(__name__)
+
+TEXTRAZOR_RESPONSE_SECTIONS = (
     "entities",
     "topics",
     "categories",
@@ -18,6 +20,20 @@ TEXTRAZOR_PAGE_METRIC_EXTRACTORS = (
     "properties",
     "nounPhrases",
 )
+
+TEXTRAZOR_BASE_URL = "https://api.textrazor.com"
+TEXTRAZOR_PAGE_METRIC_EXTRACTORS = (
+    "entities",
+    "topics",
+    "words",
+    "phrases",
+    "relations",
+    "entailments",
+    "senses",
+    "spelling",
+)
+
+TEXTRAZOR_PAGE_METRIC_CLASSIFIERS = ("textrazor_mediatopics_2023Q1",)
 
 
 @dataclass(frozen=True)
@@ -72,6 +88,7 @@ def build_entity_request(page_text: Mapping[str, str]) -> TextRazorRequest:
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         body={
             "extractors": endpoint.extractor,
+            "classifiers": ",".join(TEXTRAZOR_PAGE_METRIC_CLASSIFIERS),
             "text": str(page_text["text"]),
         },
     )
@@ -113,21 +130,37 @@ def fetch_textrazor_entities_for_pages(
 ) -> list[dict[str, object]]:
     """Fetch TextRazor entity responses for unique parsed page records."""
 
+    page_batch = pages_missing_textrazor(pages)
+    if page_batch:
+        logger.info("textrazor batch start pages=%d", len(page_batch))
+
     responses: list[dict[str, object]] = []
-    for page_text in pages_missing_textrazor(pages):
+    for page_text in page_batch:
+        url = str(page_text["url"])
+        text = str(page_text["text"])
+        logger.info(
+            "textrazor request url=%s text_chars=%d extractors=%s",
+            url,
+            len(text),
+            TEXTRAZOR_ENDPOINTS["page_metrics"].extractor,
+        )
         response = execute_textrazor_request(
             build_entity_request(page_text),
             credentials=credentials,
             transport=transport,
             timeout=timeout,
         )
+        summary = summarize_textrazor_response(response)
+        _log_textrazor_response(url=url, summary=summary)
         responses.append(
             response
             | {
-                "url": str(page_text["url"]),
-                "source_text": str(page_text["text"]),
+                "url": url,
+                "source_text": text,
             }
         )
+    if page_batch:
+        logger.info("textrazor batch done responses=%d", len(responses))
     return responses
 
 
@@ -167,6 +200,15 @@ def execute_textrazor_request(
     )
     if not isinstance(response, dict):
         raise TextRazorClientError("TextRazor response was not a JSON object")
+    error = response.get("error")
+    if isinstance(error, Mapping):
+        logger.warning(
+            "textrazor api error code=%s message=%s",
+            error.get("code"),
+            error.get("message"),
+        )
+    elif error is not None:
+        logger.warning("textrazor api error payload=%r", error)
     return response
 
 
@@ -286,10 +328,12 @@ def normalize_entities(
     normalized: list[dict[str, object]] = []
     payload = response.get("response", {})
     if not isinstance(payload, Mapping):
+        logger.info("textrazor normalize entities url=%s entities=0 (missing response payload)", url)
         return normalized
 
     entities = payload.get("entities", [])
     if not isinstance(entities, list):
+        logger.info("textrazor normalize entities url=%s entities=0 (invalid entities list)", url)
         return normalized
 
     for entity in entities:
@@ -318,6 +362,12 @@ def normalize_entities(
                 "types": [value for value in types if isinstance(value, str)],
             }
         )
+    logger.info(
+        "textrazor normalize entities url=%s entities=%d top=%s",
+        url,
+        len(normalized),
+        [entity["entity_id"] for entity in normalized[:3]],
+    )
     return normalized
 
 
@@ -332,45 +382,198 @@ def normalize_page_metrics(
     if not isinstance(payload, Mapping):
         payload = {}
 
-    entities = _mapping_list(payload.get("entities"))
-    topics = _mapping_list(payload.get("topics"))
-    categories = _mapping_list(payload.get("categories"))
-    entailments = _mapping_list(payload.get("entailments"))
-    words = _mapping_list(payload.get("words"))
-    relations = _mapping_list(payload.get("relations"))
-    properties = _mapping_list(payload.get("properties"))
-    noun_phrases = _mapping_list(payload.get("nounPhrases"))
+    entities, entities_present = _section_rows(payload, "entities")
+    topics, topics_present = _section_rows(payload, "topics")
+    categories, categories_present = _section_rows(payload, "categories")
+    entailments, entailments_present = _section_rows(payload, "entailments")
+    words, words_present = _section_rows(payload, "words")
+    relations, relations_present = _section_rows(payload, "relations")
+    properties, properties_present = _section_rows(payload, "properties")
+    noun_phrases, noun_phrases_present = _section_rows(payload, "nounPhrases")
+    section_presence = (
+        entities_present,
+        topics_present,
+        categories_present,
+        entailments_present,
+        words_present,
+        relations_present,
+        properties_present,
+        noun_phrases_present,
+    )
+    metrics = {
+        "url": url,
+        "textrazor_entity_confidence_score": _max_numeric(
+            entities,
+            ("confidenceScore",),
+            section_present=entities_present,
+        ),
+        "textrazor_entity_relevance_score": _max_numeric(
+            entities,
+            ("relevanceScore",),
+            section_present=entities_present,
+        ),
+        "textrazor_topic_score": _max_numeric(
+            topics,
+            ("score",),
+            section_present=topics_present,
+        ),
+        "textrazor_category_score": _max_numeric(
+            categories,
+            ("score",),
+            section_present=categories_present,
+        ),
+        "textrazor_classifier_score": _max_numeric(
+            categories,
+            ("classifierScore", "score"),
+            section_present=categories_present,
+        ),
+        "textrazor_entailment_score": _max_numeric(
+            entailments,
+            ("score",),
+            section_present=entailments_present,
+        ),
+        "textrazor_entailment_prior": _max_numeric(
+            entailments,
+            ("priorScore",),
+            section_present=entailments_present,
+        ),
+        "textrazor_entailment_context": _max_numeric(
+            entailments,
+            ("contextScore",),
+            section_present=entailments_present,
+        ),
+        "textrazor_word_count": _count_rows(words, section_present=words_present),
+        "textrazor_grammar_count": _count_truthy(
+            words,
+            ("isGrammar",),
+            section_present=words_present,
+        ),
+        "textrazor_sense_count": _count_truthy(
+            words,
+            ("isSense",),
+            section_present=words_present,
+        ),
+        "textrazor_spelling_count": _count_truthy(
+            words,
+            ("isSpelling",),
+            section_present=words_present,
+        ),
+        "textrazor_relation_count": _count_rows(relations, section_present=relations_present),
+        "textrazor_property_count": _count_rows(properties, section_present=properties_present),
+        "textrazor_noun_phrase_count": _count_rows(
+            noun_phrases,
+            section_present=noun_phrases_present,
+        ),
+        "textrazor_entities_present": entities_present,
+        "textrazor_topics_present": topics_present,
+        "textrazor_categories_present": categories_present,
+        "textrazor_entailments_present": entailments_present,
+        "textrazor_words_present": words_present,
+        "textrazor_relations_present": relations_present,
+        "textrazor_properties_present": properties_present,
+        "textrazor_noun_phrases_present": noun_phrases_present,
+        "textrazor_page_metrics_complete": all(section_presence),
+    }
+    logger.info(
+        "textrazor normalize metrics url=%s complete=%s "
+        "entity_confidence=%s entity_relevance=%s topic_score=%s category_score=%s "
+        "word_count=%s relation_count=%s noun_phrase_count=%s",
+        url,
+        metrics["textrazor_page_metrics_complete"],
+        metrics["textrazor_entity_confidence_score"],
+        metrics["textrazor_entity_relevance_score"],
+        metrics["textrazor_topic_score"],
+        metrics["textrazor_category_score"],
+        metrics["textrazor_word_count"],
+        metrics["textrazor_relation_count"],
+        metrics["textrazor_noun_phrase_count"],
+    )
+    return metrics
+
+
+def summarize_textrazor_response(response: Mapping[str, Any]) -> dict[str, object]:
+    """Summarize a TextRazor API response for logging."""
+
+    payload = response.get("response", {})
+    if not isinstance(payload, Mapping):
+        payload = {}
+
+    section_counts = {
+        section: _section_row_count(payload, section)
+        for section in TEXTRAZOR_RESPONSE_SECTIONS
+    }
+    entities = payload.get("entities", [])
+    top_entities: list[str] = []
+    if isinstance(entities, list):
+        for entity in entities[:3]:
+            if isinstance(entity, Mapping) and isinstance(entity.get("entityId"), str):
+                top_entities.append(entity["entityId"])
+
+    language = payload.get("language")
+    error = response.get("error")
+    if isinstance(error, Mapping):
+        error_value: object = {
+            "code": error.get("code"),
+            "message": error.get("message"),
+        }
+    else:
+        error_value = error
 
     return {
-        "url": url,
-        "textrazor_entity_confidence_score": _max_numeric(entities, ("confidenceScore",)),
-        "textrazor_entity_relevance_score": _max_numeric(entities, ("relevanceScore",)),
-        "textrazor_topic_score": _max_numeric(topics, ("score",)),
-        "textrazor_category_score": _max_numeric(categories, ("score",)),
-        "textrazor_classifier_score": _max_numeric(categories, ("classifierScore",)),
-        "textrazor_entailment_score": _max_numeric(entailments, ("score",)),
-        "textrazor_entailment_prior": _max_numeric(entailments, ("priorScore",)),
-        "textrazor_entailment_context": _max_numeric(entailments, ("contextScore",)),
-        "textrazor_word_count": len(words),
-        "textrazor_grammar_count": _count_truthy(words, ("isGrammar",)),
-        "textrazor_sense_count": _count_truthy(words, ("isSense",)),
-        "textrazor_spelling_count": _count_truthy(words, ("isSpelling",)),
-        "textrazor_relation_count": len(relations),
-        "textrazor_property_count": len(properties),
-        "textrazor_noun_phrase_count": len(noun_phrases),
+        "language": language if isinstance(language, str) else None,
+        "section_counts": section_counts,
+        "top_entities": top_entities,
+        "error": error_value,
     }
 
 
-def _mapping_list(value: object) -> list[Mapping[str, Any]]:
+def _log_textrazor_response(*, url: str, summary: Mapping[str, object]) -> None:
+    section_counts = summary.get("section_counts", {})
+    if not isinstance(section_counts, Mapping):
+        section_counts = {}
+    section_parts = [
+        f"{section}={section_counts.get(section, 0)}"
+        for section in TEXTRAZOR_RESPONSE_SECTIONS
+    ]
+    top_entities = summary.get("top_entities", [])
+    if not isinstance(top_entities, list):
+        top_entities = []
+    top_entity_text = ",".join(str(entity) for entity in top_entities) or "-"
+    logger.info(
+        "textrazor response url=%s language=%s %s top_entities=%s error=%s",
+        url,
+        summary.get("language") or "-",
+        " ".join(section_parts),
+        top_entity_text,
+        summary.get("error"),
+    )
+
+
+def _section_row_count(payload: Mapping[str, Any], key: str) -> int:
+    value = payload.get(key)
     if not isinstance(value, list):
-        return []
-    return [item for item in value if isinstance(item, Mapping)]
+        return 0
+    return sum(1 for item in value if isinstance(item, Mapping))
+
+
+def _section_rows(
+    payload: Mapping[str, Any],
+    key: str,
+) -> tuple[list[Mapping[str, Any]], bool]:
+    value = payload.get(key)
+    if not isinstance(value, list):
+        return [], False
+    return [item for item in value if isinstance(item, Mapping)], True
 
 
 def _max_numeric(
     rows: list[Mapping[str, Any]],
     candidate_keys: tuple[str, ...],
-) -> float:
+    *,
+    section_present: bool,
+) -> float | None:
+    if not section_present:
+        return None
     values: list[float] = []
     for row in rows:
         for key in candidate_keys:
@@ -381,10 +584,20 @@ def _max_numeric(
     return max(values) if values else 0.0
 
 
+def _count_rows(rows: list[Mapping[str, Any]], *, section_present: bool) -> int | None:
+    if not section_present:
+        return None
+    return len(rows)
+
+
 def _count_truthy(
     rows: list[Mapping[str, Any]],
     candidate_keys: tuple[str, ...],
-) -> int:
+    *,
+    section_present: bool,
+) -> int | None:
+    if not section_present:
+        return None
     count = 0
     for row in rows:
         for key in candidate_keys:

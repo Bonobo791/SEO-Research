@@ -14,7 +14,7 @@ Pytest configuration and verification contract for SEO-Research.
   interpreter
 - Lint / type-check / build / coverage: not configured
 - Expected test duration: fast (< 1s)
-- **Current verification status:** 261 unit tests pass (`python -m pytest tests/unit`); full suite collects 262 tests including 1 opt-in integration test
+- **Current verification status:** 271 unit tests pass (`python -m pytest tests/unit`); full suite collects 272 tests including 1 opt-in integration test
 
 ## Active Verification Command
 
@@ -65,6 +65,7 @@ placeholders only.
 | `test_stats_plackett_luce.py` | Page-level Plackett-Luce rank-ordered logit summaries, partial-ranking handling, optimizer / leave-one-out IIA diagnostics, and PL artifact emission on passing panels |
 | `test_stats_families.py` | Declarative signal-family registry loading, ordered enumeration, panel-grain preservation, and malformed-entry rejection |
 | `test_stats_family_dispatch.py` | Family-aware Spearman summaries with BH scoped per signal family (similarity vs TextRazor source marts) |
+| `test_stats_family_artifacts.py` | Combined `stats_*` artifact tree for all signal families, hard-fail family skip path, and underpowered `inference_mode` labeling |
 | `test_stats_rank_depth.py` | Rank-depth confirmatory slices: spec accessors, panel filtering, per-depth Spearman/OLS/PL, monotonic row counts, `rank_depths` JSON + report sections |
 | `test_stats_scale.py` | Within-keyword and global z-score helpers (`stats.scale`) for OLS/PL effect-size contract |
 | `test_textrazor_ingest.py` | TextRazor endpoint registry, page entity fetch, and dedupe helpers with injected transport |
@@ -180,10 +181,18 @@ exist.
   covers `normalize_page_metrics()` / `build_textrazor_page_metrics_frame()`.
 - **Page-metrics feature mart** — `tests/unit/test_feature_marts.py` materializes
   `textrazor_page_metrics` from curated page metrics.
-- **Family-aware Spearman (partial slice 29)** —
+- **Family-aware stats (slices 29–30 shipped)** —
   `tests/unit/test_stats_family_dispatch.py` covers
-  `summarize_spearman_families()` with per-family BH boundaries. OLS/PL/diagnostics
-  per family and CLI artifact wiring remain open (slices 29–30).
+  `summarize_spearman_families()` with per-family BH boundaries.
+  `tests/unit/test_stats_family_artifacts.py` covers combined `stats_*` output,
+  hard-fail family skip path, and underpowered `inference_mode` labeling.
+  Golden fixtures remain open (slice 31).
+- **TextRazor page-metrics completeness (slice 32 shipped)** —
+  `tests/unit/test_textrazor_normalization.py` and `test_feature_marts.py`
+  cover `textrazor_page_metrics_complete` and null-not-zero section counts.
+- **Small-K inference labeling (slice 33 shipped)** —
+  `tests/unit/test_stats_family_artifacts.py` covers `keyword_count` and
+  `inference_mode` on single-keyword runs.
 
 ## Planned tests (not yet in suite) — Phase 5 active scope
 

@@ -1,8 +1,10 @@
 import importlib.util
+import logging
 from pathlib import Path
 
 import pytest
 from seo_rank.gemini_embeddings import build_live_embed_content as shared_build_live_embed_content
+from seo_rank.textrazor import fixture_page_metrics_response
 
 
 SCRIPT = Path("/var/home/user/PycharmProjects/SEO-Research/analysis/gemini_nwh_similarity.py")
@@ -35,6 +37,19 @@ def test_compute_semantic_similarity_scores_orders_blocks_by_score() -> None:
         assert output_dimensionality == module.GEMINI_EMBEDDING_DIMENSIONALITY
         return vectors[content]
 
+    def fake_textrazor_transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        return fixture_page_metrics_response(
+            url="https://example.com/alpha",
+            text="Alpha block",
+        )
+
     class FakeReranker:
         def compute_score(self, pairs):
             assert pairs == [
@@ -50,6 +65,8 @@ def test_compute_semantic_similarity_scores_orders_blocks_by_score() -> None:
             {"label": "Beta", "text": "Beta block"},
         ],
         api_key="gemini-secret",
+        textrazor_api_key="textrazor-secret",
+        textrazor_transport=fake_textrazor_transport,
         embed_content=fake_embed_content,
         reranker=FakeReranker(),
     )
@@ -67,6 +84,14 @@ def test_compute_semantic_similarity_scores_orders_blocks_by_score() -> None:
                     "raw_score": 1.0,
                     "normalized_score": 1.0,
                 },
+                "textrazor_entity_confidence_score": {
+                    "raw_score": 7.5,
+                    "normalized_score": 7.5,
+                },
+                "textrazor_entity_relevance_score": {
+                    "raw_score": 0.92,
+                    "normalized_score": 0.92,
+                },
             },
         },
         {
@@ -81,6 +106,14 @@ def test_compute_semantic_similarity_scores_orders_blocks_by_score() -> None:
                     "raw_score": 0.0,
                     "normalized_score": 0.0,
                 },
+                "textrazor_entity_confidence_score": {
+                    "raw_score": 7.5,
+                    "normalized_score": 7.5,
+                },
+                "textrazor_entity_relevance_score": {
+                    "raw_score": 0.92,
+                    "normalized_score": 0.92,
+                },
             },
         },
     ]
@@ -90,6 +123,7 @@ def test_main_reports_bge_and_gemini_document_relevance(monkeypatch, capsys) -> 
     module = load_module()
 
     monkeypatch.setenv("GEMINI_API_KEY", "gemini-secret")
+    monkeypatch.setenv("TEXTRAZOR_API_KEY", "textrazor-secret")
     monkeypatch.setattr(module, "ensure_project_env_loaded", lambda: None)
 
     def fake_embed_content(content, *, api_key, model, output_dimensionality):
@@ -104,12 +138,48 @@ def test_main_reports_bge_and_gemini_document_relevance(monkeypatch, capsys) -> 
         }
         return vectors[content]
 
-    class FakeReranker:
-        def compute_score(self, pairs):
-            return [0.91]
+    def fake_compute_semantic_similarity_scores(
+        keyword,
+        blocks,
+        *,
+        api_key,
+        textrazor_api_key,
+        embed_content,
+        reranker=None,
+        textrazor_transport=None,
+    ):
+        assert keyword == "best northwest houston realtors"
+        assert api_key == "gemini-secret"
+        assert textrazor_api_key == "textrazor-secret"
+        assert blocks == [{"label": "Michele Harmon Team", "text": "Alpha block"}]
+        assert embed_content is fake_embed_content
+        return [
+            {
+                "label": "Michele Harmon Team",
+                "page_similarity": {
+                    "bge": {"raw_score": 0.91, "normalized_score": 0.713},
+                    "gemini_doc_retrieval": {
+                        "raw_score": 1.0,
+                        "normalized_score": 1.0,
+                    },
+                    "gemini_semantic_similarity": {
+                        "raw_score": 1.0,
+                        "normalized_score": 1.0,
+                    },
+                    "textrazor_entity_confidence_score": {
+                        "raw_score": 7.5,
+                        "normalized_score": 7.5,
+                    },
+                    "textrazor_entity_relevance_score": {
+                        "raw_score": 0.92,
+                        "normalized_score": 0.92,
+                    },
+                },
+            }
+        ]
 
     monkeypatch.setattr(module, "build_live_embed_content", lambda api_key: fake_embed_content)
-    monkeypatch.setattr(module, "load_bge_reranker", lambda: FakeReranker())
+    monkeypatch.setattr(module, "compute_semantic_similarity_scores", fake_compute_semantic_similarity_scores)
     monkeypatch.setattr(
         module,
         "TEXT_BLOCKS",
@@ -121,13 +191,133 @@ def test_main_reports_bge_and_gemini_document_relevance(monkeypatch, capsys) -> 
     captured = capsys.readouterr().out
     assert "BGE" in captured
     assert "Gemini document relevance" in captured
+    assert "TextRazor entity confidence" in captured
+    assert "TextRazor entity relevance" in captured
     assert '"gemini_doc_retrieval"' in captured
+    assert '"textrazor_entity_confidence_score"' in captured
 
 
 def test_analysis_script_reuses_shared_live_embed_builder() -> None:
     module = load_module()
 
     assert module.build_live_embed_content is shared_build_live_embed_content
+
+
+def test_compute_semantic_similarity_scores_logs_summary(caplog) -> None:
+    module = load_module()
+
+    caplog.set_level(logging.INFO, logger="gemini_nwh_similarity")
+
+    vectors = {
+        "task: search result | query: best northwest houston realtors": (1.0, 0.0),
+        "task: sentence similarity | query: best northwest houston realtors": (1.0, 0.0),
+        "title: Alpha | text: Alpha block": (1.0, 0.0),
+        "task: sentence similarity | query: Alpha block": (1.0, 0.0),
+    }
+
+    def fake_embed_content(content, *, api_key, model, output_dimensionality):
+        return vectors[content]
+
+    def fake_textrazor_transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        return fixture_page_metrics_response(
+            url="https://example.com/alpha",
+            text="Alpha block",
+        )
+
+    class FakeReranker:
+        def compute_score(self, pairs):
+            return [0.91]
+
+    module.compute_semantic_similarity_scores(
+        "best northwest houston realtors",
+        [{"label": "Alpha", "text": "Alpha block"}],
+        api_key="gemini-secret",
+        textrazor_api_key="textrazor-secret",
+        textrazor_transport=fake_textrazor_transport,
+        embed_content=fake_embed_content,
+        reranker=FakeReranker(),
+    )
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("computing semantic similarity keyword=best northwest houston realtors" in message for message in messages)
+    assert any("requesting textrazor metrics label=Alpha" in message for message in messages)
+    assert any("scored block label=Alpha" in message for message in messages)
+
+
+def test_compute_semantic_similarity_scores_uses_live_textrazor_request() -> None:
+    module = load_module()
+
+    vectors = {
+        "task: search result | query: best northwest houston realtors": (1.0, 0.0),
+        "task: sentence similarity | query: best northwest houston realtors": (1.0, 0.0),
+        "title: Alpha | text: Alpha block": (1.0, 0.0),
+        "task: sentence similarity | query: Alpha block": (1.0, 0.0),
+    }
+
+    def fake_embed_content(content, *, api_key, model, output_dimensionality):
+        assert api_key == "gemini-secret"
+        assert model == module.GEMINI_EMBEDDING_MODEL
+        assert output_dimensionality == module.GEMINI_EMBEDDING_DIMENSIONALITY
+        return vectors[content]
+
+    sent: dict[str, object] = {}
+
+    def fake_transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        sent.update(
+            {
+                "method": method,
+                "url": url,
+                "headers": headers,
+                "body": body,
+                "timeout": timeout,
+            }
+        )
+        return fixture_page_metrics_response(
+            url="https://example.com/alpha",
+            text="Alpha block",
+        )
+
+    class FakeReranker:
+        def compute_score(self, pairs):
+            return [0.91]
+
+    scores = module.compute_semantic_similarity_scores(
+        "best northwest houston realtors",
+        [{"label": "Alpha", "text": "Alpha block"}],
+        api_key="gemini-secret",
+        textrazor_api_key="textrazor-secret",
+        textrazor_transport=fake_transport,
+        embed_content=fake_embed_content,
+        reranker=FakeReranker(),
+    )
+
+    assert sent["method"] == "POST"
+    assert sent["url"] == "https://api.textrazor.com/"
+    assert sent["headers"]["X-TextRazor-Key"] == "textrazor-secret"
+    assert b"text=Alpha+block" in sent["body"]
+    assert sent["timeout"] == 30.0
+    assert scores[0]["page_similarity"]["textrazor_entity_confidence_score"] == {
+        "raw_score": 7.5,
+        "normalized_score": 7.5,
+    }
+    assert scores[0]["page_similarity"]["textrazor_entity_relevance_score"] == {
+        "raw_score": 0.92,
+        "normalized_score": 0.92,
+    }
 
 
 def test_compute_semantic_similarity_scores_falls_back_to_fixture_bge_when_live_dependency_missing(
@@ -151,6 +341,19 @@ def test_compute_semantic_similarity_scores_falls_back_to_fixture_bge_when_live_
         assert output_dimensionality == module.GEMINI_EMBEDDING_DIMENSIONALITY
         return vectors[content]
 
+    def fake_textrazor_transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        return fixture_page_metrics_response(
+            url="https://example.com/alpha",
+            text="Best Northwest Houston Realtors for every home",
+        )
+
     def raise_bge_error():
         raise module.BgeRerankerError("FlagEmbedding is unavailable")
 
@@ -159,6 +362,8 @@ def test_compute_semantic_similarity_scores_falls_back_to_fixture_bge_when_live_
         "best northwest houston realtors",
         [{"label": "Alpha", "text": "Best Northwest Houston Realtors for every home"}],
         api_key="gemini-secret",
+        textrazor_api_key="textrazor-secret",
+        textrazor_transport=fake_textrazor_transport,
         embed_content=fake_embed_content,
     )
 
@@ -174,6 +379,14 @@ def test_compute_semantic_similarity_scores_falls_back_to_fixture_bge_when_live_
                 "gemini_semantic_similarity": {
                     "raw_score": 1.0,
                     "normalized_score": 1.0,
+                },
+                "textrazor_entity_confidence_score": {
+                    "raw_score": 7.5,
+                    "normalized_score": 7.5,
+                },
+                "textrazor_entity_relevance_score": {
+                    "raw_score": 0.92,
+                    "normalized_score": 0.92,
                 },
             },
         }
@@ -201,6 +414,19 @@ def test_compute_semantic_similarity_scores_falls_back_to_fixture_bge_when_live_
         assert output_dimensionality == module.GEMINI_EMBEDDING_DIMENSIONALITY
         return vectors[content]
 
+    def fake_textrazor_transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        return fixture_page_metrics_response(
+            url="https://example.com/alpha",
+            text="Best Northwest Houston Realtors for every home",
+        )
+
     def raise_unexpected_error():
         raise AttributeError("XLMRobertaTokenizer has no attribute prepare_for_model")
 
@@ -209,6 +435,8 @@ def test_compute_semantic_similarity_scores_falls_back_to_fixture_bge_when_live_
         "best northwest houston realtors",
         [{"label": "Alpha", "text": "Best Northwest Houston Realtors for every home"}],
         api_key="gemini-secret",
+        textrazor_api_key="textrazor-secret",
+        textrazor_transport=fake_textrazor_transport,
         embed_content=fake_embed_content,
     )
 
@@ -225,6 +453,14 @@ def test_compute_semantic_similarity_scores_falls_back_to_fixture_bge_when_live_
                     "raw_score": 1.0,
                     "normalized_score": 1.0,
                 },
+                "textrazor_entity_confidence_score": {
+                    "raw_score": 7.5,
+                    "normalized_score": 7.5,
+                },
+                "textrazor_entity_relevance_score": {
+                    "raw_score": 0.92,
+                    "normalized_score": 0.92,
+                },
             },
         }
     ]
@@ -234,6 +470,7 @@ def test_main_reports_gemini_provider_errors(monkeypatch) -> None:
     module = load_module()
 
     monkeypatch.setenv("GEMINI_API_KEY", "gemini-secret")
+    monkeypatch.setenv("TEXTRAZOR_API_KEY", "textrazor-secret")
     monkeypatch.setattr(module, "ensure_project_env_loaded", lambda: None)
 
     def build_failing_embed_content(api_key):

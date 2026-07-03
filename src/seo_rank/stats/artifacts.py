@@ -9,8 +9,11 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import polars as pl
 
+from seo_rank.data.scans import scan_curated_table
 from seo_rank.stats.diagnostics import summarize_diagnostics_backends_from_fits
+from seo_rank.stats.diagnostics import summarize_diagnostics_families
 from seo_rank.stats.panel import (
     AnalysisPanelResult,
     load_analysis_panel,
@@ -18,14 +21,17 @@ from seo_rank.stats.panel import (
 )
 from seo_rank.stats.plackett_luce import (
     fit_plackett_luce_backends,
+    summarize_plackett_luce_families,
     summarize_plackett_luce_backends_from_fits,
     summarize_plackett_luce_diagnostics_backends_from_fits,
 )
 from seo_rank.stats.regression import (
     fit_regression_backends,
+    summarize_regression_families,
     summarize_regression_backends_from_fits,
 )
-from seo_rank.stats.spearman import summarize_spearman_backends
+from seo_rank.stats.rank_depth import filter_panel_by_max_rank
+from seo_rank.stats.spearman import summarize_spearman_backends, summarize_spearman_families
 from seo_rank.stats.spec import AnalysisSpec, load_analysis_spec
 
 
@@ -38,9 +44,141 @@ def build_stats_output_metadata(spec: AnalysisSpec) -> Mapping[str, object]:
         "estimand_version": spec.estimand_version,
         "primary_backend": spec.primary_backend,
         "backend_order": list(spec.backend_order),
+        "signal_family_order": list(spec.signal_family_keys),
         "primary_rank_depth": spec.primary_rank_depth,
         "confirmatory_rank_depths": list(spec.confirmatory_rank_depths),
     }
+
+
+def _inference_mode_for_keyword_count(keyword_count: int) -> str:
+    if keyword_count <= 0:
+        return "skipped"
+    if keyword_count == 1:
+        return "underpowered"
+    if keyword_count < 10:
+        return "exploratory"
+    return "confirmatory"
+
+
+def _annotate_inference_modes(value: object) -> object:
+    if isinstance(value, dict):
+        annotated = {key: _annotate_inference_modes(item) for key, item in value.items()}
+        keyword_count = annotated.get("keyword_count")
+        if isinstance(keyword_count, int) and "inference_mode" not in annotated:
+            annotated["inference_mode"] = _inference_mode_for_keyword_count(keyword_count)
+        return annotated
+    if isinstance(value, list):
+        return [_annotate_inference_modes(item) for item in value]
+    return value
+
+
+def build_family_source_frames(
+    run_dir: Path,
+    *,
+    analysis_mart: pl.DataFrame,
+    spec: AnalysisSpec,
+) -> dict[str, pl.DataFrame]:
+    """Load the per-family source frames used for registry-driven stats."""
+
+    source_frames: dict[str, pl.DataFrame] = {
+        "analysis_mart": analysis_mart,
+        "textrazor_page_metrics": _load_textrazor_family_frame(
+            run_dir,
+            analysis_mart=analysis_mart,
+            spec=spec,
+        ),
+    }
+    return source_frames
+
+
+def _load_textrazor_family_frame(
+    run_dir: Path,
+    *,
+    analysis_mart: pl.DataFrame,
+    spec: AnalysisSpec,
+) -> pl.DataFrame:
+    textrazor_path = Path(run_dir) / "parquet" / "textrazor_page_metrics"
+    signal_columns = _textrazor_signal_columns(spec)
+    if not textrazor_path.exists():
+        return _analysis_mart_with_null_textrazor_columns(analysis_mart, signal_columns)
+
+    try:
+        textrazor_page_metrics = scan_curated_table(run_dir, "textrazor_page_metrics").collect()
+    except OSError:
+        return _analysis_mart_with_null_textrazor_columns(analysis_mart, signal_columns)
+    return merge_analysis_mart_with_textrazor_page_metrics(
+        analysis_mart,
+        textrazor_page_metrics,
+        signal_columns=signal_columns,
+    )
+
+
+def merge_keyword_analysis_frame(
+    analysis_mart: pl.DataFrame,
+    textrazor_page_metrics: pl.DataFrame | None,
+) -> pl.DataFrame:
+    """Merge keyword inspection rows with TextRazor metrics when available."""
+
+    if textrazor_page_metrics is None or textrazor_page_metrics.is_empty():
+        return analysis_mart
+    signal_columns = tuple(
+        column
+        for column in textrazor_page_metrics.columns
+        if column not in {"run_id", "target_keyword_id", "target_keyword", "canonical_url_hash", "url", "response_id", "schema_version"}
+    )
+    return merge_analysis_mart_with_textrazor_page_metrics(
+        analysis_mart,
+        textrazor_page_metrics,
+        signal_columns=signal_columns,
+    )
+
+
+def merge_analysis_mart_with_textrazor_page_metrics(
+    analysis_mart: pl.DataFrame,
+    textrazor_page_metrics: pl.DataFrame,
+    *,
+    signal_columns: tuple[str, ...],
+) -> pl.DataFrame:
+    """Left-join TextRazor page metrics onto the analysis mart."""
+
+    visible_columns = set(signal_columns)
+    visible_columns.add("page_metrics_row_id")
+    selected_columns = [
+        "run_id",
+        "target_keyword_id",
+        "canonical_url_hash",
+        *[column for column in textrazor_page_metrics.columns if column in visible_columns],
+    ]
+    if "page_metrics_row_id" not in selected_columns and "page_metrics_row_id" in textrazor_page_metrics.columns:
+        selected_columns.append("page_metrics_row_id")
+    merged = analysis_mart.join(
+        textrazor_page_metrics.select(selected_columns),
+        on=["run_id", "target_keyword_id", "canonical_url_hash"],
+        how="left",
+    )
+    sort_columns = ["target_keyword_id", "canonical_url_hash", "serp_rank", "serp_item_id"]
+    if all(column in merged.columns for column in sort_columns):
+        merged = merged.sort(sort_columns)
+    return merged
+
+
+def _analysis_mart_with_null_textrazor_columns(
+    analysis_mart: pl.DataFrame,
+    signal_columns: tuple[str, ...],
+) -> pl.DataFrame:
+    return analysis_mart.with_columns(
+        [pl.lit(None).alias("page_metrics_row_id"), *[pl.lit(None).alias(column) for column in signal_columns]]
+    )
+
+
+def _textrazor_signal_columns(spec: AnalysisSpec) -> tuple[str, ...]:
+    columns: list[str] = []
+    for family in spec.signal_families.families:
+        if family.kind.startswith("textrazor_"):
+            for column in family.signal_columns:
+                if column not in columns:
+                    columns.append(column)
+    return tuple(columns)
 
 
 def build_rank_depth_bundles(
@@ -54,6 +192,11 @@ def build_rank_depth_bundles(
         "building rank_depth bundles depths=%s",
         list(spec.confirmatory_rank_depths),
     )
+    family_source_frames = build_family_source_frames(
+        result.run_dir,
+        analysis_mart=result.analysis_mart,
+        spec=spec,
+    )
     rank_depth_bundles: dict[str, dict[str, object]] = {}
     diagnostics_by_depth: dict[str, dict[str, object]] = {}
 
@@ -63,11 +206,18 @@ def build_rank_depth_bundles(
             depth_key=depth_key,
             spec=spec,
         )
+        keyword_count = (
+            int(depth_mart.get_column("target_keyword_id").n_unique())
+            if "target_keyword_id" in depth_mart.columns
+            else 0
+        )
         bundle: dict[str, object] = {
             "rank_depth_key": depth_key,
             "max_serp_rank": spec.rank_depth_limit(depth_key),
             "analysis_mart_rows": int(depth_mart.height),
             "panel_rows": int(depth_panel.height),
+            "keyword_count": keyword_count,
+            "inference_mode": _inference_mode_for_keyword_count(keyword_count),
             "guardrails": guardrails,
             "limitations": limitations,
             "hard_fail": hard_fail,
@@ -75,7 +225,23 @@ def build_rank_depth_bundles(
             "spearman": None,
             "regression": None,
             "plackett_luce": None,
+            "families": None,
         }
+        depth_family_frames = _filter_family_source_frames_by_rank_depth(
+            family_source_frames,
+            max_rank=spec.rank_depth_limit(depth_key),
+        )
+        if hard_fail:
+            depth_family_frames = {
+                name: frame.head(0)
+                for name, frame in depth_family_frames.items()
+            }
+        bundle["families"] = build_family_depth_bundles(
+            depth_family_frames,
+            spec=spec,
+            max_rank=spec.rank_depth_limit(depth_key),
+            include_iia_sensitivity=(depth_key == spec.primary_rank_depth),
+        )
         if not hard_fail:
             max_rank = spec.rank_depth_limit(depth_key)
             spearman = summarize_spearman_backends(depth_mart, result.backend_order)
@@ -119,6 +285,11 @@ def build_rank_depth_bundles(
                 "regression": diagnostics,
                 "plackett_luce": plackett_luce_diagnostics,
             }
+        bundle = _annotate_inference_modes(bundle)
+        if not hard_fail:
+            diagnostics_by_depth[depth_key] = _annotate_inference_modes(
+                diagnostics_by_depth.get(depth_key, {})
+            )
         logger.info(
             "rank_depth bundle depth=%s mart_rows=%d hard_fail=%s actionable=%s",
             depth_key,
@@ -129,6 +300,65 @@ def build_rank_depth_bundles(
         rank_depth_bundles[depth_key] = bundle
 
     return rank_depth_bundles, diagnostics_by_depth
+
+
+def _filter_family_source_frames_by_rank_depth(
+    source_frames: dict[str, pl.DataFrame],
+    *,
+    max_rank: int,
+) -> dict[str, pl.DataFrame]:
+    return {
+        name: (
+            filter_panel_by_max_rank(frame, max_rank=max_rank)
+            if "serp_rank" in frame.columns
+            else frame
+        )
+        for name, frame in source_frames.items()
+    }
+
+
+def build_family_depth_bundles(
+    source_frames: dict[str, pl.DataFrame],
+    *,
+    spec: AnalysisSpec,
+    max_rank: int,
+    include_iia_sensitivity: bool,
+) -> dict[str, dict[str, object]]:
+    """Build registry-ordered family bundles for one rank depth."""
+
+    spearman_families = summarize_spearman_families(
+        source_frames,
+        registry=spec.signal_families,
+    )["families"]
+    regression_families = summarize_regression_families(
+        source_frames,
+        registry=spec.signal_families,
+    )["families"]
+    diagnostics_families = summarize_diagnostics_families(
+        source_frames,
+        registry=spec.signal_families,
+    )["families"]
+    plackett_luce_families = summarize_plackett_luce_families(
+        source_frames,
+        registry=spec.signal_families,
+        max_rank=max_rank,
+        include_iia_sensitivity=include_iia_sensitivity,
+    )["families"]
+
+    family_bundles: dict[str, dict[str, object]] = {}
+    for family_key in spec.signal_family_keys:
+        family = spec.signal_family(family_key)
+        family_bundles[family_key] = {
+            "family": family_key,
+            "kind": family.kind,
+            "source_mart": spec.signal_families.source_mart_for_family(family_key),
+            "signal_columns": list(family.signal_columns),
+            "spearman": spearman_families[family_key],
+            "regression": regression_families[family_key],
+            "diagnostics": diagnostics_families[family_key],
+            "plackett_luce": plackett_luce_families[family_key],
+        }
+    return family_bundles
 
 
 def build_stats_summary(
@@ -149,6 +379,7 @@ def build_stats_summary(
         "estimand_version": result.estimand_version,
         "primary_backend": result.primary_backend,
         "backend_order": list(result.backend_order),
+        "metadata": build_stats_output_metadata(spec),
         "primary_rank_depth": primary_depth,
         "confirmatory_rank_depths": list(spec.confirmatory_rank_depths),
         "rank_depths": {
@@ -178,19 +409,28 @@ def build_stats_summary(
 def build_stats_diagnostics(
     result: AnalysisPanelResult,
     *,
+    rank_depth_bundles: dict[str, dict[str, object]],
     diagnostics_by_depth: dict[str, dict[str, object]],
     spec: AnalysisSpec,
 ) -> dict[str, object]:
     primary_depth = spec.primary_rank_depth
     primary_diagnostics = diagnostics_by_depth.get(primary_depth, {})
+    primary_bundle = rank_depth_bundles[primary_depth]
     output: dict[str, object] = {
         "analysis_spec_version": result.analysis_spec_version,
         "estimand_version": result.estimand_version,
         "primary_backend": result.primary_backend,
         "backend_order": list(result.backend_order),
+        "metadata": build_stats_output_metadata(spec),
         "primary_rank_depth": primary_depth,
         "confirmatory_rank_depths": list(spec.confirmatory_rank_depths),
-        "rank_depths": diagnostics_by_depth,
+        "rank_depths": {
+            depth_key: {
+                **diagnostics_by_depth.get(depth_key, {}),
+                "families": rank_depth_bundles[depth_key]["families"],
+            }
+            for depth_key in spec.confirmatory_rank_depths
+        },
     }
     regression = primary_diagnostics.get("regression")
     plackett_luce = primary_diagnostics.get("plackett_luce")
@@ -198,6 +438,9 @@ def build_stats_diagnostics(
         output["backends"] = regression["backends"]
     if plackett_luce is not None:
         output["plackett_luce"] = plackett_luce
+    output["guardrails"] = primary_bundle["guardrails"]
+    output["limitations"] = primary_bundle["limitations"]
+    output["hard_fail"] = primary_bundle["hard_fail"]
     return output
 
 
@@ -260,18 +503,88 @@ def _rank_depth_report_sections(
         lines.extend(["", "### Diagnostics"])
         lines.extend(_format_diagnostics_lines(diagnostics))
 
+    families = bundle.get("families")
+    if isinstance(families, dict) and families:
+        lines.extend(["", "### Families"])
+        for family_key, family_bundle in families.items():
+            lines.extend(_format_family_report_sections(family_key, family_bundle))
+
     lines.extend(
         [
             "",
             "### Status",
-            (
-                "Confirmatory inference skipped because hard-fail guardrails did not pass."
-                if bundle["hard_fail"]
-                else "Guardrails passed; confirmatory inference may proceed."
-            ),
+            _rank_depth_status_text(bundle),
             "",
         ]
     )
+    return lines
+
+
+def _rank_depth_status_text(bundle: dict[str, object]) -> str:
+    if bundle["hard_fail"]:
+        return "Confirmatory inference skipped because hard-fail guardrails did not pass."
+    inference_mode = str(bundle.get("inference_mode", "confirmatory"))
+    keyword_count = bundle.get("keyword_count", 0)
+    if inference_mode == "confirmatory":
+        return "Guardrails passed; confirmatory inference may proceed."
+    if inference_mode == "underpowered":
+        return f"Exploratory inference only: keyword_count={keyword_count}."
+    if inference_mode == "exploratory":
+        return f"Exploratory inference only: keyword_count={keyword_count} (< 10)."
+    return f"Inference mode: {inference_mode}."
+
+
+def _format_family_report_sections(
+    family_key: str,
+    family_bundle: dict[str, object],
+) -> list[str]:
+    lines = [
+        f"#### Family: {family_key}",
+        "",
+    ]
+    lines.extend(_format_family_section_lines("Spearman", family_bundle.get("spearman"), _format_spearman_lines))
+    lines.extend(
+        _format_family_section_lines(
+            "Regression",
+            family_bundle.get("regression"),
+            _format_regression_lines,
+        )
+    )
+    lines.extend(
+        _format_family_section_lines(
+            "Diagnostics",
+            family_bundle.get("diagnostics"),
+            _format_diagnostics_lines,
+        )
+    )
+    lines.extend(
+        _format_family_section_lines(
+            "Plackett-Luce",
+            family_bundle.get("plackett_luce"),
+            lambda section: _format_plackett_luce_lines(section, None),
+        )
+    )
+    lines.append("")
+    return lines
+
+
+def _format_family_section_lines(
+    section_name: str,
+    section: dict[str, object] | None,
+    formatter,
+) -> list[str]:
+    lines = [f"##### {section_name}"]
+    if not isinstance(section, dict) or not section.get("backends"):
+        skipped_reason = (
+            section.get("skipped_reason", "no_usable_rows")
+            if isinstance(section, dict)
+            else "no_usable_rows"
+        )
+        lines.append("")
+        lines.append(f"- status=skipped, skipped_reason={skipped_reason}")
+        return lines
+    lines.append("")
+    lines.extend(formatter(section))
     return lines
 
 
@@ -279,11 +592,13 @@ def _format_spearman_lines(spearman: dict[str, object]) -> list[str]:
     lines: list[str] = []
     for backend, backend_summary in spearman["backends"].items():
         backend_summary = dict(backend_summary)
+        keyword_count = int(backend_summary.get("keyword_count", 0))
         line = (
             f"- {backend}: keyword_count={backend_summary['keyword_count']}, "
             f"median_rho={backend_summary['median_rho']}, "
             f"rho_iqr={backend_summary['rho_iqr']}, "
-            f"fraction_same_sign={backend_summary['fraction_same_sign']}"
+            f"fraction_same_sign={backend_summary['fraction_same_sign']}, "
+            f"inference_mode={backend_summary.get('inference_mode', _inference_mode_for_keyword_count(keyword_count))}"
         )
         if "bh_q_values" in backend_summary:
             line += ", bh_applied=true"
@@ -304,12 +619,19 @@ def _format_regression_lines(regression: dict[str, object]) -> list[str]:
                 f"skipped_reason={backend_summary['skipped_reason']}"
             )
             continue
+        keyword_count = int(backend_summary.get("keyword_count", 0))
+        inference_mode = backend_summary.get(
+            "inference_mode",
+            _inference_mode_for_keyword_count(keyword_count),
+        )
         feature_model = backend_summary["feature_model"]
         effect_size = backend_summary["effect_size"]
         two_way_cluster = backend_summary["sensitivity"]["two_way_cluster"]
         lines.append(
             "- "
-            f"{backend}: coefficient={feature_model['coefficient']}, "
+            f"{backend}: keyword_count={backend_summary['keyword_count']}, "
+            f"inference_mode={inference_mode}, "
+            f"coefficient={feature_model['coefficient']}, "
             f"clustered_ci={feature_model['clustered_confidence_interval']}, "
             f"approx_delta_rank_per_1sd={effect_size['approximate_delta_rank_per_1sd']}, "
             f"two_way_cluster_status={two_way_cluster['status']}"
@@ -328,9 +650,16 @@ def _format_plackett_luce_lines(
             lines.append(
                 "- "
                 f"{backend}: status=skipped, "
-                f"skipped_reason={backend_summary['skipped_reason']}"
+                f"skipped_reason={backend_summary['skipped_reason']}, "
+                f"keyword_count={backend_summary.get('keyword_count', 0)}, "
+                f"inference_mode={backend_summary.get('inference_mode', 'skipped')}"
             )
             continue
+        keyword_count = int(backend_summary.get("keyword_count", 0))
+        inference_mode = backend_summary.get(
+            "inference_mode",
+            _inference_mode_for_keyword_count(keyword_count),
+        )
         main_model = backend_summary["main_model"]
         status = backend_summary.get("status", "computed")
         diagnostics_summary = None
@@ -345,6 +674,8 @@ def _format_plackett_luce_lines(
         lines.append(
             "- "
             f"{backend}: status={status}, "
+            f"keyword_count={backend_summary.get('keyword_count', 0)}, "
+            f"inference_mode={inference_mode}, "
             f"odds_ratio_per_1sd={main_model.get('odds_ratio_per_1sd', 'n/a')}, "
             f"convergence_confirmed={diagnostics_summary['convergence_confirmed'] if diagnostics_summary else 'n/a'}, "
             f"hessian_condition_number={diagnostics_summary['hessian_condition_number'] if diagnostics_summary else 'n/a'}, "
@@ -361,9 +692,16 @@ def _format_diagnostics_lines(diagnostics: dict[str, object]) -> list[str]:
             lines.append(
                 "- "
                 f"{backend}: status=skipped, "
-                f"skipped_reason={backend_summary['skipped_reason']}"
+                f"skipped_reason={backend_summary['skipped_reason']}, "
+                f"keyword_count={backend_summary.get('keyword_count', 0)}, "
+                f"inference_mode={backend_summary.get('inference_mode', 'skipped')}"
             )
             continue
+        keyword_count = int(backend_summary.get("keyword_count", 0))
+        inference_mode = backend_summary.get(
+            "inference_mode",
+            _inference_mode_for_keyword_count(keyword_count),
+        )
         reset = backend_summary["reset"]
         breusch_pagan = backend_summary["breusch_pagan"]
         influence = backend_summary["influence"]
@@ -381,6 +719,8 @@ def _format_diagnostics_lines(diagnostics: dict[str, object]) -> list[str]:
         line = (
             "- "
             f"{backend}: {reset_details}, "
+            f"keyword_count={backend_summary.get('keyword_count', 0)}, "
+            f"inference_mode={inference_mode}, "
             f"breusch_pagan_p_value={breusch_pagan['lm_p_value']}, "
             f"breusch_pagan_flagged={breusch_pagan['flagged']}, "
             f"recommended_se_type={breusch_pagan['recommended_se_type']}, "
@@ -408,6 +748,8 @@ def _public_rank_depth_bundle(bundle: dict[str, object]) -> dict[str, object]:
             "max_serp_rank",
             "analysis_mart_rows",
             "panel_rows",
+            "keyword_count",
+            "inference_mode",
             "guardrails",
             "limitations",
             "hard_fail",
@@ -420,6 +762,8 @@ def _public_rank_depth_bundle(bundle: dict[str, object]) -> dict[str, object]:
         public["regression"] = bundle["regression"]
     if bundle["plackett_luce"] is not None:
         public["plackett_luce"] = bundle["plackett_luce"]
+    if bundle.get("families") is not None:
+        public["families"] = bundle["families"]
     return public
 
 
@@ -473,17 +817,18 @@ def write_stats_artifacts(
         spec=spec,
     )
     (stats_dir / "stats_summary.json").write_text(
-        json.dumps(summary, indent=2, sort_keys=True) + "\n",
+        json.dumps(summary, indent=2) + "\n",
         encoding="utf-8",
     )
     if diagnostics_by_depth:
         diagnostics_summary = build_stats_diagnostics(
             result,
+            rank_depth_bundles=rank_depth_bundles,
             diagnostics_by_depth=diagnostics_by_depth,
             spec=spec,
         )
         (stats_dir / "stats_diagnostics.json").write_text(
-            json.dumps(diagnostics_summary, indent=2, sort_keys=True) + "\n",
+            json.dumps(diagnostics_summary, indent=2) + "\n",
             encoding="utf-8",
         )
     (stats_dir / "stats_report.md").write_text(

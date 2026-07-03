@@ -1,10 +1,13 @@
+import logging
 import urllib.parse
 
 from seo_rank.textrazor import (
     TEXTRAZOR_ENDPOINTS,
+    build_entity_request,
     TextRazorCredentials,
     fetch_textrazor_entities_for_pages,
     pages_missing_textrazor,
+    summarize_textrazor_response,
 )
 
 
@@ -14,6 +17,16 @@ def test_textrazor_endpoint_registry_seeds_entities_partition() -> None:
     assert endpoint.extractor == "entities"
     assert endpoint.raw_response_endpoint == "entities"
     assert endpoint.request_path == "/"
+
+
+def test_build_entity_request_uses_supported_page_metrics_extractors_and_classifier() -> None:
+    request = build_entity_request({"text": "Technical SEO helps crawlers."})
+
+    assert request.body == {
+        "extractors": "entities,topics,words,phrases,relations,entailments,senses,spelling",
+        "classifiers": "textrazor_mediatopics_2023Q1",
+        "text": "Technical SEO helps crawlers.",
+    }
 
 
 def test_pages_missing_textrazor_dedupes_by_keyword_and_url_preserving_order() -> None:
@@ -119,12 +132,12 @@ def test_fetch_textrazor_entities_for_pages_dedupes_requests_and_preserves_raw_s
     }
     assert (
         sent_requests[0]["body"]
-        == b"extractors=entities%2Ctopics%2Ccategories%2Centailments%2Cwords%2Crelations%2Cproperties%2CnounPhrases&text=Alpha"
+        == b"extractors=entities%2Ctopics%2Cwords%2Cphrases%2Crelations%2Centailments%2Csenses%2Cspelling&classifiers=textrazor_mediatopics_2023Q1&text=Alpha"
     )
     assert sent_requests[0]["timeout"] == 12.5
     assert (
         sent_requests[1]["body"]
-        == b"extractors=entities%2Ctopics%2Ccategories%2Centailments%2Cwords%2Crelations%2Cproperties%2CnounPhrases&text=Beta"
+        == b"extractors=entities%2Ctopics%2Cwords%2Cphrases%2Crelations%2Centailments%2Csenses%2Cspelling&classifiers=textrazor_mediatopics_2023Q1&text=Beta"
     )
     assert responses == [
         {
@@ -158,6 +171,85 @@ def test_fetch_textrazor_entities_for_pages_dedupes_requests_and_preserves_raw_s
             "source_text": "Beta",
         },
     ]
+
+
+def test_summarize_textrazor_response_counts_sections_and_top_entities() -> None:
+    summary = summarize_textrazor_response(
+        {
+            "response": {
+                "language": "eng",
+                "entities": [
+                    {"entityId": "alpha", "matchedText": "Alpha"},
+                    {"entityId": "beta", "matchedText": "Beta"},
+                ],
+                "topics": [{"label": "Alpha topic", "score": 0.5}],
+                "categories": [],
+            }
+        }
+    )
+
+    assert summary == {
+        "language": "eng",
+        "section_counts": {
+            "entities": 2,
+            "topics": 1,
+            "categories": 0,
+            "entailments": 0,
+            "words": 0,
+            "relations": 0,
+            "properties": 0,
+            "nounPhrases": 0,
+        },
+        "top_entities": ["alpha", "beta"],
+        "error": None,
+    }
+
+
+def test_fetch_textrazor_entities_for_pages_logs_response_summary(caplog) -> None:
+    caplog.set_level(logging.INFO, logger="seo_rank.textrazor")
+
+    def transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        return {
+            "response": {
+                "language": "eng",
+                "entities": [
+                    {
+                        "entityId": "alpha",
+                        "matchedText": "Alpha",
+                        "confidenceScore": 7.0,
+                        "relevanceScore": 0.9,
+                        "type": ["Topic"],
+                    }
+                ],
+                "topics": [{"label": "Alpha topic", "score": 0.5}],
+            }
+        }
+
+    fetch_textrazor_entities_for_pages(
+        [
+            {
+                "target_keyword": "Technical SEO",
+                "url": "https://example.com/a",
+                "text": "Alpha",
+            }
+        ],
+        credentials=TextRazorCredentials(api_key="textrazor-secret"),
+        transport=transport,
+    )
+
+    messages = " ".join(record.message for record in caplog.records)
+    assert "textrazor request url=https://example.com/a text_chars=5" in messages
+    assert "textrazor response url=https://example.com/a" in messages
+    assert "entities=1" in messages
+    assert "topics=1" in messages
+    assert "top_entities=alpha" in messages
 
 
 def test_fetch_textrazor_entities_for_pages_returns_empty_list_without_network_calls() -> None:

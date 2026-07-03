@@ -158,6 +158,15 @@ CURATED_SCHEMAS = {
             ("textrazor_relation_count", pa.int64()),
             ("textrazor_property_count", pa.int64()),
             ("textrazor_noun_phrase_count", pa.int64()),
+            ("textrazor_entities_present", pa.bool_()),
+            ("textrazor_topics_present", pa.bool_()),
+            ("textrazor_categories_present", pa.bool_()),
+            ("textrazor_entailments_present", pa.bool_()),
+            ("textrazor_words_present", pa.bool_()),
+            ("textrazor_relations_present", pa.bool_()),
+            ("textrazor_properties_present", pa.bool_()),
+            ("textrazor_noun_phrases_present", pa.bool_()),
+            ("textrazor_page_metrics_complete", pa.bool_()),
             ("schema_version", pa.string()),
         ]
     ),
@@ -413,6 +422,15 @@ CURATED_VALIDATION_RULES = {
             "textrazor_relation_count": pl.Int64,
             "textrazor_property_count": pl.Int64,
             "textrazor_noun_phrase_count": pl.Int64,
+            "textrazor_entities_present": pl.Boolean,
+            "textrazor_topics_present": pl.Boolean,
+            "textrazor_categories_present": pl.Boolean,
+            "textrazor_entailments_present": pl.Boolean,
+            "textrazor_words_present": pl.Boolean,
+            "textrazor_relations_present": pl.Boolean,
+            "textrazor_properties_present": pl.Boolean,
+            "textrazor_noun_phrases_present": pl.Boolean,
+            "textrazor_page_metrics_complete": pl.Boolean,
             "schema_version": pl.Utf8,
         },
         "unique_columns": ("page_metrics_row_id",),
@@ -424,21 +442,15 @@ CURATED_VALIDATION_RULES = {
             "canonical_url_hash",
             "url",
             "page_metrics_row_id",
-            "textrazor_entity_confidence_score",
-            "textrazor_entity_relevance_score",
-            "textrazor_topic_score",
-            "textrazor_category_score",
-            "textrazor_classifier_score",
-            "textrazor_entailment_score",
-            "textrazor_entailment_prior",
-            "textrazor_entailment_context",
-            "textrazor_word_count",
-            "textrazor_grammar_count",
-            "textrazor_sense_count",
-            "textrazor_spelling_count",
-            "textrazor_relation_count",
-            "textrazor_property_count",
-            "textrazor_noun_phrase_count",
+            "textrazor_entities_present",
+            "textrazor_topics_present",
+            "textrazor_categories_present",
+            "textrazor_entailments_present",
+            "textrazor_words_present",
+            "textrazor_relations_present",
+            "textrazor_properties_present",
+            "textrazor_noun_phrases_present",
+            "textrazor_page_metrics_complete",
             "schema_version",
         ),
         "bounded_columns": {
@@ -1009,7 +1021,10 @@ def build_textrazor_page_metrics_frame(
         return pl.DataFrame(
             schema=CURATED_VALIDATION_RULES["textrazor_page_metrics_curated"]["expected_schema"]
         )
-    return pl.DataFrame(rows)
+    return pl.DataFrame(
+        rows,
+        schema=CURATED_VALIDATION_RULES["textrazor_page_metrics_curated"]["expected_schema"],
+    )
 
 
 def build_similarity_scores_frame(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import json
 import os
 import sys
@@ -29,7 +30,16 @@ from seo_rank.gemini_embeddings import (
     to_vector,
 )
 from seo_rank.similarity import fixture_bge_reranker_score
+from seo_rank.textrazor import (
+    TextRazorCredentials,
+    build_entity_request,
+    execute_textrazor_request,
+    normalize_page_metrics,
+    validate_textrazor_credentials,
+)
 
+
+logger = logging.getLogger(__name__)
 
 KEYWORD = "best northwest houston realtors"
 
@@ -96,11 +106,45 @@ def _load_bge_reranker_or_fixture():
     try:
         return load_bge_reranker()
     except Exception as error:  # pragma: no cover - exercised via regression tests
-        print(
-            f"Warning: live BGE unavailable, using fixture scores instead: {error}",
-            file=sys.stderr,
+        logger.warning(
+            "live BGE unavailable, using fixture scores instead: %s",
+            error,
         )
         return _FixtureBgeReranker()
+
+
+def _textrazor_entity_scores(
+    label: str,
+    text: str,
+    *,
+    textrazor_api_key: str,
+    textrazor_transport=None,
+) -> dict[str, dict[str, float]]:
+    logger.info("requesting textrazor metrics label=%s text_chars=%d", label, len(text))
+    response = execute_textrazor_request(
+        build_entity_request({"text": text}),
+        credentials=TextRazorCredentials(api_key=textrazor_api_key),
+        transport=textrazor_transport,
+    )
+    metrics = normalize_page_metrics(response, url=f"analysis://{label}")
+    confidence = float(metrics["textrazor_entity_confidence_score"])
+    relevance = float(metrics["textrazor_entity_relevance_score"])
+    logger.info(
+        "received textrazor metrics label=%s confidence=%s relevance=%s",
+        label,
+        confidence,
+        relevance,
+    )
+    return {
+        "textrazor_entity_confidence_score": {
+            "raw_score": round(confidence, 6),
+            "normalized_score": round(confidence, 6),
+        },
+        "textrazor_entity_relevance_score": {
+            "raw_score": round(relevance, 6),
+            "normalized_score": round(relevance, 6),
+        },
+    }
 
 
 def compute_semantic_similarity_scores(
@@ -108,8 +152,10 @@ def compute_semantic_similarity_scores(
     blocks: Sequence[dict[str, str]],
     *,
     api_key: str,
+    textrazor_api_key: str,
     embed_content: Callable[..., Sequence[float]],
     reranker=None,
+    textrazor_transport=None,
 ) -> list[dict[str, object]]:
     keyword_document_vector = to_vector(
         embed_content(
@@ -134,7 +180,14 @@ def compute_semantic_similarity_scores(
         if isinstance(block.get("label"), str) and isinstance(block.get("text"), str)
     ]
     if not valid_blocks:
+        logger.info("computing semantic similarity keyword=%s blocks=0 valid_blocks=0", keyword)
         return []
+    logger.info(
+        "computing semantic similarity keyword=%s blocks=%d valid_blocks=%d",
+        keyword,
+        len(blocks),
+        len(valid_blocks),
+    )
     pairs = [[keyword, block["text"]] for block in valid_blocks]
     if reranker is None:
         reranker = _load_bge_reranker_or_fixture()
@@ -143,10 +196,7 @@ def compute_semantic_similarity_scores(
     except Exception as error:
         if isinstance(reranker, _FixtureBgeReranker):
             raise
-        print(
-            f"Warning: live BGE scoring failed, using fixture scores instead: {error}",
-            file=sys.stderr,
-        )
+        logger.warning("live BGE scoring failed, using fixture scores instead: %s", error)
         raw_bge_scores = _FixtureBgeReranker().compute_score(pairs)
     if isinstance(raw_bge_scores, (int, float)):
         raw_bge_scores = [float(raw_bge_scores)]
@@ -195,8 +245,23 @@ def compute_semantic_similarity_scores(
                         "raw_score": semantic_similarity,
                         "normalized_score": semantic_similarity,
                     },
+                    **_textrazor_entity_scores(
+                        label,
+                        text,
+                        textrazor_api_key=textrazor_api_key,
+                        textrazor_transport=textrazor_transport,
+                    ),
                 },
             }
+        )
+        logger.info(
+            "scored block label=%s bge=%s doc=%s semantic=%s textrazor_confidence=%s textrazor_relevance=%s",
+            label,
+            scores[-1]["page_similarity"]["bge"]["raw_score"],
+            document_similarity,
+            semantic_similarity,
+            scores[-1]["page_similarity"]["textrazor_entity_confidence_score"]["raw_score"],
+            scores[-1]["page_similarity"]["textrazor_entity_relevance_score"]["raw_score"],
         )
     return scores
 
@@ -205,16 +270,20 @@ def main() -> int:
     api_key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not api_key:
         raise SystemExit("GEMINI_API_KEY is required in the project .env")
+    textrazor_credentials = validate_textrazor_credentials(os.environ)
 
+    logger.info("starting analysis keyword=%s blocks=%d", KEYWORD, len(TEXT_BLOCKS))
     try:
         scores = compute_semantic_similarity_scores(
             KEYWORD,
             TEXT_BLOCKS,
             api_key=api_key,
+            textrazor_api_key=textrazor_credentials.api_key,
             embed_content=build_live_embed_content(api_key),
         )
     except Exception as error:
         raise SystemExit(f"Gemini embedding request failed: {error}") from error
+    logger.info("completed analysis keyword=%s scored_blocks=%d", KEYWORD, len(scores))
 
     print(f"Keyword: {KEYWORD}")
     for index, row in enumerate(
@@ -231,11 +300,15 @@ def main() -> int:
         bge = page_similarity["bge"]
         document_relevance = page_similarity["gemini_doc_retrieval"]
         semantic = page_similarity["gemini_semantic_similarity"]
+        textrazor_confidence = page_similarity["textrazor_entity_confidence_score"]
+        textrazor_relevance = page_similarity["textrazor_entity_relevance_score"]
         print(
             f"{index}. {row['label']} - "
             f"BGE: {bge['raw_score']:.6f} (normalized {bge['normalized_score']:.6f}) | "
             f"Gemini document relevance: {document_relevance['raw_score']:.6f} | "
-            f"Gemini semantic similarity: {semantic['raw_score']:.6f}"
+            f"Gemini semantic similarity: {semantic['raw_score']:.6f} | "
+            f"TextRazor entity confidence: {textrazor_confidence['raw_score']:.6f} | "
+            f"TextRazor entity relevance: {textrazor_relevance['raw_score']:.6f}"
         )
 
     print()

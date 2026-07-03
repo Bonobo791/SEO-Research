@@ -97,7 +97,7 @@ confirmatory keyword holdout (Phase 5.4), passage-level Plackett-Luce analysis.
 
 #### Dev slices
 
-**Progress:** 19 of 31 shipped, 2 partial, 10 open.
+**Progress:** 23 of 33 shipped, 2 partial, 8 open.
 
 1. **[x] Slice 1 — Estimand & analysis spec**
    - Add `analysis_spec.v1.yaml`: outcome (`-log(serp_rank)`), predictors,
@@ -361,21 +361,19 @@ seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-textrazor-on
     - Covered by `tests/unit/test_textrazor_normalization.py` and
       `tests/unit/test_feature_marts.py`.
 
-29. **[~] Slice 29 — Generalize the Phase 5 stats engine**
-    - **Shipped:** `summarize_spearman_families()` runs Spearman + BH per
-      registered family with per-family BH boundaries; covered by
-      `tests/unit/test_stats_family_dispatch.py`.
-    - **Open:** pooled OLS, diagnostics, Plackett-Luce, and rank-depth bundles
-      per family; artifact emission (slice 30).
+29. **[x] Slice 29 — Generalize the Phase 5 stats engine**
+    - Family-aware Spearman, pooled OLS, diagnostics, and Plackett-Luce per
+      registered signal family; BH scoped per family.
+    - Covered by `tests/unit/test_stats_family_dispatch.py` and
+      `tests/unit/test_stats_family_artifacts.py`.
 
-30. **[ ] Slice 30 — Fold families into CLI output and artifacts**
-    - Extend `stats_summary.json`, `stats_diagnostics.json`, and
-      `stats_report.md` so they show similarity and TextRazor families in one
-      combined Phase 5 report tree.
-    - Preserve the current hard-fail path: skip confirmatory inference but
-      still write the minimal summary and report artifacts.
-    - Update `seo-rank analyze` and keyword inspection output so the TextRazor
-      features appear alongside the existing similarity output.
+30. **[x] Slice 30 — Fold families into CLI output and artifacts**
+    - Combined `stats_summary.json`, `stats_diagnostics.json`, and
+      `stats_report.md` with nested `rank_depths.*.families` for similarity and
+      TextRazor families; top-level similarity blocks kept for compatibility.
+    - Hard-fail still skips confirmatory inference but writes family blocks as
+      `skipped`.
+    - Covered by `tests/unit/test_stats_family_artifacts.py`.
 
 31. **[ ] Slice 31 — TextRazor signal golden fixtures and tests**
     - Add synthetic fixtures that include both similarity rows and TextRazor
@@ -386,6 +384,18 @@ seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-textrazor-on
     - Keep one end-to-end fixture that proves the same Phase 5 stack works on a
       similarity family and the new TextRazor families without changing the
       current similarity results.
+
+32. **[x] Slice 32 — TextRazor page-metrics completeness**
+    - `textrazor.py` tracks per-section presence; missing extractors yield
+      `null` counts, not silent zeros.
+    - `textrazor_page_metrics_complete` on curated and feature marts.
+    - Covered by `tests/unit/test_textrazor_normalization.py` and
+      `tests/unit/test_feature_marts.py`.
+
+33. **[x] Slice 33 — Small-K exploratory status**
+    - `stats_*` artifacts surface `keyword_count` and `inference_mode` per rank
+      depth and backend.
+    - Covered by `tests/unit/test_stats_family_artifacts.py`.
 
 #### Phase 5 acceptance criteria
 
@@ -413,8 +423,10 @@ seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-textrazor-on
 | `parquet/entities/` after textrazor-only ingest + normalize | 21–25 | Shipped |
 | TextRazor cross-doc schema contract | 26 | Shipped |
 | TextRazor signal registry and page-metrics mart | 27, 28 | Shipped |
-| Family-aware Spearman dispatch (Spearman only) | 29 | Partial |
-| Family-aware OLS/PL/diagnostics + combined artifacts | 29, 30 | Open |
+| Family-aware Spearman, OLS, diagnostics, and PL per signal family | 29 | Shipped |
+| Combined `stats_*` artifact tree for all signal families | 30 | Shipped |
+| `textrazor_page_metrics_complete` on curated and feature marts | 32 | Shipped |
+| `keyword_count` and `inference_mode` on underpowered runs | 33 | Shipped |
 | Similarity + TextRazor golden fixtures and CLI tests | 31 | Open |
 
 ### Phase 5.1 — Live provider fail-fast on DataForSEO denial
@@ -1055,9 +1067,16 @@ Slice 4. Slice 7 last.
   at `target_keyword × SERP URL` grain; full page-metrics TextRazor extractors;
   similarity `analysis_mart` unchanged. Covered by `test_stats_families.py`,
   `test_textrazor_normalization.py`, and `test_feature_marts.py`.
-- **Phase 5 Slice 29 partial (2026-07-02):** `summarize_spearman_families()`
-  scopes BH per signal family; `test_stats_family_dispatch.py`. OLS/PL/diagnostics
-  per family and CLI artifact wiring remain open (slices 29–30).
+- **Phase 5 Slices 29–30 shipped (2026-07-02):** family-aware Spearman, pooled
+  OLS, diagnostics, and Plackett-Luce per registered signal family; combined
+  `stats_*` artifact tree with nested `rank_depths.*.families` for similarity
+  and TextRazor families; top-level similarity blocks kept for compatibility.
+  Covered by `test_stats_family_dispatch.py` and `test_stats_family_artifacts.py`.
+- **Phase 5 Slices 32–33 shipped (2026-07-02):** TextRazor page-metrics
+  completeness (`textrazor_page_metrics_complete`, null-not-zero section
+  counts) and small-K inference labeling (`keyword_count`, `inference_mode` in
+  `stats_*`). Covered by `test_textrazor_normalization.py`,
+  `test_feature_marts.py`, and `test_stats_family_artifacts.py`.
 - **Phase 5 Slices 21–26 shipped (2026-07-02):** TextRazor-only ingestion path —
   `--live-textrazor-only` / `--refresh-textrazor` CLI flags and gates,
   `TEXTRAZOR_ENDPOINTS` registry, `fetch_textrazor_entities_for_pages()`,

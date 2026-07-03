@@ -56,7 +56,7 @@ page, up to `--depth` organic rows per keyword). Raw responses land in
 `textrazor_page_metrics_curated` table and `textrazor_page_metrics` feature mart
 at the same `target_keyword × SERP URL` grain as `analysis_mart`. The similarity
 mart stays unchanged; TextRazor families are additive for Phase 5 stats (slices
-27–28 shipped; confirmatory artifact wiring slices 29–30 open).
+27–30 and 32–33 shipped; golden fixtures slice 31 open).
 
 Product architecture, scope, and phased backlog live in root markdown:
 `ARCHITECTURE.md` (this file), `GOALS.md`, and `ROADMAP.md`.
@@ -92,7 +92,7 @@ The repository contains an **offline-verifiable CLI scaffold** (Phase 1 shipped)
   `build-features`, `analyze`, `replay`, and `run --stored-run`, which resumes
   partial runs in place from the stored lake before re-materializing downstream
   marts
-- **Tests:** 261 unit tests under `tests/unit/`; full suite collects 262 tests
+- **Tests:** 271 unit tests under `tests/unit/`; full suite collects 272 tests
   (1 opt-in integration); gate: `python -m pytest tests/unit`; Phase 4.5 Slice 7
   shipped the round-trip regression sweep in `test_sdlc_docs.py`
 - **Product docs:** `ARCHITECTURE.md`, `GOALS.md`, `ROADMAP.md`, `README.md`,
@@ -105,9 +105,9 @@ Module and artifact details are in [Application Surface](#application-surface)
 and [Key Product Components](#key-product-components) below. Phase 5 slices 1–6
 and 16–20 ship the estimand spec, stats package, guardrails, Spearman/BH primary
 path, pooled regression, pooled diagnostics, and parallel confirmatory rank
-depths (top 20 / 10 / 5 / 3); multivariate sensitivity, influence robustness,
-golden fixtures, and remaining CLI polish continue in slices 7–8, 10, and 9
-(partial).
+depths (top 20 / 10 / 5 / 3); slices 29–30 add family-aware `stats_*` artifacts.
+Multivariate sensitivity, influence robustness, golden fixtures, and remaining
+CLI polish continue in slices 7–8, 10, and 9 (partial).
 
 ## Key Product Components
 
@@ -136,13 +136,14 @@ golden fixtures, and remaining CLI polish continue in slices 7–8, 10, and 9
   `--live-gemini`; local **BGE** (`BAAI/bge-reranker-v2-m3`) behind
   `--live-bge` — see [Live similarity backends (Phase 4)](#live-similarity-backends-phase-4)
   and [Planned Page Similarity Run](#planned-page-similarity-run).
-- **Analysis engine (in progress, Phase 5):** slices 1–6 and 16–20 shipped —
-  `analysis_spec.v1.yaml`, `src/seo_rank/stats/` (including `rank_depth.py`),
-  guardrails/panel prep, Spearman + BH, pooled OLS with clustered regression
-  summaries, pooled OLS diagnostics, and parallel confirmatory rank-depth bundles
-  at top 20 / 10 / 5 / 3. Multivariate sensitivity, influence robustness,
-  golden fixtures, and remaining CLI polish (slice 9 partial) remain in slices
-  7–8 and 10 — see [Planned Per-Run Statistical Analysis](#planned-per-run-statistical-analysis).
+- **Analysis engine (in progress, Phase 5):** slices 1–6, 16–20, and 29–30 shipped —
+  `analysis_spec.v1.yaml`, `src/seo_rank/stats/` (including `rank_depth.py` and
+  `families.py`), guardrails/panel prep, Spearman + BH, pooled OLS with clustered
+  regression summaries, pooled OLS diagnostics, parallel confirmatory rank-depth
+  bundles at top 20 / 10 / 5 / 3, and family-aware `stats_*` artifacts for
+  similarity and TextRazor signal families. Multivariate sensitivity, influence
+  robustness, golden fixtures, and remaining CLI polish (slice 9 partial) remain
+  in slices 7–8 and 10 — see [Planned Per-Run Statistical Analysis](#planned-per-run-statistical-analysis).
   OLS / Plackett-Luce standardization, `analysis_mart.v2` relative ranks, and
   expanded reporting are **Phase 6.1** (`ROADMAP.md`).
 - **Reporters (shipped):** JSON + Markdown under the selected run root;
@@ -191,12 +192,14 @@ runs Phase 5 stats unless the run manifest is dry-run. `raw_responses` stays
 out of normal analytical joins (replay/re-normalization only). Live DataForSEO
 payloads are not retained by the provider long-term.
 
-**Phase 5 stats today (partial):** lazy Polars joins on `analysis_mart` →
-guardrails → parallel confirmatory rank-depth bundles (top 20 / 10 / 5 / 3) →
-keyword-level Spearman ρ with BH per backend → pooled OLS with clustered SEs and
-diagnostics → page-level Plackett-Luce per depth → `runs/{run_id}/stats/`
-artifacts. Multivariate sensitivity, influence refit, golden fixtures, and
-`--no-fail-on-guardrails` remain open (slices 7–8, 10; slice 9 partial).
+**Phase 5 stats today:** lazy Polars joins on `analysis_mart` and
+`textrazor_page_metrics` → guardrails → parallel confirmatory rank-depth bundles
+(top 20 / 10 / 5 / 3) per signal family → keyword-level Spearman ρ with BH per
+family → pooled OLS with clustered SEs and diagnostics → page-level
+Plackett-Luce per depth → `runs/{run_id}/stats/` artifacts with
+`keyword_count` and `inference_mode` labeling. Multivariate sensitivity,
+influence refit, golden fixtures, and `--no-fail-on-guardrails` remain open
+(slices 7–8, 10; slice 9 partial).
 
 **Planned workflow integrity (Phase 6):** every required accounting unit must
 reach a permitted terminal disposition at each applicable boundary, proven from
@@ -294,7 +297,7 @@ sink. Every row includes join keys: `run_id`,
 | `page_content_fields` | One row per decoded `content_parsing/live` field with path metadata and stable ids |
 | `passages` | Passage splits with offsets; no duplicate full page bodies |
 | `entities` | TextRazor entity mention rows when present |
-| `textrazor_page_metrics_curated` | One row per `target_keyword × SERP URL` with aggregated TextRazor scalar and structural page metrics |
+| `textrazor_page_metrics_curated` | One row per `target_keyword × SERP URL` with aggregated TextRazor scalar and structural page metrics; `textrazor_page_metrics_complete` flags whether all extractor sections were present |
 | `similarity_scores` | Page-level `bge`, `gemini_doc_retrieval`, `gemini_semantic_similarity` (sourced from `run.json` `page_similarity`) |
 
 Planned follow-on: raw HTML persistence still needs a dedicated sink path, and
@@ -315,7 +318,7 @@ Derived from curated tables via `features.py`. Filter and select **before** join
 | `page_features` | Page-level similarity and text features |
 | `passage_features` | Passage-level features (Phase 5.5 expands scoring scope) |
 | `domain_features` | Domain-level aggregates (Phase 5.5 expands URL inventory) |
-| `textrazor_page_metrics` | TextRazor page-signal columns keyed like `analysis_mart` (not joined into similarity mart) |
+| `textrazor_page_metrics` | TextRazor page-signal columns keyed like `analysis_mart` (not joined into similarity mart); includes `textrazor_page_metrics_complete` |
 
 ### Layer 4 — analysis mart
 
@@ -419,18 +422,18 @@ src/seo_rank/stats/   # Phase 5 observational analysis (see ROADMAP.md)
 | `marts.py` | Join feature marts into `analysis_mart` at `target_keyword × SERP URL` grain |
 | `validate.py` | Schema contracts plus row-level uniqueness, null, and range audits; used before every mart write or at the sink edge |
 
-**Phase 5 stats package** (`src/seo_rank/stats/`): **slices 1–6 and 16–20
-shipped** — `spec.py` loads `analysis_spec.v1.yaml` (including `rank_depths`,
-`limitations_by_depth`, and `signal_families`); `families.py` keeps the family
-registry ordered at the `target_keyword_id × canonical_url_hash` grain;
-`rank_depth.py` filters panels by max SERP rank; `panel.py` prepares per-depth
-guardrails and limitations; `artifacts.py` runs `run_phase5_stats()` with
-nested `rank_depths` JSON, four `## Rank depth:` report sections, and a top-20
-compat shim. `spearman.py`, `regression.py`, `plackett_luce.py`, and
-`diagnostics.py` each emit per-depth summaries.
-Multivariate sensitivity and influence robustness remain in slices 7–8; slice 9
-(partial) still needs `--no-fail-on-guardrails` and a `report.md` link to
-`stats/stats_report.md`.
+**Phase 5 stats package** (`src/seo_rank/stats/`): **slices 1–6, 16–20, and
+29–30 shipped** — `spec.py` loads `analysis_spec.v1.yaml` (including
+`rank_depths`, `limitations_by_depth`, and `signal_families`); `families.py`
+keeps the family registry ordered at the `target_keyword_id × canonical_url_hash`
+grain; `rank_depth.py` filters panels by max SERP rank; `panel.py` prepares
+per-depth guardrails and limitations; `artifacts.py` runs `run_phase5_stats()`
+with nested `rank_depths` JSON (including per-family Spearman, OLS, diagnostics,
+and Plackett-Luce blocks), four `## Rank depth:` report sections with a
+`### Families` subsection, `keyword_count` / `inference_mode` labeling, and a
+top-20 compat shim. Multivariate sensitivity and influence robustness remain in
+slices 7–8; slice 9 (partial) still needs `--no-fail-on-guardrails` and a
+`report.md` link to `stats/stats_report.md`.
 Dependencies: `statsmodels`, `numpy`, `scipy`, `PyYAML` in `pyproject.toml`.
 Spec: `analysis_spec.v1.yaml`.
 
@@ -607,7 +610,10 @@ Phase 5.75 features → `analysis_spec.v2.yaml`.
 **Outputs:** `runs/{run_id}/stats/stats_summary.json`, `stats_diagnostics.json`,
 `stats_report.md`; link from `report.md`. Nested under `rank_depths` at
 `top_20`, `top_10`, `top_5`, and `top_3` with per-depth guardrails, Spearman,
-pooled regression, Plackett-Luce, limitations, and `actionable_association`.
+pooled regression, Plackett-Luce, limitations, `actionable_association`, and
+nested `families` for each signal family. Each depth and backend reports
+`keyword_count` and `inference_mode` (`confirmatory` when K ≥ 10,
+`exploratory` when 2 ≤ K < 10, `underpowered` when K = 1).
 Top-level summary fields mirror `rank_depths.top_20` for backward compatibility.
 `actionable_association_by_rank_depth` maps each depth to its BGE rule outcome.
 The diagnostics file nests regression and Plackett-Luce diagnostics per depth;
@@ -878,7 +884,8 @@ before proceeding to Benjamini-Hochberg correction and run reporting.
   tables; `raw_responses` excluded from normal analytical joins.
 - Capture TextRazor page signals per SERP URL into curated and feature marts;
   keep similarity `analysis_mart` unchanged. Family-aware confirmatory stats
-  (Spearman dispatch partial in slice 29; OLS/PL/artifacts slices 29–30 open).
+  across similarity and TextRazor signal families ship in slices 29–30; golden
+  fixtures (slice 31) remain open.
 - Continue filling in the real package under `src/seo_rank/` and add
   discoverable tests under `tests/`.
 - Record significant architecture decisions in this file's [Decisions](#decisions)

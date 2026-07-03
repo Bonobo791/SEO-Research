@@ -122,6 +122,8 @@ def summarize_spearman_family(
             "kind": family.kind,
             "source_mart": source_mart,
             "signal_columns": list(family.signal_columns),
+            "signals": {},
+            "backends": {},
             "status": "skipped",
             "skipped_reason": "no_usable_rows",
         }
@@ -152,6 +154,7 @@ def summarize_spearman_family(
             "status": "skipped",
             "skipped_reason": "no_usable_rows",
             "signals": signal_summaries,
+            "backends": signal_summaries,
         }
 
     rho_values = [float(test["rho"]) for test in family_tests]
@@ -168,6 +171,7 @@ def summarize_spearman_family(
         else 0.0,
         "fraction_same_sign": _fraction_same_sign(rho_values),
         "signals": signal_summaries,
+        "backends": signal_summaries,
     }
     if len(family_tests) >= 10:
         q_values = adjust_p_values([float(test["p_value"]) for test in family_tests])
@@ -195,11 +199,17 @@ def compute_keyword_spearman_tests(
             continue
         scores = paired.get_column(score_column).to_list()
         ranks = paired.get_column("serp_rank").to_list()
-        rho, p_value = spearmanr(scores, ranks)
-        if rho is None or math.isnan(float(rho)):
+        scores_constant = _is_constant_sequence(scores)
+        ranks_constant = _is_constant_sequence(ranks)
+        if scores_constant or ranks_constant:
             rho = 0.0
-        if p_value is None or math.isnan(float(p_value)):
             p_value = 1.0
+        else:
+            rho, p_value = spearmanr(scores, ranks)
+            if rho is None or math.isnan(float(rho)):
+                rho = 0.0
+            if p_value is None or math.isnan(float(p_value)):
+                p_value = 1.0
         tests.append(
             {
                 "target_keyword_id": keyword_id,
@@ -247,6 +257,7 @@ def _summarize_signal_spearman(
         if rho_values
         else 0.0,
         "fraction_same_sign": _fraction_same_sign(rho_values),
+        "status": "computed",
     }
     if family_key is not None:
         summary["family"] = family_key
@@ -292,3 +303,10 @@ def _sign(value: float) -> int:
     if value < 0:
         return -1
     return 0
+
+
+def _is_constant_sequence(values: Sequence[object]) -> bool:
+    if len(values) <= 1:
+        return True
+    first = values[0]
+    return all(value == first for value in values[1:])

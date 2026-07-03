@@ -1,4 +1,5 @@
 import logging
+import warnings
 from pathlib import Path
 
 import polars as pl
@@ -6,7 +7,7 @@ import pytest
 
 from seo_rank.stats.artifacts import run_phase5_stats
 from seo_rank.stats.bh import adjust_p_values
-from seo_rank.stats.spearman import summarize_backend_spearman
+from seo_rank.stats.spearman import compute_keyword_spearman_tests, summarize_backend_spearman
 
 
 def _passing_analysis_mart_frame() -> pl.DataFrame:
@@ -100,6 +101,46 @@ def _secondary_backend_only_keyword_frame() -> pl.DataFrame:
 def _underpowered_analysis_mart_frame() -> pl.DataFrame:
     frame = _passing_analysis_mart_frame()
     return frame.filter(pl.col("target_keyword_id") != "kw-10")
+
+
+def test_compute_keyword_spearman_tests_skips_constant_score_inputs_without_warning() -> None:
+    frame = pl.DataFrame(
+        [
+            {
+                "target_keyword_id": "kw-1",
+                "target_keyword": "keyword 1",
+                "serp_rank": 1,
+                "textrazor_topic_score": 0.0,
+            },
+            {
+                "target_keyword_id": "kw-1",
+                "target_keyword": "keyword 1",
+                "serp_rank": 2,
+                "textrazor_topic_score": 0.0,
+            },
+            {
+                "target_keyword_id": "kw-1",
+                "target_keyword": "keyword 1",
+                "serp_rank": 3,
+                "textrazor_topic_score": 0.0,
+            },
+        ]
+    )
+
+    with warnings.catch_warnings(record=True) as warning_records:
+        warnings.simplefilter("always")
+        tests = compute_keyword_spearman_tests(frame, score_column="textrazor_topic_score")
+
+    assert tests == [
+        {
+            "target_keyword_id": "kw-1",
+            "target_keyword": "keyword 1",
+            "n_rows": 3,
+            "rho": 0.0,
+            "p_value": 1.0,
+        }
+    ]
+    assert not any("ConstantInput" in str(warning.message) for warning in warning_records)
 
 
 def test_adjust_p_values_applies_benjamini_hochberg_ordering() -> None:

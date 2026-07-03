@@ -73,7 +73,7 @@ def test_stored_run_docs_describe_partial_resume_and_current_suite_status() -> N
     assert "reuses existing raw responses" in readme
     assert "`--stored-run` resumes partial runs in place" in architecture
     assert "refreshes only missing work" in architecture
-    assert "261 unit tests pass" in testing or "261 unit tests" in testing
+    assert "271 unit tests pass" in testing or "271 unit tests" in testing
     assert "resumes from the saved raw lake" in roadmap
 
 
@@ -145,8 +145,8 @@ def test_phase_45_slice_9_regression_sweep_marks_mart_sink_docs_as_shipped() -> 
     assert "Phase 4.5 Slice 9 shipped" in roadmap
     assert "Phase 4.5 Slice 10 shipped" in roadmap
     assert "Phase 4.5 signed off" in roadmap
-    assert "261 unit tests" in architecture or "261 tests" in architecture or "261 unit tests pass" in architecture
-    assert "261 unit tests pass" in testing or "261 unit tests" in testing
+    assert "271 unit tests" in architecture or "271 tests" in architecture or "271 unit tests pass" in architecture
+    assert "271 unit tests pass" in testing or "271 unit tests" in testing
     assert "sink feature marts lazily with Parquet statistics" in testing
 
 
@@ -208,7 +208,7 @@ def test_phase_5_slice_5_ships_pooled_regression_secondary_path() -> None:
     assert "| 5 | Pooled regression (secondary) | Stats | Shipped |" in goals
     assert "Phase 5 Slice 5 shipped" in roadmap
     assert "**[x] Slice 5 — Pooled regression (secondary)**" in roadmap
-    assert "slices 1–6 and 16–20 shipped" in architecture
+    assert "Phase 5 slices 1–6" in architecture
     assert "keyword-clustered SEs" in architecture
     assert "test_stats_regression.py" in testing
     assert "Phase 5 slices 1–6 and 16–20" in testing
@@ -312,16 +312,22 @@ def test_textrazor_signal_expansion_docs_cross_link() -> None:
     assert "textrazor_page_metrics" in architecture
     assert "families.py" in architecture
     assert "test_stats_family_dispatch.py" in testing
+    assert "test_stats_family_artifacts.py" in testing
     assert "textrazor_page_metrics_curated" in readme
     assert "TextRazor signal families" in plan_review
+    assert "**[x] Slice 29 — Generalize the Phase 5 stats engine**" in goals
+    assert "**[x] Slice 30 — Fold families into CLI output and artifacts**" in goals
+    assert "**[x] Slice 32 — TextRazor page-metrics completeness**" in goals
+    assert "**[x] Slice 33 — Small-K exploratory status**" in goals
+    assert "Phase 5 Slices 29–30 shipped" in roadmap
 
 
 def test_phase_5_progress_counts_are_aligned() -> None:
     goals = (ROOT / "GOALS.md").read_text(encoding="utf-8")
     roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
 
-    assert "19 of 31 shipped, 2 partial, 10 open" in goals
-    assert "19 of 31 shipped, 2 partial, 10 open" in roadmap
+    assert "23 of 33 shipped, 2 partial, 8 open" in goals
+    assert "23 of 33 shipped, 2 partial, 8 open" in roadmap
 
 
 def test_phase_6_plans_workflow_integrity_guardrails() -> None:

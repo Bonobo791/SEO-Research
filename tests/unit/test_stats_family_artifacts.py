@@ -83,6 +83,10 @@ def _combined_textrazor_frame() -> pl.DataFrame:
     return pl.DataFrame(rows)
 
 
+def _single_keyword_analysis_mart_frame() -> pl.DataFrame:
+    return _combined_analysis_mart_frame().filter(pl.col("target_keyword_id") == "kw-1")
+
+
 def test_run_phase5_stats_emits_combined_family_tree_and_keeps_similarity_compatibility(
     tmp_path: Path,
 ) -> None:
@@ -169,3 +173,33 @@ def test_run_phase5_stats_marks_textrazor_family_blocks_skipped_on_hard_fail(
     ] == "skipped"
     assert "Confirmatory inference skipped because hard-fail guardrails did not pass." in report
     assert "#### Family: textrazor_topic_score" in report
+
+
+def test_run_phase5_stats_marks_single_keyword_runs_as_underpowered(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "runs" / "run-1"
+    (run_dir / "parquet" / "analysis_mart").mkdir(parents=True)
+
+    _single_keyword_analysis_mart_frame().write_parquet(
+        run_dir / "parquet" / "analysis_mart" / "part-0.parquet"
+    )
+
+    result = run_phase5_stats(run_dir)
+
+    summary = json.loads((run_dir / "stats" / "stats_summary.json").read_text(encoding="utf-8"))
+    report = (run_dir / "stats" / "stats_report.md").read_text(encoding="utf-8")
+
+    assert result.hard_fail is False
+    assert summary["rank_depths"]["top_20"]["keyword_count"] == 1
+    assert summary["rank_depths"]["top_20"]["inference_mode"] == "underpowered"
+    assert (
+        summary["rank_depths"]["top_20"]["spearman"]["backends"]["bge"]["inference_mode"]
+        == "underpowered"
+    )
+    assert (
+        summary["rank_depths"]["top_20"]["regression"]["backends"]["bge"]["inference_mode"]
+        == "underpowered"
+    )
+    assert "inference_mode=underpowered" in report
+    assert "confirmatory inference may proceed" not in report

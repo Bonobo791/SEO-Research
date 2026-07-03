@@ -164,12 +164,16 @@ def summarize_regression_for_score_column(
         label=label,
         score_column=score_column,
     )
-    return _summarize_backend_regression_result(
+    summary = _summarize_backend_regression_result(
         analysis_mart,
         backend=label,
         fit=fit,
         score_column=score_column,
     )
+    if summary.get("status") == "skipped":
+        return summary
+    summary["status"] = "computed"
+    return summary
 
 
 def summarize_regression_backends_from_fits(

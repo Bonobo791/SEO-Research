@@ -359,7 +359,7 @@ def test_run_live_textrazor_only_uses_offline_dataforseo_fixtures_and_live_textr
     monkeypatch.setattr("seo_rank.cli.fixture_keyword_expansion_response", record_keyword_expansion)
     monkeypatch.setattr("seo_rank.cli.fixture_serp_response", record_serp)
     monkeypatch.setattr("seo_rank.cli.fixture_page_text_response", record_page_text)
-    monkeypatch.setattr("seo_rank.cli.fixture_entity_response", lambda *args, **kwargs: pytest.fail("offline TextRazor fixtures should not be used"))
+    monkeypatch.setattr("seo_rank.cli.fixture_page_metrics_response", lambda *args, **kwargs: pytest.fail("offline TextRazor fixtures should not be used"))
     monkeypatch.setattr("seo_rank.cli.DEFAULT_DATAFORSEO_TRANSPORT", dataforseo_transport)
     monkeypatch.setattr("seo_rank.cli.DEFAULT_TEXTRAZOR_TRANSPORT", textrazor_transport)
 
@@ -387,7 +387,7 @@ def test_run_live_textrazor_only_uses_offline_dataforseo_fixtures_and_live_textr
     assert len(textrazor_requests) == 3
     assert all(
         request["body"].startswith(
-            b"extractors=entities%2Ctopics%2Ccategories%2Centailments%2Cwords%2Crelations%2Cproperties%2CnounPhrases&text="
+            b"extractors=entities%2Ctopics%2Cwords%2Cphrases%2Crelations%2Centailments%2Csenses%2Cspelling&classifiers=textrazor_mediatopics_2023Q1&text="
         )
         and b"Fixture+Page" in request["body"]
         for request in textrazor_requests

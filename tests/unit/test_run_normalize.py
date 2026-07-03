@@ -111,6 +111,38 @@ def test_normalize_run_materializes_curated_tables_from_raw_responses(
     assert run_json["catalog"]["datasets"]["similarity_scores"]["row_count"] == 1
 
 
+def test_dry_run_materializes_textrazor_topic_and_page_metrics(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--depth",
+            "1",
+            "--output-dir",
+            str(output_dir),
+            "--dry-run",
+        ]
+    )
+
+    assert exit_code == 0
+
+    metrics_path = output_dir / "parquet" / "textrazor_page_metrics_curated" / "part-0.parquet"
+    assert metrics_path.exists(), "dry-run should materialize textrazor_page_metrics_curated"
+
+    metrics = pl.read_parquet(metrics_path)
+    assert metrics.height >= 1
+    assert metrics["textrazor_topics_present"].all()
+    assert metrics["textrazor_topic_score"].null_count() == 0
+    assert metrics["textrazor_page_metrics_complete"].all()
+
+
 def test_normalize_run_preserves_run_json_page_similarity_scores(
     tmp_path: Path,
 ) -> None:

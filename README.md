@@ -78,7 +78,9 @@ raw-response rows. Normalization also materializes `parquet/entities/` (entity
 mentions) and `parquet/textrazor_page_metrics_curated/` (one aggregated row per
 `target_keyword × SERP URL`). The feature mart
 `parquet/textrazor_page_metrics/` feeds Phase 5 TextRazor signal families; the
-similarity `analysis_mart` stays similarity-only.
+similarity `analysis_mart` stays similarity-only. Curated and feature marts
+include `textrazor_page_metrics_complete` when upstream extractor sections were
+fully present.
 
 **Brand-new run with live TextRazor only** uses offline DataForSEO fixtures for
 keyword expansion, SERP, and page text, then calls live TextRazor for entities.
@@ -153,17 +155,23 @@ see `ROADMAP.md` (BGE hybrid / retrieve-then-rerank backlog).
 `analyze` writes `parquet/analysis_mart/` (SERP rank plus the three similarity
 columns and page text length). TextRazor page metrics live in separate marts
 (`textrazor_page_metrics_curated`, `textrazor_page_metrics`) at the same URL
-grain; they are not columns on `analysis_mart` today. If feature marts are
-missing, it materializes them first from the curated tables. It does **not** re-fetch pages or re-run
-embeddings. The current stats path runs guardrails, Spearman summaries,
-pooled regression summaries, and page-level Plackett-Luce summaries at four
-confirmatory rank depths (`top_20`, `top_10`, `top_5`, `top_3`) into
-`runs/{run_id}/stats/`, including nested `rank_depths` in
-`stats_summary.json` and `stats_diagnostics.json`, four `## Rank depth:`
-sections in `stats_report.md`, and `actionable_association_by_rank_depth`.
-Top-level summary fields mirror `rank_depths.top_20` for compatibility.
-Passage-level Plackett-Luce remains deferred backlog work and is not wired
-into `analyze` today.
+grain; they are not columns on `analysis_mart` today. The curated and feature
+marts include `textrazor_page_metrics_complete` so incomplete upstream
+extractor coverage is visible instead of silent zeros. If feature marts are
+missing, it materializes them first from the curated tables. It does **not**
+re-fetch pages or re-run embeddings. The stats path runs guardrails, Spearman
+summaries, pooled regression summaries, and page-level Plackett-Luce summaries
+at four confirmatory rank depths (`top_20`, `top_10`, `top_5`, `top_3`) for
+every registered signal family (similarity backends plus TextRazor page-signal
+families) into `runs/{run_id}/stats/`, including nested `rank_depths` and
+`rank_depths.*.families` in `stats_summary.json` and
+`stats_diagnostics.json`, four `## Rank depth:` sections with `### Families`
+subsections in `stats_report.md`, and `actionable_association_by_rank_depth`.
+Each depth and backend reports `keyword_count` and `inference_mode`
+(`confirmatory` when K ≥ 10, `exploratory` when 2 ≤ K < 10, `underpowered`
+when K = 1). Top-level summary fields mirror `rank_depths.top_20` for
+compatibility. Passage-level Plackett-Luce remains deferred backlog work and
+is not wired into `analyze` today.
 
 ### Standalone script
 
