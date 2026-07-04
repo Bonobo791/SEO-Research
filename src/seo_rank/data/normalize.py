@@ -15,6 +15,8 @@ from seo_rank.data.validate import (
 )
 from seo_rank.debug_trace import debug_trace
 from seo_rank.dataforseo import (
+    BACKLINKS_QUERY_DOFOLLOW,
+    BACKLINKS_QUERY_SUMMARY,
     DATAFORSEO_RESPONSE_SCHEMAS,
     DEFAULT_KEYWORD_LIMIT,
     decode_content_parsing_items,
@@ -25,6 +27,25 @@ from seo_rank.dataforseo import (
     parsed_page_text_details,
     validate_dataforseo_response,
 )
+
+BACKLINKS_LEGACY_ENDPOINT = "backlinks"
+BACKLINKS_SUMMARY_ENDPOINT = "backlinks_summary"
+BACKLINKS_DOFOLLOW_ENDPOINT = "backlinks_dofollow_summary"
+BACKLINKS_RAW_ENDPOINTS = frozenset(
+    {
+        BACKLINKS_LEGACY_ENDPOINT,
+        BACKLINKS_SUMMARY_ENDPOINT,
+        BACKLINKS_DOFOLLOW_ENDPOINT,
+    }
+)
+BACKLINKS_DISTRIBUTION_JSON_COLUMNS = {
+    "referring_links_types": "referring_links_types_json",
+    "referring_links_tld": "referring_links_tld_json",
+    "referring_links_platform_types": "referring_links_platform_types_json",
+    "referring_links_semantic_locations": "referring_links_semantic_locations_json",
+    "referring_links_attributes": "referring_links_attributes_json",
+    "referring_links_countries": "referring_links_countries_json",
+}
 from seo_rank.text import normalize_page_text
 from seo_rank.textrazor import TEXTRAZOR_ENDPOINTS, normalize_entities, normalize_page_metrics
 
@@ -196,12 +217,41 @@ CURATED_SCHEMAS = {
             ("target_keyword_id", pa.string()),
             ("target_keyword", pa.string()),
             ("response_id", pa.string()),
+            ("summary_response_id", pa.string()),
+            ("dofollow_summary_response_id", pa.string()),
             ("backlink_id", pa.string()),
             ("canonical_url_hash", pa.string()),
             ("url", pa.string()),
             ("backlinks_count", pa.int64()),
             ("referring_domains_count", pa.int64()),
             ("dofollow_backlinks_count", pa.int64()),
+            ("dofollow_referring_domains_count", pa.int64()),
+            ("rank", pa.int64()),
+            ("backlinks_spam_score", pa.int64()),
+            ("target_spam_score", pa.int64()),
+            ("new_backlinks", pa.int64()),
+            ("lost_backlinks", pa.int64()),
+            ("new_referring_domains", pa.int64()),
+            ("lost_referring_domains", pa.int64()),
+            ("referring_pages", pa.int64()),
+            ("referring_main_domains", pa.int64()),
+            ("referring_ips", pa.int64()),
+            ("referring_subnets", pa.int64()),
+            ("broken_backlinks", pa.int64()),
+            ("broken_pages", pa.int64()),
+            ("referring_domains_nofollow", pa.int64()),
+            ("crawled_pages", pa.int64()),
+            ("internal_links_count", pa.int64()),
+            ("external_links_count", pa.int64()),
+            ("first_seen", pa.string()),
+            ("lost_date", pa.string()),
+            ("referring_links_types_json", pa.string()),
+            ("referring_links_tld_json", pa.string()),
+            ("referring_links_platform_types_json", pa.string()),
+            ("referring_links_semantic_locations_json", pa.string()),
+            ("referring_links_attributes_json", pa.string()),
+            ("referring_links_countries_json", pa.string()),
+            ("backlinks_metrics_complete", pa.bool_()),
             ("schema_version", pa.string()),
         ]
     ),
@@ -534,12 +584,41 @@ CURATED_VALIDATION_RULES = {
             "target_keyword_id": pl.Utf8,
             "target_keyword": pl.Utf8,
             "response_id": pl.Utf8,
+            "summary_response_id": pl.Utf8,
+            "dofollow_summary_response_id": pl.Utf8,
             "backlink_id": pl.Utf8,
             "canonical_url_hash": pl.Utf8,
             "url": pl.Utf8,
             "backlinks_count": pl.Int64,
             "referring_domains_count": pl.Int64,
             "dofollow_backlinks_count": pl.Int64,
+            "dofollow_referring_domains_count": pl.Int64,
+            "rank": pl.Int64,
+            "backlinks_spam_score": pl.Int64,
+            "target_spam_score": pl.Int64,
+            "new_backlinks": pl.Int64,
+            "lost_backlinks": pl.Int64,
+            "new_referring_domains": pl.Int64,
+            "lost_referring_domains": pl.Int64,
+            "referring_pages": pl.Int64,
+            "referring_main_domains": pl.Int64,
+            "referring_ips": pl.Int64,
+            "referring_subnets": pl.Int64,
+            "broken_backlinks": pl.Int64,
+            "broken_pages": pl.Int64,
+            "referring_domains_nofollow": pl.Int64,
+            "crawled_pages": pl.Int64,
+            "internal_links_count": pl.Int64,
+            "external_links_count": pl.Int64,
+            "first_seen": pl.Utf8,
+            "lost_date": pl.Utf8,
+            "referring_links_types_json": pl.Utf8,
+            "referring_links_tld_json": pl.Utf8,
+            "referring_links_platform_types_json": pl.Utf8,
+            "referring_links_semantic_locations_json": pl.Utf8,
+            "referring_links_attributes_json": pl.Utf8,
+            "referring_links_countries_json": pl.Utf8,
+            "backlinks_metrics_complete": pl.Boolean,
             "schema_version": pl.Utf8,
         },
         "unique_columns": ("backlink_id",),
@@ -548,12 +627,12 @@ CURATED_VALIDATION_RULES = {
             "target_keyword_id",
             "target_keyword",
             "response_id",
+            "summary_response_id",
             "backlink_id",
             "canonical_url_hash",
             "url",
             "backlinks_count",
-            "referring_domains_count",
-            "dofollow_backlinks_count",
+            "backlinks_metrics_complete",
             "schema_version",
         ),
     },
@@ -641,11 +720,27 @@ def normalize_run(run_dir: Path) -> dict[str, object]:
 def validate_raw_response_bodies(raw_responses: pl.LazyFrame) -> None:
     """Fail fast on any stored raw response schema drift before curated writes."""
 
-    for record in raw_responses.select(["endpoint", "response_body_bytes"]).collect(
+    for record in raw_responses.select(
+        ["endpoint", "request_metadata_json", "response_body_bytes"]
+    ).collect(
         engine="streaming"
     ).to_dicts():
-        validate_endpoint = str(record["endpoint"])
+        endpoint = str(record["endpoint"])
+        metadata_raw = record.get("request_metadata_json")
+        metadata: dict[str, object] = {}
+        if metadata_raw is not None:
+            metadata = json.loads(str(metadata_raw))
+        variant = (
+            _backlinks_record_variant(endpoint, metadata)
+            if endpoint in BACKLINKS_RAW_ENDPOINTS
+            else None
+        )
+        validate_endpoint = _backlinks_validation_endpoint(endpoint, variant=variant)
         if validate_endpoint not in DATAFORSEO_RESPONSE_SCHEMAS:
+            continue
+        if endpoint == BACKLINKS_LEGACY_ENDPOINT and not _backlinks_summary_has_aggregates(
+            record
+        ):
             continue
         _validated_response_body(record, endpoint=validate_endpoint)
 
@@ -692,8 +787,17 @@ def build_curated_lazyframes_from_raw_responses(
     serp_responses = raw_responses.filter(pl.col("endpoint") == "serp").select(
         ["run_id", "response_id", "target_keyword", "response_body_bytes"]
     )
-    backlink_responses = raw_responses.filter(pl.col("endpoint") == "backlinks").select(
-        ["run_id", "response_id", "target_keyword", "response_body_bytes"]
+    backlink_responses = raw_responses.filter(
+        pl.col("endpoint").is_in(sorted(BACKLINKS_RAW_ENDPOINTS))
+    ).select(
+        [
+            "run_id",
+            "response_id",
+            "target_keyword",
+            "endpoint",
+            "request_metadata_json",
+            "response_body_bytes",
+        ]
     )
     page_responses = raw_responses.filter(pl.col("endpoint") == "page_text").select(
         ["run_id", "response_id", "target_keyword", "response_body_bytes"]
@@ -870,46 +974,79 @@ def build_backlinks_frame(
     *,
     run_id: str,
 ) -> pl.DataFrame:
-    rows: list[dict[str, object]] = []
+    grouped: dict[tuple[str, str], dict[str, object]] = {}
+
     for record in frame.to_dicts():
         response_id = str(record["response_id"])
         target_keyword = str(record["target_keyword"])
-        target_keyword_id = stable_id(target_keyword)
-        body = _validated_response_body(record, endpoint="backlinks")
-        response_url = extract_response_url(body)
-        tasks = body.get("tasks", [])
-        if not isinstance(tasks, list):
+        endpoint = str(record["endpoint"])
+        metadata = json.loads(str(record["request_metadata_json"]))
+        variant = _backlinks_record_variant(endpoint, metadata)
+        body = _backlinks_response_body(record, endpoint=endpoint, variant=variant)
+        url = _backlinks_url_from_record(metadata, body)
+        if url is None:
             continue
-        for task in tasks:
-            if not isinstance(task, Mapping):
-                continue
-            results = task.get("result", [])
-            if not isinstance(results, list):
-                continue
-            for result in results:
-                if not isinstance(result, Mapping):
-                    continue
-                url = result.get("target")
-                if not isinstance(url, str) or not url.strip():
-                    if isinstance(response_url, str) and response_url.strip():
-                        url = response_url
-                    else:
-                        continue
-                rows.append(
-                    {
-                        "run_id": run_id,
-                        "target_keyword_id": target_keyword_id,
-                        "target_keyword": target_keyword,
-                        "response_id": response_id,
-                        "backlink_id": stable_id(run_id, target_keyword, url),
-                        "canonical_url_hash": stable_id(url),
-                        "url": url,
-                        "backlinks_count": _backlink_metric(result, "total_count"),
-                        "referring_domains_count": _referring_domains_count(result),
-                        "dofollow_backlinks_count": _dofollow_backlinks_count(result),
-                        "schema_version": CURATED_SCHEMA_VERSION,
-                    }
-                )
+        group_key = (target_keyword, url)
+        entry = grouped.setdefault(
+            group_key,
+            {
+                "target_keyword": target_keyword,
+                "url": url,
+                "summary": None,
+                "dofollow": None,
+            },
+        )
+        payload = {
+            "response_id": response_id,
+            "body": body,
+        }
+        if variant == BACKLINKS_QUERY_DOFOLLOW:
+            entry["dofollow"] = payload
+        else:
+            entry["summary"] = payload
+
+    rows: list[dict[str, object]] = []
+    for (target_keyword, url), entry in grouped.items():
+        summary = entry.get("summary")
+        dofollow = entry.get("dofollow")
+        if not isinstance(summary, Mapping):
+            continue
+        target_keyword_id = stable_id(target_keyword)
+        summary_body = summary["body"]
+        assert isinstance(summary_body, Mapping)
+        summary_result = _single_backlinks_result(summary_body)
+        summary_response_id = str(summary["response_id"])
+        dofollow_response_id: str | None = None
+        dofollow_backlinks_count: int | None = None
+        dofollow_referring_domains_count: int | None = None
+        if isinstance(dofollow, Mapping):
+            dofollow_body = dofollow["body"]
+            assert isinstance(dofollow_body, Mapping)
+            dofollow_result = _single_backlinks_result(dofollow_body)
+            dofollow_response_id = str(dofollow["response_id"])
+            dofollow_backlinks_count = _required_backlink_metric(
+                dofollow_result,
+                "backlinks",
+            )
+            dofollow_referring_domains_count = _optional_backlink_metric(
+                dofollow_result,
+                "referring_domains",
+            )
+        row = _summary_backlinks_row(
+            run_id=run_id,
+            target_keyword=target_keyword,
+            target_keyword_id=target_keyword_id,
+            url=url,
+            summary_response_id=summary_response_id,
+            dofollow_summary_response_id=dofollow_response_id,
+            summary_result=summary_result,
+            dofollow_backlinks_count=dofollow_backlinks_count,
+            dofollow_referring_domains_count=dofollow_referring_domains_count,
+            backlinks_metrics_complete=dofollow_response_id is not None
+            and not _is_legacy_backlinks_live_result(summary_result),
+        )
+        rows.append(row)
+
     if not rows:
         return pl.DataFrame(schema=CURATED_VALIDATION_RULES["backlinks"]["expected_schema"])
     return pl.DataFrame(rows, schema=CURATED_VALIDATION_RULES["backlinks"]["expected_schema"])
@@ -1226,52 +1363,262 @@ def _load_run_page_similarity_scores(
     return scores_by_keyword
 
 
-def _backlink_metric(item: Mapping[str, object], key: str) -> int:
+def _backlinks_validation_endpoint(
+    endpoint: str,
+    *,
+    variant: str | None = None,
+) -> str:
+    if endpoint == BACKLINKS_DOFOLLOW_ENDPOINT or variant == BACKLINKS_QUERY_DOFOLLOW:
+        return BACKLINKS_DOFOLLOW_ENDPOINT
+    if endpoint in {BACKLINKS_LEGACY_ENDPOINT, BACKLINKS_SUMMARY_ENDPOINT}:
+        return BACKLINKS_SUMMARY_ENDPOINT
+    return endpoint
+
+
+def _backlinks_record_variant(endpoint: str, metadata: Mapping[str, object]) -> str:
+    variant = metadata.get("variant")
+    if isinstance(variant, str) and variant.strip():
+        return variant.strip()
+    backlinks_query = metadata.get("backlinks_query")
+    if isinstance(backlinks_query, str) and backlinks_query.strip():
+        return backlinks_query.strip()
+    if endpoint == BACKLINKS_DOFOLLOW_ENDPOINT:
+        return BACKLINKS_QUERY_DOFOLLOW
+    return BACKLINKS_QUERY_SUMMARY
+
+
+def _backlinks_summary_has_aggregates(record: Mapping[str, object]) -> bool:
+    try:
+        raw_body = record["response_body_bytes"]
+        body_bytes = (
+            raw_body if isinstance(raw_body, (bytes, bytearray)) else str(raw_body).encode()
+        )
+        body = json.loads(body_bytes)
+        if not isinstance(body, Mapping):
+            return False
+        result = _single_backlinks_result(body)
+    except (ValueError, json.JSONDecodeError, TypeError, KeyError):
+        return False
+    return "backlinks" in result and "referring_domains" in result
+
+
+def _is_legacy_backlinks_live_result(result: Mapping[str, object]) -> bool:
+    return "backlinks" not in result and (
+        "total_count" in result or "items_count" in result
+    )
+
+
+def _legacy_backlinks_count(result: Mapping[str, object]) -> int:
+    for key in ("total_count", "items_count"):
+        if key in result:
+            value = result[key]
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(
+                    f"legacy backlinks aggregate field {key!r} must be numeric"
+                )
+            return int(value)
+    raise ValueError("legacy backlinks response is missing total_count/items_count")
+
+
+def _backlinks_url_from_record(
+    metadata: Mapping[str, object],
+    body: Mapping[str, object],
+) -> str | None:
+    url = metadata.get("url")
+    if isinstance(url, str) and url.strip():
+        return url.strip()
+    response_url = extract_response_url(body)
+    if isinstance(response_url, str) and response_url.strip():
+        return response_url.strip()
+    return None
+
+
+def _single_backlinks_result(body: Mapping[str, object]) -> Mapping[str, object]:
+    tasks = body.get("tasks", [])
+    if not isinstance(tasks, list) or not tasks:
+        raise ValueError("backlinks response is missing tasks")
+    task = tasks[0]
+    if not isinstance(task, Mapping):
+        raise ValueError("backlinks response task must be an object")
+    results = task.get("result", [])
+    if not isinstance(results, list) or not results:
+        raise ValueError("backlinks response is missing result aggregates")
+    result = results[0]
+    if not isinstance(result, Mapping):
+        raise ValueError("backlinks response result must be an object")
+    return result
+
+
+def _summary_backlinks_row(
+    *,
+    run_id: str,
+    target_keyword: str,
+    target_keyword_id: str,
+    url: str,
+    summary_response_id: str,
+    dofollow_summary_response_id: str | None,
+    summary_result: Mapping[str, object],
+    dofollow_backlinks_count: int | None,
+    dofollow_referring_domains_count: int | None,
+    backlinks_metrics_complete: bool,
+) -> dict[str, object]:
+    info = summary_result.get("info")
+    target_spam_score = None
+    if isinstance(info, Mapping):
+        target_spam_score = _optional_backlink_metric(info, "target_spam_score")
+
+    if _is_legacy_backlinks_live_result(summary_result):
+        return {
+            "run_id": run_id,
+            "target_keyword_id": target_keyword_id,
+            "target_keyword": target_keyword,
+            "response_id": summary_response_id,
+            "summary_response_id": summary_response_id,
+            "dofollow_summary_response_id": dofollow_summary_response_id,
+            "backlink_id": stable_id(run_id, target_keyword, url),
+            "canonical_url_hash": stable_id(url),
+            "url": url,
+            "backlinks_count": _legacy_backlinks_count(summary_result),
+            "referring_domains_count": None,
+            "dofollow_backlinks_count": None,
+            "dofollow_referring_domains_count": None,
+            "rank": None,
+            "backlinks_spam_score": None,
+            "target_spam_score": target_spam_score,
+            "new_backlinks": None,
+            "lost_backlinks": None,
+            "new_referring_domains": None,
+            "lost_referring_domains": None,
+            "referring_pages": None,
+            "referring_main_domains": None,
+            "referring_ips": None,
+            "referring_subnets": None,
+            "broken_backlinks": None,
+            "broken_pages": None,
+            "referring_domains_nofollow": None,
+            "crawled_pages": None,
+            "internal_links_count": None,
+            "external_links_count": None,
+            "first_seen": None,
+            "lost_date": None,
+            "referring_links_types_json": None,
+            "referring_links_tld_json": None,
+            "referring_links_platform_types_json": None,
+            "referring_links_semantic_locations_json": None,
+            "referring_links_attributes_json": None,
+            "referring_links_countries_json": None,
+            "backlinks_metrics_complete": False,
+            "schema_version": CURATED_SCHEMA_VERSION,
+        }
+
+    row: dict[str, object] = {
+        "run_id": run_id,
+        "target_keyword_id": target_keyword_id,
+        "target_keyword": target_keyword,
+        "response_id": summary_response_id,
+        "summary_response_id": summary_response_id,
+        "dofollow_summary_response_id": dofollow_summary_response_id,
+        "backlink_id": stable_id(run_id, target_keyword, url),
+        "canonical_url_hash": stable_id(url),
+        "url": url,
+        "backlinks_count": _required_backlink_metric(summary_result, "backlinks"),
+        "referring_domains_count": _required_backlink_metric(
+            summary_result,
+            "referring_domains",
+        ),
+        "dofollow_backlinks_count": dofollow_backlinks_count,
+        "dofollow_referring_domains_count": dofollow_referring_domains_count,
+        "rank": _optional_backlink_metric(summary_result, "rank"),
+        "backlinks_spam_score": _optional_backlink_metric(
+            summary_result,
+            "backlinks_spam_score",
+        ),
+        "target_spam_score": target_spam_score,
+        "new_backlinks": _optional_backlink_metric(summary_result, "new_backlinks"),
+        "lost_backlinks": _optional_backlink_metric(summary_result, "lost_backlinks"),
+        "new_referring_domains": _optional_backlink_metric(
+            summary_result,
+            "new_referring_domains",
+        ),
+        "lost_referring_domains": _optional_backlink_metric(
+            summary_result,
+            "lost_referring_domains",
+        ),
+        "referring_pages": _optional_backlink_metric(summary_result, "referring_pages"),
+        "referring_main_domains": _optional_backlink_metric(
+            summary_result,
+            "referring_main_domains",
+        ),
+        "referring_ips": _optional_backlink_metric(summary_result, "referring_ips"),
+        "referring_subnets": _optional_backlink_metric(
+            summary_result,
+            "referring_subnets",
+        ),
+        "broken_backlinks": _optional_backlink_metric(summary_result, "broken_backlinks"),
+        "broken_pages": _optional_backlink_metric(summary_result, "broken_pages"),
+        "referring_domains_nofollow": _optional_backlink_metric(
+            summary_result,
+            "referring_domains_nofollow",
+        ),
+        "crawled_pages": _optional_backlink_metric(summary_result, "crawled_pages"),
+        "internal_links_count": _optional_backlink_metric(
+            summary_result,
+            "internal_links_count",
+        ),
+        "external_links_count": _optional_backlink_metric(
+            summary_result,
+            "external_links_count",
+        ),
+        "first_seen": _optional_backlink_text(summary_result, "first_seen"),
+        "lost_date": _optional_backlink_text(summary_result, "lost_date"),
+        "backlinks_metrics_complete": backlinks_metrics_complete,
+        "schema_version": CURATED_SCHEMA_VERSION,
+    }
+    for source_key, target_key in BACKLINKS_DISTRIBUTION_JSON_COLUMNS.items():
+        row[target_key] = _serialize_backlinks_distribution(
+            summary_result.get(source_key),
+        )
+    return row
+
+
+def _serialize_backlinks_distribution(value: object) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise ValueError("backlinks distribution field must be an object")
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _optional_backlink_text(result: Mapping[str, object], key: str) -> str | None:
+    value = result.get(key)
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+def _required_backlink_metric(item: Mapping[str, object], key: str) -> int:
+    if key not in item:
+        raise ValueError(f"backlinks aggregate is missing required field {key!r}")
+    value = item.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(
+            f"backlinks aggregate field {key!r} must be numeric, got {type(value).__name__}"
+        )
+    return int(value)
+
+
+def _optional_backlink_metric(item: Mapping[str, object], key: str) -> int | None:
+    if key not in item:
+        return None
     value = item.get(key)
     if value is None:
-        return 0
-    if isinstance(value, bool):
-        return 0
-    if isinstance(value, (int, float)):
-        return int(value)
-    try:
-        return int(str(value))
-    except (TypeError, ValueError):
-        return 0
-
-
-def _dofollow_backlinks_count(result: Mapping[str, object]) -> int:
-    items = result.get("items")
-    if isinstance(items, list):
-        return sum(
-            1
-            for item in items
-            if isinstance(item, Mapping) and item.get("dofollow") is True
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(
+            f"backlinks aggregate field {key!r} must be numeric, got {type(value).__name__}"
         )
-    backlinks = _backlink_metric(result, "backlinks")
-    attributes = result.get("referring_links_attributes")
-    if not isinstance(attributes, Mapping):
-        return 0
-    nofollow = attributes.get("nofollow")
-    if isinstance(nofollow, bool) or not isinstance(nofollow, (int, float)):
-        return 0
-    return max(backlinks - int(nofollow), 0)
-
-
-def _referring_domains_count(result: Mapping[str, object]) -> int:
-    explicit = _backlink_metric(result, "referring_domains")
-    if explicit:
-        return explicit
-    items = result.get("items")
-    if not isinstance(items, list):
-        return 0
-    domains = {
-        str(item.get("domain_from")).strip()
-        for item in items
-        if isinstance(item, Mapping) and isinstance(item.get("domain_from"), str)
-    }
-    domains.discard("")
-    return len(domains)
+    return int(value)
 
 
 def _validated_response_body(
@@ -1282,6 +1629,23 @@ def _validated_response_body(
     body = json.loads(bytes(record["response_body_bytes"]).decode("utf-8"))
     validate_dataforseo_response(endpoint, body)
     return body
+
+
+def _backlinks_response_body(
+    record: Mapping[str, object],
+    *,
+    endpoint: str,
+    variant: str,
+) -> dict[str, object]:
+    if endpoint == BACKLINKS_LEGACY_ENDPOINT and not _backlinks_summary_has_aggregates(
+        record
+    ):
+        body = json.loads(bytes(record["response_body_bytes"]).decode("utf-8"))
+        if not isinstance(body, dict):
+            raise ValueError("backlinks response body must be an object")
+        return body
+    validation_endpoint = _backlinks_validation_endpoint(endpoint, variant=variant)
+    return _validated_response_body(record, endpoint=validation_endpoint)
 
 
 def write_curated_lazyframe_dataset(

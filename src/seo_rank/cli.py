@@ -29,7 +29,10 @@ from seo_rank.dataforseo import (
     DataForSeoParseError,
     DataForSeoCredentials,
     DEFAULT_KEYWORD_LIMIT,
-    build_backlinks_request,
+    BACKLINKS_QUERY_DOFOLLOW,
+    BACKLINKS_QUERY_SUMMARY,
+    build_backlinks_dofollow_summary_request,
+    build_backlinks_summary_request,
     build_keyword_expansion_request,
     build_page_text_request,
     build_serp_request,
@@ -751,17 +754,17 @@ def expand_stored_run(
     merged_dataforseo["keyword_expansion"] = load_stored_keyword_expansion_response(
         stored_run
     )
-    merged_dataforseo["backlinks"] = [
-        response
+    merged_keyword_results = [
+        keyword_result
         for keyword_result in merged_payload.get("keyword_results", [])
         if isinstance(keyword_result, Mapping)
-        for response in (
-            keyword_result.get("raw_provider_data", {})
-            if isinstance(keyword_result.get("raw_provider_data", {}), Mapping)
-            else {}
-        ).get("dataforseo", {}).get("backlinks", [])
-        if isinstance(response, Mapping)
     ]
+    merged_dataforseo["backlinks_summary"] = collect_backlinks_variant_responses(
+        merged_keyword_results, variant_key="backlinks_summary"
+    )
+    merged_dataforseo["backlinks_dofollow_summary"] = collect_backlinks_variant_responses(
+        merged_keyword_results, variant_key="backlinks_dofollow_summary"
+    )
     merged_raw_provider_data["dataforseo"] = merged_dataforseo
     merged_payload["raw_provider_data"] = merged_raw_provider_data
     raw_response_records = build_raw_response_records(run_id, merged_payload)
@@ -1114,45 +1117,79 @@ def build_resumed_keyword_result(
         keyword=target_keyword,
         depth=config.depth,
     )
-    existing_backlinks_by_url: dict[str, dict[str, object]] = {}
+    existing_backlinks_by_url_variant: dict[tuple[str, str], dict[str, object]] = {}
+    for variant, endpoint in BACKLINKS_VARIANT_ENDPOINTS.items():
+        for record in raw_keyword_records.get(endpoint, []):
+            response_body_bytes = record.get("response_body_bytes")
+            if not isinstance(response_body_bytes, (bytes, bytearray)):
+                continue
+            response = json.loads(bytes(response_body_bytes).decode("utf-8"))
+            url = extract_response_url(response)
+            if isinstance(url, str):
+                existing_backlinks_by_url_variant[(url, variant)] = {
+                    **response,
+                    "variant": variant,
+                }
     for record in raw_keyword_records.get("backlinks", []):
         response_body_bytes = record.get("response_body_bytes")
         if not isinstance(response_body_bytes, (bytes, bytearray)):
             continue
         response = json.loads(bytes(response_body_bytes).decode("utf-8"))
         url = extract_response_url(response)
-        if isinstance(url, str):
-            existing_backlinks_by_url[url] = response
+        if not isinstance(url, str):
+            continue
+        metadata = json.loads(str(record.get("request_metadata_json", "{}")))
+        variant = metadata.get("variant") or metadata.get("backlinks_query")
+        if variant == BACKLINKS_QUERY_DOFOLLOW:
+            resolved_variant = BACKLINKS_QUERY_DOFOLLOW
+        else:
+            resolved_variant = BACKLINKS_QUERY_SUMMARY
+        key = (url, resolved_variant)
+        if key not in existing_backlinks_by_url_variant:
+            existing_backlinks_by_url_variant[key] = {
+                **response,
+                "variant": resolved_variant,
+            }
 
-    missing_backlink_urls = [
-        str(result["url"])
-        for result in serp_results
-        if str(result["url"]) not in existing_backlinks_by_url
-    ]
-    if missing_backlink_urls and config.live_providers and live_context is not None:
-        if progress is not None:
-            progress.keyword_log(
+    serp_urls = [str(result["url"]) for result in serp_results]
+    missing_backlink_urls_by_variant: dict[str, list[str]] = {
+        variant: [
+            url
+            for url in serp_urls
+            if (url, variant) not in existing_backlinks_by_url_variant
+        ]
+        for variant in BACKLINKS_VARIANT_ENDPOINTS
+    }
+    if config.live_providers and live_context is not None:
+        for variant, missing_urls_for_variant in missing_backlink_urls_by_variant.items():
+            if not missing_urls_for_variant:
+                continue
+            endpoint = BACKLINKS_VARIANT_ENDPOINTS[variant]
+            if progress is not None:
+                progress.keyword_log(
+                    target_keyword,
+                    f"dataforseo {endpoint} ({len(missing_urls_for_variant)} urls)",
+                )
+            fetched_backlinks = fetch_dataforseo_backlinks_for_urls(
                 target_keyword,
-                f"dataforseo backlinks ({len(missing_backlink_urls)} urls)",
+                missing_urls_for_variant,
+                credentials=live_context["credentials"].dataforseo,
+                transport=DEFAULT_DATAFORSEO_TRANSPORT,
+                variants=(variant,),
+                progress=None,
+                run_dir=config.output_dir,
             )
-        fetched_backlinks = fetch_dataforseo_backlinks_for_urls(
-            target_keyword,
-            missing_backlink_urls,
-            credentials=live_context["credentials"].dataforseo,
-            transport=DEFAULT_DATAFORSEO_TRANSPORT,
-            progress=None,
-            run_dir=config.output_dir,
-        )
-        if fetched_backlinks:
-            network_calls.append("dataforseo.backlinks")
-            for response in fetched_backlinks:
-                url = extract_response_url(response)
-                if isinstance(url, str):
-                    existing_backlinks_by_url[url] = response
+            if fetched_backlinks:
+                network_calls.append(f"dataforseo.{endpoint}")
+                for response in fetched_backlinks:
+                    url = extract_response_url(response)
+                    if isinstance(url, str):
+                        existing_backlinks_by_url_variant[(url, variant)] = response
     backlinks_responses = [
-        existing_backlinks_by_url[str(result["url"])]
+        existing_backlinks_by_url_variant[(str(result["url"]), variant)]
         for result in serp_results
-        if str(result["url"]) in existing_backlinks_by_url
+        for variant in BACKLINKS_VARIANT_ENDPOINTS
+        if (str(result["url"]), variant) in existing_backlinks_by_url_variant
     ]
     existing_page_text_by_url: dict[str, dict[str, object]] = {}
     for record in raw_keyword_records.get("page_text", []):
@@ -1693,14 +1730,12 @@ def build_textrazor_only_payload(
                 keyword_result["raw_provider_data"]["dataforseo"]["serp"]
                 for keyword_result in keyword_results
             ],
-            "backlinks": [
-                response
-                for keyword_result in keyword_results
-                for response in keyword_result["raw_provider_data"]["dataforseo"].get(
-                    "backlinks", []
-                )
-                if isinstance(response, Mapping)
-            ],
+            "backlinks_summary": collect_backlinks_variant_responses(
+                keyword_results, variant_key="backlinks_summary"
+            ),
+            "backlinks_dofollow_summary": collect_backlinks_variant_responses(
+                keyword_results, variant_key="backlinks_dofollow_summary"
+            ),
         },
     }
     textrazor_responses = [
@@ -1975,14 +2010,12 @@ def build_live_payload(
                 keyword_result["raw_provider_data"]["dataforseo"]["serp"]
                 for keyword_result in keyword_results
             ],
-            "backlinks": [
-                response
-                for keyword_result in keyword_results
-                for response in keyword_result["raw_provider_data"]["dataforseo"].get(
-                    "backlinks", []
-                )
-                if isinstance(response, Mapping)
-            ],
+            "backlinks_summary": collect_backlinks_variant_responses(
+                keyword_results, variant_key="backlinks_summary"
+            ),
+            "backlinks_dofollow_summary": collect_backlinks_variant_responses(
+                keyword_results, variant_key="backlinks_dofollow_summary"
+            ),
         },
     }
     textrazor_responses = [
@@ -2062,7 +2095,12 @@ def build_live_keyword_result(
         run_dir=config.output_dir,
     )
     if backlinks_responses:
-        network_calls.append("dataforseo.backlinks")
+        partitioned = partition_backlinks_responses_by_variant(backlinks_responses)
+        for variant, responses_for_variant in partitioned.items():
+            if responses_for_variant:
+                network_calls.append(
+                    f"dataforseo.{BACKLINKS_VARIANT_ENDPOINTS[variant]}"
+                )
 
     if progress is not None:
         progress.keyword_log(
@@ -2189,12 +2227,39 @@ def raise_for_failed_dataforseo_tasks(
     *,
     target_keyword: str | None = None,
 ) -> None:
+    top_level_status_code = response.get("status_code")
+    if isinstance(top_level_status_code, int) and top_level_status_code != 20000:
+        status_message = response.get("status_message")
+        rendered_message = (
+            status_message
+            if isinstance(status_message, str) and status_message.strip()
+            else "unknown response failure"
+        )
+        keyword_context = (
+            f" for target_keyword={target_keyword!r}"
+            if isinstance(target_keyword, str) and target_keyword
+            else ""
+        )
+        raise DataForSeoClientError(
+            f"DataForSEO {endpoint} response failed{keyword_context} "
+            f"with status_code={top_level_status_code}: {rendered_message}"
+        )
+
     tasks = response.get("tasks", [])
     if not isinstance(tasks, list):
         return
     for task_index, task in enumerate(tasks):
         if not isinstance(task, Mapping):
             continue
+        cost = task.get("cost")
+        if isinstance(cost, (int, float)):
+            logging.getLogger("seo_rank.dataforseo.cost").info(
+                "DataForSEO %s task[%d] cost=%s target_keyword=%r",
+                endpoint,
+                task_index,
+                cost,
+                target_keyword,
+            )
         status_code = task.get("status_code")
         if not isinstance(status_code, int) or status_code == 20000:
             continue
@@ -2236,12 +2301,56 @@ def execute_validated_dataforseo_request(
     return validate_dataforseo_response(endpoint, response)
 
 
+BACKLINKS_VARIANT_REQUEST_BUILDERS = {
+    BACKLINKS_QUERY_SUMMARY: build_backlinks_summary_request,
+    BACKLINKS_QUERY_DOFOLLOW: build_backlinks_dofollow_summary_request,
+}
+
+BACKLINKS_VARIANT_PROVIDER_DATA_KEYS = {
+    BACKLINKS_QUERY_SUMMARY: "backlinks_summary",
+    BACKLINKS_QUERY_DOFOLLOW: "backlinks_dofollow_summary",
+}
+
+
+def partition_backlinks_responses_by_variant(
+    responses: Sequence[Mapping[str, object]],
+) -> dict[str, list[dict[str, object]]]:
+    partitioned: dict[str, list[dict[str, object]]] = {
+        BACKLINKS_QUERY_SUMMARY: [],
+        BACKLINKS_QUERY_DOFOLLOW: [],
+    }
+    for response in responses:
+        if not isinstance(response, Mapping):
+            continue
+        variant = response.get("variant")
+        if variant not in partitioned:
+            variant = BACKLINKS_QUERY_SUMMARY
+        partitioned[variant].append(dict(response))
+    return partitioned
+
+
+def collect_backlinks_variant_responses(
+    keyword_results: Sequence[Mapping[str, object]],
+    *,
+    variant_key: str,
+) -> list[dict[str, object]]:
+    return [
+        dict(response)
+        for keyword_result in keyword_results
+        for response in keyword_result.get("raw_provider_data", {})
+        .get("dataforseo", {})
+        .get(variant_key, [])
+        if isinstance(response, Mapping)
+    ]
+
+
 def fetch_dataforseo_backlinks_for_urls(
     target_keyword: str,
     urls: Sequence[str],
     *,
     credentials: DataForSeoCredentials,
     transport,
+    variants: Sequence[str] = (BACKLINKS_QUERY_SUMMARY, BACKLINKS_QUERY_DOFOLLOW),
     progress: RunProgress | None = None,
     run_dir: Path | None = None,
 ) -> list[dict[str, object]]:
@@ -2249,36 +2358,53 @@ def fetch_dataforseo_backlinks_for_urls(
     new_records: list[dict[str, object]] = []
     try:
         for url in urls:
-            if progress is not None:
-                progress.keyword_log(target_keyword, f"dataforseo backlinks ({url})")
-            response = execute_validated_dataforseo_request(
-                "backlinks",
-                build_backlinks_request(url),
-                credentials=credentials,
-                transport=transport,
-            )
-            raise_for_failed_dataforseo_tasks(
-                "backlinks",
-                response,
-                target_keyword=target_keyword,
-            )
-            response_with_url = {**response, "url": url}
-            responses.append(response_with_url)
-            if run_dir is not None:
-                new_records.append(
-                    build_raw_response_record(
-                        run_dir.name,
-                        endpoint="backlinks",
-                        provider="dataforseo",
-                        response=response_with_url,
-                        target_keyword=target_keyword,
-                        request_metadata={
-                            "target_keyword": target_keyword,
-                            "url": url,
-                        },
-                        recorded_at=datetime.now(UTC).isoformat(),
+            for variant in variants:
+                endpoint = BACKLINKS_VARIANT_ENDPOINTS[variant]
+                if progress is not None:
+                    progress.keyword_log(
+                        target_keyword, f"dataforseo {endpoint} ({url})"
                     )
+                request = BACKLINKS_VARIANT_REQUEST_BUILDERS[variant](url)
+                response = execute_validated_dataforseo_request(
+                    endpoint,
+                    request,
+                    credentials=credentials,
+                    transport=transport,
                 )
+                raise_for_failed_dataforseo_tasks(
+                    endpoint,
+                    response,
+                    target_keyword=target_keyword,
+                )
+                response_with_url = {**response, "url": url, "variant": variant}
+                responses.append(response_with_url)
+                if run_dir is not None:
+                    request_metadata: dict[str, object] = {
+                        "target_keyword": target_keyword,
+                        "url": url,
+                        "target": request.body[0]["target"],
+                        "variant": variant,
+                        "include_subdomains": request.body[0]["include_subdomains"],
+                        "backlinks_status_type": request.body[0][
+                            "backlinks_status_type"
+                        ],
+                        "internal_list_limit": request.body[0]["internal_list_limit"],
+                    }
+                    if "backlinks_filters" in request.body[0]:
+                        request_metadata["backlinks_filters"] = request.body[0][
+                            "backlinks_filters"
+                        ]
+                    new_records.append(
+                        build_raw_response_record(
+                            run_dir.name,
+                            endpoint=endpoint,
+                            provider="dataforseo",
+                            response=response_with_url,
+                            target_keyword=target_keyword,
+                            request_metadata=request_metadata,
+                            recorded_at=datetime.now(UTC).isoformat(),
+                        )
+                    )
     finally:
         if run_dir is not None and new_records:
             persist_backlink_raw_responses(run_dir, new_records)
@@ -2432,7 +2558,12 @@ def build_keyword_result_from_responses(
         },
     }
     if backlinks_responses is not None:
-        raw_provider_data["dataforseo"]["backlinks"] = list(backlinks_responses)
+        partitioned_backlinks = partition_backlinks_responses_by_variant(
+            backlinks_responses
+        )
+        for variant, key in BACKLINKS_VARIANT_PROVIDER_DATA_KEYS.items():
+            if partitioned_backlinks[variant]:
+                raw_provider_data["dataforseo"][key] = partitioned_backlinks[variant]
     if textrazor_responses:
         raw_provider_data["textrazor"] = {
             "entities": list(textrazor_responses),
@@ -2790,21 +2921,25 @@ def build_raw_response_records(
                             recorded_at=recorded_at,
                         )
                     )
-            backlinks_responses = dataforseo_data.get("backlinks", [])
-            if isinstance(backlinks_responses, list):
+            for variant, provider_data_key in BACKLINKS_VARIANT_PROVIDER_DATA_KEYS.items():
+                backlinks_responses = dataforseo_data.get(provider_data_key, [])
+                if not isinstance(backlinks_responses, list):
+                    continue
+                endpoint = BACKLINKS_VARIANT_ENDPOINTS[variant]
                 for response in backlinks_responses:
                     if not isinstance(response, Mapping):
                         continue
                     records.append(
                         build_raw_response_record(
                             run_id,
-                            endpoint="backlinks",
+                            endpoint=endpoint,
                             provider="dataforseo",
                             response=response,
                             target_keyword=target_keyword,
                             request_metadata={
                                 "target_keyword": target_keyword,
                                 "url": extract_response_url(response),
+                                "variant": variant,
                             },
                             recorded_at=recorded_at,
                         )
@@ -2912,7 +3047,7 @@ def load_raw_response_partition_rows(run_dir: Path, endpoint: str) -> list[dict[
     return rows
 
 
-def backlink_raw_response_key(record: Mapping[str, object]) -> tuple[str, str]:
+def backlink_raw_response_key(record: Mapping[str, object]) -> tuple[str, str, str]:
     target_keyword = record.get("target_keyword")
     if not isinstance(target_keyword, str) or not target_keyword.strip():
         raise ValueError("raw response record is missing target_keyword")
@@ -2925,25 +3060,27 @@ def backlink_raw_response_key(record: Mapping[str, object]) -> tuple[str, str]:
     if not isinstance(url, str) or not url.strip():
         raise ValueError("raw response record is missing a usable url")
 
-    return target_keyword.casefold().strip(), url.strip()
+    variant = metadata.get("variant")
+    if not isinstance(variant, str) or not variant.strip():
+        variant = BACKLINKS_QUERY_SUMMARY
+
+    return target_keyword.casefold().strip(), url.strip(), variant
 
 
 def rewrite_backlink_endpoint_partition(
     run_dir: Path,
     rows: Sequence[Mapping[str, object]],
+    *,
+    endpoint: str = "backlinks_summary",
 ) -> None:
-    partition_dir = Path(run_dir) / "parquet" / "raw_responses" / "endpoint=backlinks"
+    partition_dir = Path(run_dir) / "parquet" / "raw_responses" / f"endpoint={endpoint}"
     if partition_dir.exists():
         shutil.rmtree(partition_dir)
     partition_dir.mkdir(parents=True, exist_ok=True)
 
     sorted_rows = sorted(
-        (validate_raw_response_record(row, endpoint="backlinks") for row in rows),
-        key=lambda row: (
-            backlink_raw_response_key(row)[0],
-            backlink_raw_response_key(row)[1],
-            str(row.get("response_id", "")),
-        ),
+        (validate_raw_response_record(row, endpoint=endpoint) for row in rows),
+        key=backlink_raw_response_key,
     )
     pq.write_table(
         pa.Table.from_pylist(sorted_rows, schema=RAW_RESPONSE_SCHEMA),
@@ -2956,22 +3093,17 @@ def rewrite_backlink_endpoint_partition(
 def merge_backlink_raw_response_rows(
     existing_rows: Sequence[Mapping[str, object]],
     new_records: Sequence[Mapping[str, object]],
+    *,
+    endpoint: str = "backlinks_summary",
 ) -> list[dict[str, object]]:
-    merged_rows: dict[tuple[str, str], dict[str, object]] = {}
+    merged_rows: dict[tuple[str, str, str], dict[str, object]] = {}
     for row in existing_rows:
-        normalized_row = validate_raw_response_record(row, endpoint="backlinks")
+        normalized_row = validate_raw_response_record(row, endpoint=endpoint)
         merged_rows[backlink_raw_response_key(normalized_row)] = normalized_row
     for row in new_records:
-        normalized_row = validate_raw_response_record(row, endpoint="backlinks")
+        normalized_row = validate_raw_response_record(row, endpoint=endpoint)
         merged_rows[backlink_raw_response_key(normalized_row)] = normalized_row
-    return sorted(
-        merged_rows.values(),
-        key=lambda row: (
-            backlink_raw_response_key(row)[0],
-            backlink_raw_response_key(row)[1],
-            str(row.get("response_id", "")),
-        ),
-    )
+    return sorted(merged_rows.values(), key=backlink_raw_response_key)
 
 
 def refresh_run_json_raw_response_catalog(run_dir: Path) -> None:
@@ -2993,6 +3125,12 @@ def refresh_run_json_raw_response_catalog(run_dir: Path) -> None:
     )
 
 
+BACKLINKS_VARIANT_ENDPOINTS: dict[str, str] = {
+    BACKLINKS_QUERY_SUMMARY: "backlinks_summary",
+    BACKLINKS_QUERY_DOFOLLOW: "backlinks_dofollow_summary",
+}
+
+
 def persist_backlink_raw_responses(
     run_dir: Path,
     records: Sequence[Mapping[str, object]],
@@ -3000,9 +3138,17 @@ def persist_backlink_raw_responses(
     if not records:
         return
     try:
-        existing_rows = load_raw_response_partition_rows(run_dir, "backlinks")
-        merged_rows = merge_backlink_raw_response_rows(existing_rows, records)
-        rewrite_backlink_endpoint_partition(run_dir, merged_rows)
+        records_by_endpoint: dict[str, list[Mapping[str, object]]] = {}
+        for record in records:
+            endpoint = str(record.get("endpoint") or "backlinks_summary")
+            records_by_endpoint.setdefault(endpoint, []).append(record)
+
+        for endpoint, endpoint_records in records_by_endpoint.items():
+            existing_rows = load_raw_response_partition_rows(run_dir, endpoint)
+            merged_rows = merge_backlink_raw_response_rows(
+                existing_rows, endpoint_records, endpoint=endpoint
+            )
+            rewrite_backlink_endpoint_partition(run_dir, merged_rows, endpoint=endpoint)
         refresh_run_json_raw_response_catalog(run_dir)
     except STORAGE_COMMAND_EXCEPTIONS as error:
         raise CliCommandError(str(error)) from error

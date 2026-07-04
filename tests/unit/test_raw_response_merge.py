@@ -359,63 +359,107 @@ def _backlink_raw_response_record(
     response_id: str,
     target_keyword: str,
     url: str,
+    endpoint: str = "backlinks_summary",
+    variant: str = "summary",
 ) -> dict[str, object]:
     row = build_raw_response_record(
         run_id,
-        endpoint="backlinks",
+        endpoint=endpoint,
         provider="dataforseo",
-        response={**fixture_backlinks_response(url), "url": url},
+        response={**fixture_backlinks_response(url, dofollow_only=variant == "dofollow"), "url": url},
         target_keyword=target_keyword,
-        request_metadata={"target_keyword": target_keyword, "url": url},
+        request_metadata={
+            "target_keyword": target_keyword,
+            "url": url,
+            "variant": variant,
+        },
         recorded_at="2026-07-02T12:00:00+00:00",
     )
     row["response_id"] = response_id
     return row
 
 
-def test_merge_backlink_raw_response_rows_dedupes_by_keyword_and_url() -> None:
-    existing = _backlink_raw_response_record(
+def test_merge_backlink_raw_response_rows_dedupes_by_keyword_url_and_variant() -> None:
+    existing_summary = _backlink_raw_response_record(
         run_id="artifacts",
-        response_id="backlink-a-old",
+        response_id="backlink-a-summary-old",
         target_keyword="technical seo",
         url="https://example.com/a",
+        endpoint="backlinks_summary",
+        variant="summary",
     )
-    incoming_duplicate = _backlink_raw_response_record(
+    incoming_summary = _backlink_raw_response_record(
         run_id="artifacts",
-        response_id="backlink-a-new",
+        response_id="backlink-a-summary-new",
         target_keyword=" technical seo ",
         url="https://example.com/a",
+        endpoint="backlinks_summary",
+        variant="summary",
     )
     incoming_new = _backlink_raw_response_record(
         run_id="artifacts",
-        response_id="backlink-b",
+        response_id="backlink-b-summary",
         target_keyword="technical seo",
         url="https://example.com/b",
+        endpoint="backlinks_summary",
+        variant="summary",
     )
 
-    merged = merge_backlink_raw_response_rows(
-        [existing],
-        [incoming_duplicate, incoming_new],
+    merged_summary = merge_backlink_raw_response_rows(
+        [existing_summary],
+        [incoming_summary, incoming_new],
+        endpoint="backlinks_summary",
     )
 
-    assert len(merged) == 2
-    merged_by_id = {str(row["response_id"]): row for row in merged}
-    assert merged_by_id["backlink-a-new"]["response_id"] == "backlink-a-new"
-    assert merged_by_id["backlink-b"]["response_id"] == "backlink-b"
+    assert len(merged_summary) == 2
+    merged_by_id = {str(row["response_id"]): row for row in merged_summary}
+    assert merged_by_id["backlink-a-summary-new"]["response_id"] == "backlink-a-summary-new"
+    assert merged_by_id["backlink-b-summary"]["response_id"] == "backlink-b-summary"
+
+    existing_dofollow = _backlink_raw_response_record(
+        run_id="artifacts",
+        response_id="backlink-a-dofollow-old",
+        target_keyword="technical seo",
+        url="https://example.com/a",
+        endpoint="backlinks_dofollow_summary",
+        variant="dofollow",
+    )
+    incoming_dofollow = _backlink_raw_response_record(
+        run_id="artifacts",
+        response_id="backlink-a-dofollow-new",
+        target_keyword="technical seo",
+        url="https://example.com/a",
+        endpoint="backlinks_dofollow_summary",
+        variant="dofollow",
+    )
+
+    merged_dofollow = merge_backlink_raw_response_rows(
+        [existing_dofollow],
+        [incoming_dofollow],
+        endpoint="backlinks_dofollow_summary",
+    )
+
+    assert len(merged_dofollow) == 1
+    assert merged_dofollow[0]["response_id"] == "backlink-a-dofollow-new"
 
 
-def test_persist_backlink_raw_responses_rewrites_partition_once(
+def test_persist_backlink_raw_responses_rewrites_each_partition_once(
     tmp_path: Path,
 ) -> None:
     run_dir = tmp_path / "artifacts"
-    backlinks_dir = run_dir / "parquet" / "raw_responses" / "endpoint=backlinks"
+    summary_dir = run_dir / "parquet" / "raw_responses" / "endpoint=backlinks_summary"
+    dofollow_dir = (
+        run_dir / "parquet" / "raw_responses" / "endpoint=backlinks_dofollow_summary"
+    )
     existing = _backlink_raw_response_record(
         run_id="artifacts",
         response_id="backlink-existing",
         target_keyword="technical seo",
         url="https://example.com/existing",
+        endpoint="backlinks_summary",
+        variant="summary",
     )
-    _write_raw_response_partition(backlinks_dir, [existing])
+    _write_raw_response_partition(summary_dir, [existing])
     (run_dir / "run.json").write_text(
         json.dumps({"run_id": "artifacts", "catalog": {"datasets": {}}}, indent=2)
         + "\n",
@@ -425,20 +469,28 @@ def test_persist_backlink_raw_responses_rewrites_partition_once(
     incoming = [
         _backlink_raw_response_record(
             run_id="artifacts",
-            response_id=f"backlink-{index}",
+            response_id=f"backlink-summary-{index}",
             target_keyword="technical seo",
             url=f"https://example.com/{index}",
+            endpoint="backlinks_summary",
+            variant="summary",
+        )
+        for index in range(3)
+    ] + [
+        _backlink_raw_response_record(
+            run_id="artifacts",
+            response_id=f"backlink-dofollow-{index}",
+            target_keyword="technical seo",
+            url=f"https://example.com/{index}",
+            endpoint="backlinks_dofollow_summary",
+            variant="dofollow",
         )
         for index in range(3)
     ]
 
     persist_backlink_raw_responses(run_dir, incoming)
 
-    merged = pq.ParquetFile(backlinks_dir / "part-0.parquet").read().to_pylist()
-    assert len(merged) == 4
-    assert {str(row["response_id"]) for row in merged} == {
-        "backlink-existing",
-        "backlink-0",
-        "backlink-1",
-        "backlink-2",
-    }
+    merged_summary = pq.ParquetFile(summary_dir / "part-0.parquet").read().to_pylist()
+    merged_dofollow = pq.ParquetFile(dofollow_dir / "part-0.parquet").read().to_pylist()
+    assert len(merged_summary) == 4
+    assert len(merged_dofollow) == 3

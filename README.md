@@ -89,12 +89,15 @@ Pass `--live-providers` on replay even when the stored run was created offline:
 the CLI overlays live-provider flags onto the saved config for this invocation
 (`merge_stored_run_cli_overlay`); `--skip-textrazor` stays sticky and suppresses
 TextRazor even when the stored run had it enabled. Only missing SERP URL
-backlink summaries are fetched via DataForSEO `backlinks/backlinks/live`;
-existing raw rows are kept. Each keyword batch persists to
-`parquet/raw_responses/endpoint=backlinks/` once (dedupe on `(target_keyword, url)`),
+backlink summaries are fetched via DataForSEO `backlinks/summary/live` (two
+calls per URL: unfiltered summary plus dofollow-filtered summary); existing raw
+rows are kept. Each keyword batch persists to
+`parquet/raw_responses/endpoint=backlinks_summary/` and
+`endpoint=backlinks_dofollow_summary/` (dedupe on `(target_keyword, url, variant)`),
 including partial progress when a later URL in the same batch fails; survives
 later provider failures before `run.json` is written. Curated rows materialize in
-`parquet/backlinks/` on normalize.
+`parquet/backlinks/` on normalize (`dofollow_backlinks_count` is null when the
+dofollow variant is missing; `backlinks_metrics_complete` flags paired rows).
 
 TextRazor responses are stored under `raw_responses/endpoint=entities`, use
 `provider=textrazor`, and share the same `RAW_RESPONSE_SCHEMA` as the other
@@ -138,8 +141,11 @@ scores alongside the three similarity backends.
 On every `run` (offline or live), per expanded cluster keyword:
 
 1. SERP normalization (top *N* organic rows, default 20)
-2. DataForSEO `backlinks/backlinks/live` per SERP URL when live providers are on
-   (incremental raw-lake persistence; curated `backlinks` on normalize)
+2. DataForSEO `backlinks/summary/live` — **two calls per SERP URL** when live
+   providers are on (unfiltered summary plus dofollow-filtered summary; ~$0.04
+   per target for both calls combined); incremental raw-lake persistence to
+   `endpoint=backlinks_summary` and `endpoint=backlinks_dofollow_summary`;
+   curated `backlinks` on normalize
 3. Page text from fixtures or DataForSEO `content_parsing/live`
 4. Passage splitting
 5. **Passage-level similarity features** — max/mean cosine per URL from deterministic
@@ -315,7 +321,7 @@ runs/{run_id}/
   run.json
   report.md
   parquet/
-    raw_responses/endpoint={keyword_expansion|serp|page_text|entities|backlinks}/part-*.parquet
+    raw_responses/endpoint={keyword_expansion|serp|page_text|entities|backlinks_summary|backlinks_dofollow_summary}/part-*.parquet
     keywords/part-*.parquet
     serp_items/part-*.parquet
     pages/part-*.parquet

@@ -2,10 +2,19 @@
 
 import base64
 import json
+import logging
+import time
+import urllib.error
 import urllib.request
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
+
+logger = logging.getLogger(__name__)
+
+RETRYABLE_HTTP_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+DEFAULT_MAX_ATTEMPTS = 3
+DEFAULT_RETRY_BACKOFF_SECONDS = 0.5
 
 DEFAULT_KEYWORD_LIMIT = 1
 DEFAULT_SERP_DEPTH = 20
@@ -16,7 +25,13 @@ DATAFORSEO_KEYWORD_EXPANSION_PATH = (
 )
 DATAFORSEO_SERP_PATH = "/v3/serp/google/organic/live/advanced"
 DATAFORSEO_PAGE_TEXT_PATH = "/v3/on_page/content_parsing/live"
-DATAFORSEO_BACKLINKS_PATH = "/v3/backlinks/backlinks/live"
+DATAFORSEO_BACKLINKS_PATH = "/v3/backlinks/summary/live"
+BACKLINKS_QUERY_SUMMARY = "summary"
+BACKLINKS_QUERY_DOFOLLOW = "dofollow"
+REQUIRED_BACKLINKS_QUERIES = frozenset(
+    {BACKLINKS_QUERY_SUMMARY, BACKLINKS_QUERY_DOFOLLOW}
+)
+BACKLINKS_DOFOLLOW_FILTERS: list[object] = ["dofollow", "=", True]
 
 
 @dataclass(frozen=True)
@@ -45,6 +60,10 @@ class DataForSeoCredentialError(ValueError):
 
 class DataForSeoClientError(RuntimeError):
     """Raised when a DataForSEO HTTP request fails."""
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class DataForSeoParseError(ValueError):
@@ -94,7 +113,7 @@ DATAFORSEO_RESPONSE_SCHEMAS: dict[str, tuple[DataForSeoFieldSchema, ...]] = {
         DataForSeoFieldSchema(("tasks",), list),
         DataForSeoFieldSchema(("tasks", "[]", "result"), (list, type(None))),
     ),
-    "backlinks": (
+    "backlinks_summary": (
         DataForSeoFieldSchema(("tasks",), list),
         DataForSeoFieldSchema(("tasks", "[]", "result"), (list, type(None))),
         DataForSeoFieldSchema(
@@ -102,37 +121,24 @@ DATAFORSEO_RESPONSE_SCHEMAS: dict[str, tuple[DataForSeoFieldSchema, ...]] = {
             str,
         ),
         DataForSeoFieldSchema(
-            ("tasks", "[]", "result", "[]", "total_count"),
+            ("tasks", "[]", "result", "[]", "backlinks"),
             int,
         ),
-        DataForSeoFieldSchema(("tasks", "[]", "result", "[]", "items"), (list, type(None))),
         DataForSeoFieldSchema(
-            ("tasks", "[]", "result", "[]", "items", "[]", "type"),
+            ("tasks", "[]", "result", "[]", "referring_domains"),
+            int,
+        ),
+    ),
+    "backlinks_dofollow_summary": (
+        DataForSeoFieldSchema(("tasks",), list),
+        DataForSeoFieldSchema(("tasks", "[]", "result"), (list, type(None))),
+        DataForSeoFieldSchema(
+            ("tasks", "[]", "result", "[]", "target"),
             str,
         ),
         DataForSeoFieldSchema(
-            ("tasks", "[]", "result", "[]", "items", "[]", "domain_from"),
-            str,
-        ),
-        DataForSeoFieldSchema(
-            ("tasks", "[]", "result", "[]", "items", "[]", "url_from"),
-            str,
-        ),
-        DataForSeoFieldSchema(
-            ("tasks", "[]", "result", "[]", "items", "[]", "url_to"),
-            str,
-        ),
-        DataForSeoFieldSchema(
-            ("tasks", "[]", "result", "[]", "items", "[]", "dofollow"),
-            bool,
-        ),
-        DataForSeoFieldSchema(
-            ("tasks", "[]", "result", "[]", "items", "[]", "is_new"),
-            bool,
-        ),
-        DataForSeoFieldSchema(
-            ("tasks", "[]", "result", "[]", "items", "[]", "is_lost"),
-            bool,
+            ("tasks", "[]", "result", "[]", "backlinks"),
+            int,
         ),
     ),
 }
@@ -210,20 +216,63 @@ def build_page_text_request(
     )
 
 
-def build_backlinks_request(
+def format_backlinks_target(target: str) -> str:
+    """Format a backlinks target per DataForSEO conventions.
+
+    Absolute page URLs (with a path) are passed through unchanged. Bare
+    domains/subdomains are stripped of scheme and a leading ``www.`` label.
+    """
+
+    if "://" not in target:
+        return target.lstrip("/").removeprefix("www.")
+
+    scheme_sep = target.index("://")
+    remainder = target[scheme_sep + 3 :]
+    path_index = remainder.find("/")
+    if path_index != -1:
+        path = remainder[path_index:]
+        if path not in {"", "/"}:
+            # Has a real path component: it's a page target, keep the absolute URL.
+            return target
+    return remainder[:path_index if path_index != -1 else len(remainder)].removeprefix(
+        "www."
+    )
+
+
+def _build_backlinks_base_body(url: str) -> dict[str, object]:
+    return {
+        "target": format_backlinks_target(url),
+        "include_subdomains": True,
+        "backlinks_status_type": "live",
+        "internal_list_limit": 1000,
+    }
+
+
+def build_backlinks_summary_request(
     url: str,
+    *,
+    backlinks_filters: list[object] | None = None,
 ) -> ProviderRequest:
-    """Build a DataForSEO backlinks request without executing it."""
+    """Build a DataForSEO backlinks summary request without executing it."""
+
+    body = _build_backlinks_base_body(url)
+    if backlinks_filters is not None:
+        body["backlinks_filters"] = backlinks_filters
 
     return ProviderRequest(
         method="POST",
         path=DATAFORSEO_BACKLINKS_PATH,
         headers={"Content-Type": "application/json"},
-        body=[
-            {
-                "target": url,
-            }
-        ],
+        body=[body],
+    )
+
+
+def build_backlinks_dofollow_summary_request(url: str) -> ProviderRequest:
+    """Build a filtered summary request whose aggregated counts are dofollow-only."""
+
+    return build_backlinks_summary_request(
+        url,
+        backlinks_filters=BACKLINKS_DOFOLLOW_FILTERS,
     )
 
 
@@ -251,8 +300,15 @@ def execute_dataforseo_request(
     credentials: DataForSeoCredentials,
     transport=None,
     timeout: float = 30.0,
+    max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, object]:
-    """Execute a DataForSEO request and parse the JSON response."""
+    """Execute a DataForSEO request and parse the JSON response.
+
+    Retries with exponential backoff when the transport raises a
+    ``DataForSeoClientError`` carrying a retryable HTTP status code
+    (429 or 5xx); other failures propagate immediately.
+    """
 
     if transport is None:
         transport = urllib_json_transport
@@ -261,13 +317,28 @@ def execute_dataforseo_request(
         **request.headers,
         "Authorization": dataforseo_basic_auth_header(credentials),
     }
-    response = transport(
-        method=request.method,
-        url=f"{DATAFORSEO_BASE_URL}{request.path}",
-        headers=headers,
-        body=body,
-        timeout=timeout,
-    )
+
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            response = transport(
+                method=request.method,
+                url=f"{DATAFORSEO_BASE_URL}{request.path}",
+                headers=headers,
+                body=body,
+                timeout=timeout,
+            )
+        except DataForSeoClientError as error:
+            if (
+                error.status_code in RETRYABLE_HTTP_STATUS_CODES
+                and attempt < max_attempts
+            ):
+                sleep(DEFAULT_RETRY_BACKOFF_SECONDS * (2 ** (attempt - 1)))
+                continue
+            raise
+        break
+
     if not isinstance(response, dict):
         raise DataForSeoClientError("DataForSEO response was not a JSON object")
     return response
@@ -300,8 +371,6 @@ def validate_dataforseo_response(
         _validate_content_parsing_response(response)
     elif endpoint == "serp":
         _validate_serp_response(response)
-    elif endpoint == "backlinks":
-        _validate_backlinks_response(response)
     return response
 
 
@@ -570,36 +639,6 @@ def _validate_serp_response(response: Mapping[str, object]) -> None:
                 )
 
 
-def _validate_backlinks_response(response: Mapping[str, object]) -> None:
-    tasks = response.get("tasks", [])
-    if not isinstance(tasks, list):
-        return
-    for task_index, task in enumerate(tasks):
-        if not isinstance(task, Mapping):
-            continue
-        results = task.get("result", [])
-        if not isinstance(results, list):
-            continue
-        for result_index, result in enumerate(results):
-            if not isinstance(result, Mapping):
-                continue
-            result_path = f"tasks[{task_index}].result[{result_index}]"
-            if "target" not in result:
-                raise DataForSeoParseError(
-                    endpoint="backlinks",
-                    path=f"{result_path}.target",
-                    expected="present",
-                    actual=None,
-                    actual_type="field absent",
-                )
-            _raise_unless_type(
-                result["target"],
-                str,
-                f"{result_path}.target",
-                endpoint="backlinks",
-            )
-
-
 def _content_parsing_item_has_body(item: Mapping[str, object]) -> bool:
     return any(
         item.get(key) is not None
@@ -646,6 +685,11 @@ def urllib_json_transport(
     try:
         with urllib.request.urlopen(http_request, timeout=timeout) as response:
             payload = response.read()
+    except urllib.error.HTTPError as error:
+        raise DataForSeoClientError(
+            f"DataForSEO request failed: {error}",
+            status_code=error.code,
+        ) from error
     except OSError as error:
         raise DataForSeoClientError(f"DataForSEO request failed: {error}") from error
     return json.loads(payload.decode("utf-8"))
@@ -756,45 +800,82 @@ def fixture_serp_response(keyword: str) -> dict[str, object]:
     }
 
 
-def fixture_backlinks_response(url: str) -> dict[str, object]:
-    """Return a deterministic DataForSEO-shaped backlink fixture."""
+def fixture_backlinks_response(
+    url: str,
+    *,
+    dofollow_only: bool = False,
+) -> dict[str, object]:
+    """Return a deterministic DataForSEO-shaped backlink summary fixture."""
+
+    if dofollow_only:
+        result: dict[str, object] = {
+            "target": url,
+            "backlinks": 35,
+            "referring_domains": 10,
+            "rank": 412,
+        }
+    else:
+        result = {
+            "target": url,
+            "rank": 412,
+            "backlinks": 42,
+            "referring_domains": 12,
+            "referring_main_domains": 11,
+            "referring_pages": 40,
+            "referring_ips": 9,
+            "referring_subnets": 8,
+            "backlinks_spam_score": 4,
+            "info": {"target_spam_score": 6},
+            "new_backlinks": 3,
+            "lost_backlinks": 1,
+            "new_referring_domains": 1,
+            "lost_referring_domains": 0,
+            "broken_backlinks": 0,
+            "broken_pages": 0,
+            "referring_domains_nofollow": 2,
+            "crawled_pages": 40,
+            "internal_links_count": 5,
+            "external_links_count": 42,
+            "first_seen": "2026-01-01 00:00:00 +00:00",
+            "lost_date": None,
+            "referring_links_types": {"anchor": 30, "image": 12},
+            "referring_links_tld": {"com": 35, "org": 7},
+            "referring_links_platform_types": {"blogs": 20, "news": 22},
+            "referring_links_semantic_locations": {"content": 38, "footer": 4},
+            "referring_links_attributes": {"follow": 30, "nofollow": 12},
+            "referring_links_countries": {"US": 25, "GB": 17},
+        }
 
     return {
+        "status_code": 20000,
         "provider": "dataforseo",
-        "endpoint": "backlinks/backlinks/live",
+        "endpoint": "backlinks/summary/live",
         "url": url,
         "tasks": [
             {
                 "status_code": 20000,
-                "result": [
-                    {
-                        "target": url,
-                        "total_count": 42,
-                        "items": [
-                            {
-                                "type": "backlink",
-                                "domain_from": "www.example.org",
-                                "url_from": "https://www.example.org/post",
-                                "url_to": url,
-                                "dofollow": True,
-                                "is_new": False,
-                                "is_lost": False,
-                            },
-                            {
-                                "type": "backlink",
-                                "domain_from": "www.example.net",
-                                "url_from": "https://www.example.net/article",
-                                "url_to": url,
-                                "dofollow": False,
-                                "is_new": False,
-                                "is_lost": False,
-                            },
-                        ],
-                    }
-                ],
+                "cost": 0.02,
+                "result": [result],
             }
         ],
     }
+
+
+def fixture_backlinks_response_for_request_body(
+    request_body: list[Mapping[str, object]],
+) -> dict[str, object]:
+    """Return the matching backlinks fixture for a built request body.
+
+    Inspects ``backlinks_filters`` on the (single-task) request body to
+    decide whether this is the unfiltered summary call or the dofollow-only
+    filtered summary call.
+    """
+
+    task = request_body[0]
+    target = task["target"]
+    assert isinstance(target, str)
+    dofollow_only = bool(task.get("backlinks_filters"))
+    return fixture_backlinks_response(target, dofollow_only=dofollow_only)
 
 
 def normalize_serp_results(

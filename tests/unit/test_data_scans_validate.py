@@ -38,11 +38,13 @@ def test_scan_raw_responses_uses_lazy_parquet_scan(
     assert isinstance(lazy_frame, pl.LazyFrame)
     assert captured["path"] == str(run_dir / "parquet" / "raw_responses")
     assert captured["kwargs"]["hive_partitioning"] is True
+    assert captured["kwargs"]["missing_columns"] == "insert"
     assert lazy_frame.collect().to_dicts() == [
         {
             "run_id": "run-1",
             "response_id": "abc123",
             "endpoint": "serp",
+            "request_metadata_json": None,
         }
     ]
 

@@ -13,6 +13,8 @@ from seo_rank.cli import build_raw_response_record
 from seo_rank.cli import main
 from seo_rank.cli import RAW_RESPONSE_SCHEMA
 from seo_rank.dataforseo import (
+    BACKLINKS_QUERY_DOFOLLOW,
+    BACKLINKS_QUERY_SUMMARY,
     DataForSeoParseError,
     fixture_backlinks_response,
     fixture_keyword_expansion_response,
@@ -119,7 +121,7 @@ def test_normalize_run_materializes_curated_tables_from_raw_responses(
     assert run_json["catalog"]["datasets"]["similarity_scores"]["row_count"] == 1
 
 
-def test_normalize_run_materializes_backlinks_table_from_raw_responses(
+def test_normalize_run_materializes_backlinks_table_from_summary_only_with_null_dofollow(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -141,171 +143,41 @@ def test_normalize_run_materializes_backlinks_table_from_raw_responses(
 
     assert exit_code == 0
 
-    backlinks_dir = output_dir / "parquet" / "raw_responses" / "endpoint=backlinks"
-    backlinks_dir.mkdir(parents=True, exist_ok=True)
-    backlinks_response = {
-        "provider": "dataforseo",
-        "endpoint": "backlinks/backlinks/live",
-        "tasks": [
-            {
-                "status_code": 20000,
-                "result": [
-                    {
-                        "target": "https://example.com/technical-seo/1",
-                        "total_count": 42,
-                        "referring_domains": 12,
-                        "items": [
-                            {
-                                "type": "backlink",
-                                "domain_from": "www.example.org",
-                                "url_from": "https://www.example.org/post",
-                                "url_to": "https://example.com/technical-seo/1",
-                                "dofollow": True,
-                                "is_new": False,
-                                "is_lost": False,
-                            },
-                            {
-                                "type": "backlink",
-                                "domain_from": "www.example.net",
-                                "url_from": "https://www.example.net/article",
-                                "url_to": "https://example.com/technical-seo/1",
-                                "dofollow": False,
-                                "is_new": False,
-                                "is_lost": False,
-                            },
-                        ],
-                    }
-                ],
-            }
-        ],
-    }
-    backlinks_record = build_raw_response_record(
+    summary_dir = (
+        output_dir / "parquet" / "raw_responses" / "endpoint=backlinks_summary"
+    )
+    summary_dir.mkdir(parents=True, exist_ok=True)
+    target_url = "https://example.com/technical-seo/1"
+    summary_record = build_raw_response_record(
         output_dir.name,
-        endpoint="backlinks",
+        endpoint="backlinks_summary",
         provider="dataforseo",
-        response=backlinks_response,
+        response=fixture_backlinks_response(target_url),
         target_keyword="technical seo",
         request_metadata={
             "target_keyword": "technical seo",
-            "url": "https://example.com/technical-seo/1",
+            "url": target_url,
+            "variant": BACKLINKS_QUERY_SUMMARY,
         },
         recorded_at="2026-07-02T12:00:00+00:00",
     )
     pq.write_table(
-        pa.Table.from_pylist([backlinks_record], schema=RAW_RESPONSE_SCHEMA),
-        backlinks_dir / "part-0.parquet",
-    )
-
-    catalog = normalize_run(output_dir)
-
-    assert catalog["datasets"]["backlinks"]["row_count"] == 1
-    assert (output_dir / "parquet" / "backlinks").exists()
-    backlinks = ds.dataset(output_dir / "parquet" / "backlinks", format="parquet").to_table().to_pylist()
-    assert backlinks == [
-        {
-            "run_id": output_dir.name,
-            "target_keyword_id": stable_id("technical seo"),
-            "target_keyword": "technical seo",
-            "response_id": backlinks_record["response_id"],
-            "backlink_id": stable_id(
-                output_dir.name,
-                "technical seo",
-                "https://example.com/technical-seo/1",
-            ),
-            "canonical_url_hash": stable_id("https://example.com/technical-seo/1"),
-            "url": "https://example.com/technical-seo/1",
-            "backlinks_count": 42,
-            "referring_domains_count": 12,
-            "dofollow_backlinks_count": 1,
-            "schema_version": "curated.v1",
-        }
-    ]
-
-
-def test_normalize_run_materializes_backlinks_table_without_referring_domains(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    output_dir = tmp_path / "artifacts"
-    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
-
-    exit_code = main(
-        [
-            "run",
-            "--seed",
-            "technical seo",
-            "--depth",
-            "1",
-            "--output-dir",
-            str(output_dir),
-            "--dry-run",
-        ]
-    )
-
-    assert exit_code == 0
-
-    backlinks_dir = output_dir / "parquet" / "raw_responses" / "endpoint=backlinks"
-    backlinks_dir.mkdir(parents=True, exist_ok=True)
-    backlinks_response = {
-        "provider": "dataforseo",
-        "endpoint": "backlinks/backlinks/live",
-        "tasks": [
-            {
-                "status_code": 20000,
-                "result": [
-                    {
-                        "target": "https://example.com/technical-seo/1",
-                        "total_count": 42,
-                        "items": [
-                            {
-                                "type": "backlink",
-                                "domain_from": "www.example.org",
-                                "url_from": "https://www.example.org/post",
-                                "url_to": "https://example.com/technical-seo/1",
-                                "dofollow": True,
-                                "is_new": False,
-                                "is_lost": False,
-                            },
-                            {
-                                "type": "backlink",
-                                "domain_from": "www.example.net",
-                                "url_from": "https://www.example.net/article",
-                                "url_to": "https://example.com/technical-seo/1",
-                                "dofollow": False,
-                                "is_new": False,
-                                "is_lost": False,
-                            },
-                        ],
-                    }
-                ],
-            }
-        ],
-    }
-    backlinks_record = build_raw_response_record(
-        output_dir.name,
-        endpoint="backlinks",
-        provider="dataforseo",
-        response=backlinks_response,
-        target_keyword="technical seo",
-        request_metadata={
-            "target_keyword": "technical seo",
-            "url": "https://example.com/technical-seo/1",
-        },
-        recorded_at="2026-07-02T12:00:00+00:00",
-    )
-    pq.write_table(
-        pa.Table.from_pylist([backlinks_record], schema=RAW_RESPONSE_SCHEMA),
-        backlinks_dir / "part-0.parquet",
+        pa.Table.from_pylist([summary_record], schema=RAW_RESPONSE_SCHEMA),
+        summary_dir / "part-0.parquet",
     )
 
     catalog = normalize_run(output_dir)
 
     assert catalog["datasets"]["backlinks"]["row_count"] == 1
     backlinks = ds.dataset(output_dir / "parquet" / "backlinks", format="parquet").to_table().to_pylist()
-    assert backlinks[0]["referring_domains_count"] == 2
+    assert backlinks[0]["backlinks_count"] == 42
+    assert backlinks[0]["referring_domains_count"] == 12
+    assert backlinks[0]["dofollow_backlinks_count"] is None
+    assert backlinks[0]["backlinks_metrics_complete"] is False
+    assert backlinks[0]["referring_links_types_json"] is not None
 
 
-def test_normalize_run_skips_backlinks_results_with_null_items(
+def test_normalize_run_materializes_backlinks_table_from_summary_and_dofollow_responses(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -327,19 +199,154 @@ def test_normalize_run_skips_backlinks_results_with_null_items(
 
     assert exit_code == 0
 
-    backlinks_dir = output_dir / "parquet" / "raw_responses" / "endpoint=backlinks"
-    backlinks_dir.mkdir(parents=True, exist_ok=True)
+    summary_dir = (
+        output_dir / "parquet" / "raw_responses" / "endpoint=backlinks_summary"
+    )
+    dofollow_dir = (
+        output_dir
+        / "parquet"
+        / "raw_responses"
+        / "endpoint=backlinks_dofollow_summary"
+    )
+    summary_dir.mkdir(parents=True, exist_ok=True)
+    dofollow_dir.mkdir(parents=True, exist_ok=True)
+    target_url = "https://example.com/technical-seo/1"
+    summary_record = build_raw_response_record(
+        output_dir.name,
+        endpoint="backlinks_summary",
+        provider="dataforseo",
+        response=fixture_backlinks_response(target_url),
+        target_keyword="technical seo",
+        request_metadata={
+            "target_keyword": "technical seo",
+            "url": target_url,
+            "variant": BACKLINKS_QUERY_SUMMARY,
+        },
+        recorded_at="2026-07-02T12:00:00+00:00",
+    )
+    dofollow_record = build_raw_response_record(
+        output_dir.name,
+        endpoint="backlinks_dofollow_summary",
+        provider="dataforseo",
+        response=fixture_backlinks_response(target_url, dofollow_only=True),
+        target_keyword="technical seo",
+        request_metadata={
+            "target_keyword": "technical seo",
+            "url": target_url,
+            "variant": BACKLINKS_QUERY_DOFOLLOW,
+        },
+        recorded_at="2026-07-02T12:00:01+00:00",
+    )
+    pq.write_table(
+        pa.Table.from_pylist([summary_record], schema=RAW_RESPONSE_SCHEMA),
+        summary_dir / "part-0.parquet",
+    )
+    pq.write_table(
+        pa.Table.from_pylist([dofollow_record], schema=RAW_RESPONSE_SCHEMA),
+        dofollow_dir / "part-0.parquet",
+    )
+
+    catalog = normalize_run(output_dir)
+
+    assert catalog["datasets"]["backlinks"]["row_count"] == 1
+    backlinks = ds.dataset(output_dir / "parquet" / "backlinks", format="parquet").to_table().to_pylist()
+    assert backlinks[0]["backlinks_count"] == 42
+    assert backlinks[0]["referring_domains_count"] == 12
+    assert backlinks[0]["dofollow_backlinks_count"] == 35
+    assert backlinks[0]["dofollow_referring_domains_count"] == 10
+    assert backlinks[0]["backlinks_metrics_complete"] is True
+    assert backlinks[0]["rank"] == 412
+    assert backlinks[0]["target_spam_score"] == 6
+
+
+def test_normalize_run_materializes_backlinks_table_from_legacy_backlinks_partition(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--depth",
+            "1",
+            "--output-dir",
+            str(output_dir),
+            "--dry-run",
+        ]
+    )
+
+    assert exit_code == 0
+
+    legacy_dir = output_dir / "parquet" / "raw_responses" / "endpoint=backlinks"
+    legacy_dir.mkdir(parents=True, exist_ok=True)
+    target_url = "https://example.com/technical-seo/1"
+    legacy_record = build_raw_response_record(
+        output_dir.name,
+        endpoint="backlinks",
+        provider="dataforseo",
+        response=fixture_backlinks_response(target_url),
+        target_keyword="technical seo",
+        request_metadata={
+            "target_keyword": "technical seo",
+            "url": target_url,
+        },
+        recorded_at="2026-07-02T12:00:00+00:00",
+    )
+    pq.write_table(
+        pa.Table.from_pylist([legacy_record], schema=RAW_RESPONSE_SCHEMA),
+        legacy_dir / "part-0.parquet",
+    )
+
+    catalog = normalize_run(output_dir)
+
+    assert catalog["datasets"]["backlinks"]["row_count"] == 1
+    backlinks = ds.dataset(output_dir / "parquet" / "backlinks", format="parquet").to_table().to_pylist()
+    assert backlinks[0]["backlinks_count"] == 42
+    assert backlinks[0]["dofollow_backlinks_count"] is None
+    assert backlinks[0]["backlinks_metrics_complete"] is False
+
+
+def test_normalize_run_rejects_backlinks_summary_missing_required_aggregates(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--depth",
+            "1",
+            "--output-dir",
+            str(output_dir),
+            "--dry-run",
+        ]
+    )
+
+    assert exit_code == 0
+
+    summary_dir = (
+        output_dir / "parquet" / "raw_responses" / "endpoint=backlinks_summary"
+    )
+    summary_dir.mkdir(parents=True, exist_ok=True)
     backlinks_response = {
+        "status_code": 20000,
         "provider": "dataforseo",
-        "endpoint": "backlinks/backlinks/live",
+        "endpoint": "backlinks/summary/live",
         "tasks": [
             {
                 "status_code": 20000,
                 "result": [
                     {
                         "target": "https://example.com/technical-seo/1",
-                        "total_count": 0,
-                        "items": None,
+                        "backlinks": 42,
                     }
                 ],
             }
@@ -347,24 +354,94 @@ def test_normalize_run_skips_backlinks_results_with_null_items(
     }
     backlinks_record = build_raw_response_record(
         output_dir.name,
-        endpoint="backlinks",
+        endpoint="backlinks_summary",
         provider="dataforseo",
         response=backlinks_response,
         target_keyword="technical seo",
         request_metadata={
             "target_keyword": "technical seo",
             "url": "https://example.com/technical-seo/1",
+            "variant": BACKLINKS_QUERY_SUMMARY,
         },
         recorded_at="2026-07-02T12:00:00+00:00",
     )
     pq.write_table(
         pa.Table.from_pylist([backlinks_record], schema=RAW_RESPONSE_SCHEMA),
-        backlinks_dir / "part-0.parquet",
+        summary_dir / "part-0.parquet",
+    )
+
+    with pytest.raises(DataForSeoParseError):
+        normalize_run(output_dir)
+
+
+def test_normalize_run_materializes_backlinks_table_with_zero_backlinks(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--depth",
+            "1",
+            "--output-dir",
+            str(output_dir),
+            "--dry-run",
+        ]
+    )
+
+    assert exit_code == 0
+
+    summary_dir = (
+        output_dir / "parquet" / "raw_responses" / "endpoint=backlinks_summary"
+    )
+    summary_dir.mkdir(parents=True, exist_ok=True)
+    backlinks_response = {
+        "status_code": 20000,
+        "provider": "dataforseo",
+        "endpoint": "backlinks/summary/live",
+        "tasks": [
+            {
+                "status_code": 20000,
+                "result": [
+                    {
+                        "target": "https://example.com/technical-seo/1",
+                        "backlinks": 0,
+                        "referring_domains": 0,
+                    }
+                ],
+            }
+        ],
+    }
+    backlinks_record = build_raw_response_record(
+        output_dir.name,
+        endpoint="backlinks_summary",
+        provider="dataforseo",
+        response=backlinks_response,
+        target_keyword="technical seo",
+        request_metadata={
+            "target_keyword": "technical seo",
+            "url": "https://example.com/technical-seo/1",
+            "variant": BACKLINKS_QUERY_SUMMARY,
+        },
+        recorded_at="2026-07-02T12:00:00+00:00",
+    )
+    pq.write_table(
+        pa.Table.from_pylist([backlinks_record], schema=RAW_RESPONSE_SCHEMA),
+        summary_dir / "part-0.parquet",
     )
 
     catalog = normalize_run(output_dir)
 
     assert catalog["datasets"]["backlinks"]["row_count"] == 1
+    backlinks = ds.dataset(output_dir / "parquet" / "backlinks", format="parquet").to_table().to_pylist()
+    assert backlinks[0]["backlinks_count"] == 0
+    assert backlinks[0]["referring_domains_count"] == 0
+    assert backlinks[0]["dofollow_backlinks_count"] is None
 
 
 def test_dry_run_materializes_textrazor_topic_and_page_metrics(

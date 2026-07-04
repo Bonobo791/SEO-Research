@@ -177,9 +177,12 @@ parsed pages → fixture similarity scoring → `network_calls` contains
 when not `--dry-run`.
 
 **Live run today (Phase 4):** seed keyword → keyword expansion → per-keyword
-top-20 SERP → DataForSEO `backlinks/backlinks/live` per SERP URL (one batched
-write per keyword to `raw_responses/endpoint=backlinks`, with partial progress
-on mid-loop failure) → page text →
+top-20 SERP → DataForSEO `backlinks/summary/live` per SERP URL (two calls:
+unfiltered summary plus dofollow-filtered summary, ~$0.04/target combined;
+batched writes per keyword to
+`raw_responses/endpoint=backlinks_summary` and
+`endpoint=backlinks_dofollow_summary`, dedupe on `(target_keyword, url, variant)`,
+with partial progress on mid-loop failure) → page text →
 optional TextRazor entities → page similarity (fixture
 by default; Gemini live under `--live-gemini`; BGE live under `--live-bge`) →
 grouped `keyword_results` in `run.json` + `report.md`.
@@ -244,7 +247,8 @@ runs/{run_id}/
       endpoint=serp/part-*.parquet
       endpoint=page_text/part-*.parquet
       endpoint=entities/part-*.parquet
-      endpoint=backlinks/part-*.parquet
+      endpoint=backlinks_summary/part-*.parquet
+      endpoint=backlinks_dofollow_summary/part-*.parquet
     keywords/part-*.parquet
     serp_items/part-*.parquet
     pages/part-*.parquet
@@ -277,7 +281,7 @@ every downloaded payload.
 | Column (conceptual) | Role |
 |---------------------|------|
 | `response_id` | Stable UUID for this HTTP response within the run |
-| `endpoint` | Low-cardinality partition key: `keyword_expansion`, `serp`, `page_text`, `entities`, `backlinks` |
+| `endpoint` | Low-cardinality partition key: `keyword_expansion`, `serp`, `page_text`, `entities`, `backlinks_summary`, `backlinks_dofollow_summary` (legacy `backlinks` read-compat on normalize) |
 | `provider` | `dataforseo` or `textrazor` (entities partition may be TextRazor-only) |
 | `task_id` | DataForSEO task identifier when present |
 | `timestamp` | Response receipt time (UTC) |
@@ -316,7 +320,7 @@ sink. Every row includes join keys: `run_id`,
 | `page_content_fields` | One row per decoded `content_parsing/live` field with path metadata and stable ids |
 | `passages` | Passage splits with offsets; no duplicate full page bodies |
 | `entities` | TextRazor entity mention rows when present |
-| `backlinks` | One row per `target_keyword × SERP URL` with backlink summary counts from DataForSEO `backlinks/backlinks/live` (`total_count`, `referring_domains_count`, dofollow count from item rows) |
+| `backlinks` | One row per `target_keyword × SERP URL` merging unfiltered and dofollow-filtered DataForSEO `backlinks/summary/live` responses (`backlinks_count`, `referring_domains_count`, `dofollow_backlinks_count` null when the dofollow variant is missing; expanded distribution JSON columns; `backlinks_metrics_complete`) |
 | `textrazor_page_metrics_curated` | One row per `target_keyword × SERP URL` with aggregated TextRazor scalar and structural page metrics; `textrazor_page_metrics_complete` flags whether all extractor sections were present |
 | `similarity_scores` | Page-level `bge`, `gemini_doc_retrieval`, `gemini_semantic_similarity` (sourced from `run.json` `page_similarity`) |
 

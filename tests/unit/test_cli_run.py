@@ -11,6 +11,7 @@ import pytest
 from seo_rank.dataforseo import DataForSeoClientError
 from seo_rank.dataforseo import DataForSeoCredentials
 from seo_rank.dataforseo import fixture_backlinks_response
+from seo_rank.dataforseo import fixture_backlinks_response_for_request_body
 from seo_rank.dataforseo import fixture_keyword_expansion_response
 from seo_rank.dataforseo import fixture_page_text_response
 from seo_rank.dataforseo import fixture_serp_response
@@ -568,10 +569,10 @@ def test_run_live_providers_writes_backlink_raw_responses(
             return fixture_serp_response("technical seo")
         if url.endswith("/on_page/content_parsing/live"):
             return fixture_page_text_response(request_body[0]["url"], "technical seo")
-        if url.endswith("/backlinks/backlinks/live"):
+        if url.endswith("/backlinks/summary/live"):
             target = request_body[0]["target"]
             backlinks_targets.append(target)
-            return fixture_backlinks_response(target)
+            return fixture_backlinks_response_for_request_body(request_body)
         raise AssertionError(f"unexpected DataForSEO URL: {url}")
 
     monkeypatch.setattr("seo_rank.cli.DEFAULT_DATAFORSEO_TRANSPORT", dataforseo_transport)
@@ -593,24 +594,44 @@ def test_run_live_providers_writes_backlink_raw_responses(
     )
 
     assert exit_code == 0
-    assert backlinks_targets == ["https://example.com/technical-seo/1"]
+    assert backlinks_targets == [
+        "https://example.com/technical-seo/1",
+        "https://example.com/technical-seo/1",
+    ]
 
     payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
-    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 4
+    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 5
     assert payload["catalog"]["datasets"]["raw_responses"]["files"] == [
-        "parquet/raw_responses/endpoint=backlinks/part-0.parquet",
+        "parquet/raw_responses/endpoint=backlinks_dofollow_summary/part-0.parquet",
+        "parquet/raw_responses/endpoint=backlinks_summary/part-0.parquet",
         "parquet/raw_responses/endpoint=keyword_expansion/part-0.parquet",
         "parquet/raw_responses/endpoint=page_text/part-0.parquet",
         "parquet/raw_responses/endpoint=serp/part-0.parquet",
     ]
-    backlinks_path = (
-        output_dir / "parquet" / "raw_responses" / "endpoint=backlinks" / "part-0.parquet"
+    summary_path = (
+        output_dir
+        / "parquet"
+        / "raw_responses"
+        / "endpoint=backlinks_summary"
+        / "part-0.parquet"
     )
-    assert backlinks_path.exists()
-    backlinks_rows = pq.ParquetFile(backlinks_path).read().to_pylist()
-    assert len(backlinks_rows) == 1
-    backlinks_response = json.loads(bytes(backlinks_rows[0]["response_body_bytes"]).decode("utf-8"))
-    assert backlinks_response["url"] == "https://example.com/technical-seo/1"
+    dofollow_path = (
+        output_dir
+        / "parquet"
+        / "raw_responses"
+        / "endpoint=backlinks_dofollow_summary"
+        / "part-0.parquet"
+    )
+    assert summary_path.exists()
+    assert dofollow_path.exists()
+    summary_rows = pq.ParquetFile(summary_path).read().to_pylist()
+    dofollow_rows = pq.ParquetFile(dofollow_path).read().to_pylist()
+    assert len(summary_rows) == 1
+    assert len(dofollow_rows) == 1
+    summary_response = json.loads(
+        bytes(summary_rows[0]["response_body_bytes"]).decode("utf-8")
+    )
+    assert summary_response["url"] == "https://example.com/technical-seo/1"
 
 
 def test_run_live_providers_persists_backlinks_before_later_provider_failure(
@@ -636,8 +657,8 @@ def test_run_live_providers_persists_backlinks_before_later_provider_failure(
             return fixture_keyword_expansion_response("technical seo")
         if url.endswith("/serp/google/organic/live/advanced"):
             return fixture_serp_response("technical seo")
-        if url.endswith("/backlinks/backlinks/live"):
-            return fixture_backlinks_response(request_body[0]["target"])
+        if url.endswith("/backlinks/summary/live"):
+            return fixture_backlinks_response_for_request_body(request_body)
         if url.endswith("/on_page/content_parsing/live"):
             raise DataForSeoClientError("page_text request failed after backlinks")
         raise AssertionError(f"unexpected DataForSEO URL: {url}")
@@ -661,14 +682,24 @@ def test_run_live_providers_persists_backlinks_before_later_provider_failure(
     )
 
     assert exit_code == 2
-    backlinks_path = (
-        output_dir / "parquet" / "raw_responses" / "endpoint=backlinks" / "part-0.parquet"
+    summary_path = (
+        output_dir
+        / "parquet"
+        / "raw_responses"
+        / "endpoint=backlinks_summary"
+        / "part-0.parquet"
     )
-    assert backlinks_path.exists()
-    backlinks_rows = pq.ParquetFile(backlinks_path).read().to_pylist()
-    assert len(backlinks_rows) == 1
-    backlinks_response = json.loads(bytes(backlinks_rows[0]["response_body_bytes"]).decode("utf-8"))
-    assert backlinks_response["url"] == "https://example.com/technical-seo/1"
+    dofollow_path = (
+        output_dir
+        / "parquet"
+        / "raw_responses"
+        / "endpoint=backlinks_dofollow_summary"
+        / "part-0.parquet"
+    )
+    assert summary_path.exists()
+    assert dofollow_path.exists()
+    assert len(pq.ParquetFile(summary_path).read().to_pylist()) == 1
+    assert len(pq.ParquetFile(dofollow_path).read().to_pylist()) == 1
     assert not (output_dir / "run.json").exists()
 
 
@@ -676,13 +707,18 @@ def test_fetch_dataforseo_backlinks_for_urls_persists_partition_once_per_batch(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    from seo_rank.dataforseo import fixture_backlinks_response_for_request_body
+
     run_dir = tmp_path / "artifacts"
     rewrite_calls = 0
+    api_calls = 0
 
-    def counting_rewrite(run_dir_arg, rows):  # noqa: ANN001
+    def counting_rewrite(run_dir_arg, rows, *, endpoint="backlinks_summary"):  # noqa: ANN001
         nonlocal rewrite_calls
         rewrite_calls += 1
-        return rewrite_backlink_endpoint_partition(run_dir_arg, rows)
+        return rewrite_backlink_endpoint_partition(
+            run_dir_arg, rows, endpoint=endpoint
+        )
 
     monkeypatch.setattr("seo_rank.cli.rewrite_backlink_endpoint_partition", counting_rewrite)
 
@@ -694,10 +730,12 @@ def test_fetch_dataforseo_backlinks_for_urls_persists_partition_once_per_batch(
         body: bytes,
         timeout: float,
     ) -> dict[str, object]:
+        nonlocal api_calls
         del method, headers, timeout
         request_body = json.loads(body.decode("utf-8"))
-        assert url.endswith("/backlinks/backlinks/live")
-        return fixture_backlinks_response(request_body[0]["target"])
+        assert url.endswith("/backlinks/summary/live")
+        api_calls += 1
+        return fixture_backlinks_response_for_request_body(request_body)
 
     urls = [f"https://example.com/technical-seo/{index}" for index in range(1, 4)]
     responses = fetch_dataforseo_backlinks_for_urls(
@@ -708,16 +746,30 @@ def test_fetch_dataforseo_backlinks_for_urls_persists_partition_once_per_batch(
         run_dir=run_dir,
     )
 
-    assert len(responses) == 3
-    assert rewrite_calls == 1
-    backlinks_path = run_dir / "parquet" / "raw_responses" / "endpoint=backlinks" / "part-0.parquet"
-    assert backlinks_path.exists()
-    assert len(pq.ParquetFile(backlinks_path).read().to_pylist()) == 3
+    assert api_calls == 6
+    assert len(responses) == 6
+    assert rewrite_calls == 2
+    summary_path = (
+        run_dir / "parquet" / "raw_responses" / "endpoint=backlinks_summary" / "part-0.parquet"
+    )
+    dofollow_path = (
+        run_dir
+        / "parquet"
+        / "raw_responses"
+        / "endpoint=backlinks_dofollow_summary"
+        / "part-0.parquet"
+    )
+    assert summary_path.exists()
+    assert dofollow_path.exists()
+    assert len(pq.ParquetFile(summary_path).read().to_pylist()) == 3
+    assert len(pq.ParquetFile(dofollow_path).read().to_pylist()) == 3
 
 
 def test_fetch_dataforseo_backlinks_for_urls_persists_partial_progress_on_mid_loop_failure(
     tmp_path: Path,
 ) -> None:
+    from seo_rank.dataforseo import fixture_backlinks_response_for_request_body
+
     run_dir = tmp_path / "artifacts"
     urls = [
         "https://example.com/technical-seo/1",
@@ -738,7 +790,7 @@ def test_fetch_dataforseo_backlinks_for_urls_persists_partial_progress_on_mid_lo
         target = request_body[0]["target"]
         if target == urls[2]:
             raise DataForSeoClientError("backlinks failed on third url")
-        return fixture_backlinks_response(target)
+        return fixture_backlinks_response_for_request_body(request_body)
 
     with pytest.raises(DataForSeoClientError, match="third url"):
         fetch_dataforseo_backlinks_for_urls(
@@ -749,13 +801,28 @@ def test_fetch_dataforseo_backlinks_for_urls_persists_partial_progress_on_mid_lo
             run_dir=run_dir,
         )
 
-    backlinks_path = run_dir / "parquet" / "raw_responses" / "endpoint=backlinks" / "part-0.parquet"
-    assert backlinks_path.exists()
+    summary_path = (
+        run_dir / "parquet" / "raw_responses" / "endpoint=backlinks_summary" / "part-0.parquet"
+    )
+    dofollow_path = (
+        run_dir
+        / "parquet"
+        / "raw_responses"
+        / "endpoint=backlinks_dofollow_summary"
+        / "part-0.parquet"
+    )
+    assert summary_path.exists()
+    assert dofollow_path.exists()
     persisted_urls = {
         json.loads(str(row["request_metadata_json"]))["url"]
-        for row in pq.ParquetFile(backlinks_path).read().to_pylist()
+        for row in pq.ParquetFile(summary_path).read().to_pylist()
+    }
+    persisted_dofollow_urls = {
+        json.loads(str(row["request_metadata_json"]))["url"]
+        for row in pq.ParquetFile(dofollow_path).read().to_pylist()
     }
     assert persisted_urls == {urls[0], urls[1]}
+    assert persisted_dofollow_urls == {urls[0], urls[1]}
 
 
 def test_build_live_payload_includes_backlinks_in_raw_provider_data(
@@ -792,8 +859,8 @@ def test_build_live_payload_includes_backlinks_in_raw_provider_data(
             return fixture_serp_response("technical seo")
         if url.endswith("/on_page/content_parsing/live"):
             return fixture_page_text_response(request_body[0]["url"], "technical seo")
-        if url.endswith("/backlinks/backlinks/live"):
-            return fixture_backlinks_response(request_body[0]["target"])
+        if url.endswith("/backlinks/summary/live"):
+            return fixture_backlinks_response_for_request_body(request_body)
         raise AssertionError(f"unexpected DataForSEO URL: {url}")
 
     monkeypatch.setattr("seo_rank.cli.prepare_live_run_context", fake_prepare_live_run_context)
@@ -822,10 +889,14 @@ def test_build_live_payload_includes_backlinks_in_raw_provider_data(
         textrazor_transport=lambda **kwargs: None,
     )
 
-    backlinks = payload["raw_provider_data"]["dataforseo"]["backlinks"]
-    assert isinstance(backlinks, list)
-    assert len(backlinks) == 1
-    assert backlinks[0]["url"] == "https://example.com/technical-seo/1"
+    backlinks_summary = payload["raw_provider_data"]["dataforseo"]["backlinks_summary"]
+    backlinks_dofollow = payload["raw_provider_data"]["dataforseo"]["backlinks_dofollow_summary"]
+    assert isinstance(backlinks_summary, list)
+    assert isinstance(backlinks_dofollow, list)
+    assert len(backlinks_summary) == 1
+    assert len(backlinks_dofollow) == 1
+    assert backlinks_summary[0]["url"] == "https://example.com/technical-seo/1"
+    assert backlinks_dofollow[0]["url"] == "https://example.com/technical-seo/1"
 
 
 def test_run_materializes_feature_marts_analysis_and_stats_for_fresh_runs(
@@ -1100,10 +1171,10 @@ def test_run_stored_run_backfills_only_missing_backlinks_in_place(
             return fixture_serp_response("technical seo")
         if url.endswith("/on_page/content_parsing/live"):
             return fixture_page_text_response(request_body[0]["url"], "technical seo")
-        if url.endswith("/backlinks/backlinks/live"):
+        if url.endswith("/backlinks/summary/live"):
             target = request_body[0]["target"]
             live_backlink_targets.append(target)
-            return fixture_backlinks_response(target)
+            return fixture_backlinks_response_for_request_body(request_body)
         raise AssertionError(f"unexpected DataForSEO URL: {url}")
 
     monkeypatch.setattr("seo_rank.cli.DEFAULT_DATAFORSEO_TRANSPORT", dataforseo_transport)
@@ -1127,21 +1198,25 @@ def test_run_stored_run_backfills_only_missing_backlinks_in_place(
         == 0
     )
 
-    backlinks_path = (
-        output_dir / "parquet" / "raw_responses" / "endpoint=backlinks" / "part-0.parquet"
-    )
-    backlinks_table = pq.ParquetFile(backlinks_path).read()
-    backlinks_rows = backlinks_table.to_pylist()
     missing_url = "https://example.com/technical-seo/2"
-    kept_rows = [
-        row
-        for row in backlinks_rows
-        if json.loads(row["request_metadata_json"])["url"] != missing_url
-    ]
-    pq.write_table(
-        pa.Table.from_pylist(kept_rows, schema=backlinks_table.schema),
-        backlinks_path,
-    )
+    for endpoint in ("backlinks_summary", "backlinks_dofollow_summary"):
+        partition_path = (
+            output_dir
+            / "parquet"
+            / "raw_responses"
+            / f"endpoint={endpoint}"
+            / "part-0.parquet"
+        )
+        partition_table = pq.ParquetFile(partition_path).read()
+        kept_rows = [
+            row
+            for row in partition_table.to_pylist()
+            if json.loads(row["request_metadata_json"])["url"] != missing_url
+        ]
+        pq.write_table(
+            pa.Table.from_pylist(kept_rows, schema=partition_table.schema),
+            partition_path,
+        )
 
     live_backlink_targets.clear()
 
@@ -1165,28 +1240,33 @@ def test_run_stored_run_backfills_only_missing_backlinks_in_place(
     )
 
     assert exit_code == 0
-    assert live_backlink_targets == [missing_url]
+    assert live_backlink_targets == [missing_url, missing_url]
 
     payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
-    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 6
+    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 8
     assert payload["catalog"]["datasets"]["raw_responses"]["files"] == [
-        "parquet/raw_responses/endpoint=backlinks/part-0.parquet",
+        "parquet/raw_responses/endpoint=backlinks_dofollow_summary/part-0.parquet",
+        "parquet/raw_responses/endpoint=backlinks_summary/part-0.parquet",
         "parquet/raw_responses/endpoint=keyword_expansion/part-0.parquet",
         "parquet/raw_responses/endpoint=page_text/part-0.parquet",
         "parquet/raw_responses/endpoint=serp/part-0.parquet",
     ]
-    backlinks_path = (
-        output_dir / "parquet" / "raw_responses" / "endpoint=backlinks" / "part-0.parquet"
-    )
-    backlinks_rows = pq.ParquetFile(backlinks_path).read().to_pylist()
-    assert len(backlinks_rows) == 2
-    assert {
-        json.loads(bytes(row["response_body_bytes"]).decode("utf-8"))["url"]
-        for row in backlinks_rows
-    } == {
-        "https://example.com/technical-seo/1",
-        "https://example.com/technical-seo/2",
-    }
+    for endpoint in ("backlinks_summary", "backlinks_dofollow_summary"):
+        partition_rows = pq.ParquetFile(
+            output_dir
+            / "parquet"
+            / "raw_responses"
+            / f"endpoint={endpoint}"
+            / "part-0.parquet"
+        ).read().to_pylist()
+        assert len(partition_rows) == 2
+        assert {
+            json.loads(bytes(row["response_body_bytes"]).decode("utf-8"))["url"]
+            for row in partition_rows
+        } == {
+            "https://example.com/technical-seo/1",
+            "https://example.com/technical-seo/2",
+        }
 
 
 def test_run_stored_run_cli_live_providers_backfills_backlinks_when_stored_config_offline(
@@ -1210,10 +1290,10 @@ def test_run_stored_run_cli_live_providers_backfills_backlinks_when_stored_confi
     ) -> dict[str, object]:
         del method, headers, timeout
         request_body = json.loads(body.decode("utf-8"))
-        if url.endswith("/backlinks/backlinks/live"):
+        if url.endswith("/backlinks/summary/live"):
             target = request_body[0]["target"]
             live_backlink_targets.append(target)
-            return fixture_backlinks_response(target)
+            return fixture_backlinks_response_for_request_body(request_body)
         raise AssertionError(f"unexpected DataForSEO URL: {url}")
 
     monkeypatch.setattr("seo_rank.cli.DEFAULT_DATAFORSEO_TRANSPORT", dataforseo_transport)
@@ -1239,7 +1319,9 @@ def test_run_stored_run_cli_live_providers_backfills_backlinks_when_stored_confi
 
     payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
     assert payload["config"]["live_providers"] is False
-    assert not (output_dir / "parquet" / "raw_responses" / "endpoint=backlinks").exists()
+    assert not (
+        output_dir / "parquet" / "raw_responses" / "endpoint=backlinks_summary"
+    ).exists()
 
     exit_code = main(
         [
@@ -1255,14 +1337,27 @@ def test_run_stored_run_cli_live_providers_backfills_backlinks_when_stored_confi
     )
 
     assert exit_code == 0
-    assert len(live_backlink_targets) == 2
+    assert len(live_backlink_targets) == 4
     payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
     assert payload["config"]["live_providers"] is True
-    assert "dataforseo.backlinks" in payload["network_calls"]
-    backlinks_path = (
-        output_dir / "parquet" / "raw_responses" / "endpoint=backlinks" / "part-0.parquet"
+    assert "dataforseo.backlinks_summary" in payload["network_calls"]
+    assert "dataforseo.backlinks_dofollow_summary" in payload["network_calls"]
+    summary_path = (
+        output_dir
+        / "parquet"
+        / "raw_responses"
+        / "endpoint=backlinks_summary"
+        / "part-0.parquet"
     )
-    assert backlinks_path.exists()
+    dofollow_path = (
+        output_dir
+        / "parquet"
+        / "raw_responses"
+        / "endpoint=backlinks_dofollow_summary"
+        / "part-0.parquet"
+    )
+    assert summary_path.exists()
+    assert dofollow_path.exists()
     assert payload["catalog"]["datasets"]["backlinks"]["row_count"] == 2
 
 
@@ -1294,9 +1389,8 @@ def test_run_stored_run_skip_textrazor_disables_stored_live_textrazor(
             return fixture_serp_response("technical seo")
         if url.endswith("/on_page/content_parsing/live"):
             return fixture_page_text_response(request_body[0]["url"], "technical seo")
-        if url.endswith("/backlinks/backlinks/live"):
-            target = request_body[0]["target"]
-            return fixture_backlinks_response(target)
+        if url.endswith("/backlinks/summary/live"):
+            return fixture_backlinks_response_for_request_body(request_body)
         raise AssertionError(f"unexpected DataForSEO URL: {url}")
 
     def textrazor_transport(
@@ -1736,9 +1830,9 @@ def test_run_stored_run_refreshes_only_stale_serps_in_place(
                     }
                 ],
             }
-        if url.endswith("/backlinks/backlinks/live"):
+        if url.endswith("/backlinks/summary/live"):
             request_body = json.loads(body.decode("utf-8"))
-            return fixture_backlinks_response(request_body[0]["target"])
+            return fixture_backlinks_response_for_request_body(request_body)
         raise AssertionError(f"unexpected DataForSEO URL: {url}")
 
     monkeypatch.setattr("seo_rank.cli.DEFAULT_DATAFORSEO_TRANSPORT", dataforseo_transport)
@@ -1812,7 +1906,7 @@ def test_run_stored_run_refreshes_only_stale_serps_in_place(
 
     payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
     assert payload["keywords"] == ["technical seo", "technical seo audit"]
-    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 7
+    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 9
     assert payload["catalog"]["datasets"]["keyword_serp"]["row_count"] == 2
     assert payload["catalog"]["datasets"]["analysis_mart"]["row_count"] == 2
     assert (output_dir / "stats" / "stats_summary.json").exists()
@@ -2039,9 +2133,9 @@ def test_run_live_providers_without_optional_flags_does_not_require_optional_cre
                     }
                 ],
             }
-        if url.endswith("/backlinks/backlinks/live"):
+        if url.endswith("/backlinks/summary/live"):
             request_body = json.loads(body.decode("utf-8"))
-            return fixture_backlinks_response(request_body[0]["target"])
+            return fixture_backlinks_response_for_request_body(request_body)
         raise AssertionError(f"unexpected DataForSEO URL: {url}")
 
     monkeypatch.setattr("seo_rank.cli.DEFAULT_DATAFORSEO_TRANSPORT", dataforseo_transport)
@@ -2387,9 +2481,9 @@ def test_run_live_gemini_uses_live_gemini_page_scores(
                     }
                 ],
             }
-        if url.endswith("/backlinks/backlinks/live"):
+        if url.endswith("/backlinks/summary/live"):
             request_body = json.loads(body.decode("utf-8"))
-            return fixture_backlinks_response(request_body[0]["target"])
+            return fixture_backlinks_response_for_request_body(request_body)
         raise AssertionError(f"unexpected DataForSEO URL: {url}")
 
     def fake_compute_gemini_scores(
@@ -2480,7 +2574,8 @@ def test_run_live_gemini_uses_live_gemini_page_scores(
     assert payload["network_calls"] == [
         "dataforseo.keyword_expansion",
         "dataforseo.serp",
-        "dataforseo.backlinks",
+        "dataforseo.backlinks_summary",
+        "dataforseo.backlinks_dofollow_summary",
         "dataforseo.page_text",
         "genai.embed_content",
     ]
@@ -2550,9 +2645,9 @@ def test_run_live_bge_replaces_only_bge_page_scores(
                     }
                 ],
             }
-        if url.endswith("/backlinks/backlinks/live"):
+        if url.endswith("/backlinks/summary/live"):
             request_body = json.loads(body.decode("utf-8"))
-            return fixture_backlinks_response(request_body[0]["target"])
+            return fixture_backlinks_response_for_request_body(request_body)
         raise AssertionError(f"unexpected DataForSEO URL: {url}")
 
     def fake_compute_bge_scores(
@@ -2634,7 +2729,8 @@ def test_run_live_bge_replaces_only_bge_page_scores(
     assert payload["network_calls"] == [
         "dataforseo.keyword_expansion",
         "dataforseo.serp",
-        "dataforseo.backlinks",
+        "dataforseo.backlinks_summary",
+        "dataforseo.backlinks_dofollow_summary",
         "dataforseo.page_text",
     ]
 
@@ -2732,9 +2828,9 @@ def test_run_live_providers_skips_textrazor_when_not_requested(
                     }
                 ],
             }
-        if url.endswith("/backlinks/backlinks/live"):
+        if url.endswith("/backlinks/summary/live"):
             request_body = json.loads(body.decode("utf-8"))
-            return fixture_backlinks_response(request_body[0]["target"])
+            return fixture_backlinks_response_for_request_body(request_body)
         raise AssertionError(f"unexpected DataForSEO URL: {url}")
 
     def textrazor_transport(**kwargs) -> dict[str, object]:
@@ -2756,13 +2852,14 @@ def test_run_live_providers_skips_textrazor_when_not_requested(
     )
 
     assert exit_code == 0
-    assert len(dataforseo_calls) == 4
+    assert len(dataforseo_calls) == 5
     payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
     assert payload["textrazor_entities"] == []
     assert "raw_provider_data" not in payload
-    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 4
+    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 5
     assert payload["catalog"]["datasets"]["raw_responses"]["files"] == [
-        "parquet/raw_responses/endpoint=backlinks/part-0.parquet",
+        "parquet/raw_responses/endpoint=backlinks_dofollow_summary/part-0.parquet",
+        "parquet/raw_responses/endpoint=backlinks_summary/part-0.parquet",
         "parquet/raw_responses/endpoint=keyword_expansion/part-0.parquet",
         "parquet/raw_responses/endpoint=page_text/part-0.parquet",
         "parquet/raw_responses/endpoint=serp/part-0.parquet",
@@ -2839,9 +2936,9 @@ def test_run_live_providers_writes_artifacts_with_injected_transports(
                     }
                 ],
             }
-        if url.endswith("/backlinks/backlinks/live"):
+        if url.endswith("/backlinks/summary/live"):
             request_body = json.loads(body.decode("utf-8"))
-            return fixture_backlinks_response(request_body[0]["target"])
+            return fixture_backlinks_response_for_request_body(request_body)
         raise AssertionError(f"unexpected DataForSEO URL: {url}")
 
     def textrazor_transport(
@@ -2884,7 +2981,7 @@ def test_run_live_providers_writes_artifacts_with_injected_transports(
     )
 
     assert exit_code == 0
-    assert len(dataforseo_calls) == 4
+    assert len(dataforseo_calls) == 5
     assert len(textrazor_calls) == 1
 
     payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
@@ -2905,14 +3002,16 @@ def test_run_live_providers_writes_artifacts_with_injected_transports(
     assert payload["network_calls"] == [
         "dataforseo.keyword_expansion",
         "dataforseo.serp",
-        "dataforseo.backlinks",
+        "dataforseo.backlinks_summary",
+        "dataforseo.backlinks_dofollow_summary",
         "dataforseo.page_text",
         "textrazor.entities",
     ]
     assert "raw_provider_data" not in payload
-    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 5
+    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 6
     assert payload["catalog"]["datasets"]["raw_responses"]["files"] == [
-        "parquet/raw_responses/endpoint=backlinks/part-0.parquet",
+        "parquet/raw_responses/endpoint=backlinks_dofollow_summary/part-0.parquet",
+        "parquet/raw_responses/endpoint=backlinks_summary/part-0.parquet",
         "parquet/raw_responses/endpoint=entities/part-0.parquet",
         "parquet/raw_responses/endpoint=keyword_expansion/part-0.parquet",
         "parquet/raw_responses/endpoint=page_text/part-0.parquet",

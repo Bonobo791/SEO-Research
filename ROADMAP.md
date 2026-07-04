@@ -1052,6 +1052,157 @@ their effective defaults.
 - Catalog/provenance test: confirm the saved metadata is sufficient to identify
   prior matching pulls.
 
+### Phase 5.91 — Backlinks two-call dofollow correctness
+
+The 2026-07-03 backlinks summary migration (`/v3/backlinks/summary/live`)
+shipped `_dofollow_backlinks_count()` deriving "total dofollow backlinks" by
+subtracting a fabricated `referring_links_attributes.nofollow` field that
+does not exist in real DataForSEO summary responses — every live run
+silently persisted `dofollow_backlinks_count = 0`. A true dofollow count
+requires a **second, filtered** call to the same endpoint
+(`backlinks_filters: ["dofollow", "=", true]`); it cannot be derived from one
+unfiltered call. This phase replaces the one-call design with a two-call
+design end-to-end: request building, separate raw partitions, curated
+merge/null semantics, and an expanded curated schema capturing the fields
+DataForSEO actually returns.
+
+**Non-negotiables:** missing dofollow data is `null` (never defaulted to
+`0`), the two call variants persist to **separate** raw partitions
+(`endpoint=backlinks_summary`, `endpoint=backlinks_dofollow_summary`, not one
+partition distinguished only by a metadata tag), and the curated schema is
+expanded now rather than deferred.
+
+**Out of scope:** root-domain backlink rollups (this stays page-level, one
+row per SERP URL); changing `backlinks_status_type` off `"live"` or
+`include_subdomains` off `true`; concurrency changes to DataForSEO request
+execution.
+
+**Depends on / blocks:** Phase 6.2 (Backlinks count family and analysis
+surfacing) assumed the single-partition, single-call schema and must be
+re-checked against the expanded schema and `endpoint=backlinks_summary` /
+`endpoint=backlinks_dofollow_summary` partitions once this phase ships.
+
+#### Dev slices
+
+**Progress:** 6 of 6 shipped.
+
+1. **[x] Slice 1 — Request builders, fixtures, and schema (`dataforseo.py`)**
+   - `format_backlinks_target()` target-format helper (domain strip vs.
+     absolute page URL passthrough); shared `_build_backlinks_base_body()`
+     (`target`, `include_subdomains: true`, `backlinks_status_type: "live"`,
+     `internal_list_limit: 1000`).
+   - `build_backlinks_summary_request()` (renamed from
+     `build_backlinks_request`) and `build_backlinks_dofollow_summary_request()`
+     both build off the shared base body; the latter layers
+     `BACKLINKS_DOFOLLOW_FILTERS`.
+   - `fixture_backlinks_response(url, *, dofollow_only=False)` drops the
+     fabricated `referring_links_attributes.nofollow` derivation; dofollow
+     fixture returns `backlinks=35` directly. New
+     `fixture_backlinks_response_for_request_body()` picks the fixture
+     variant from a request body's `backlinks_filters`.
+   - Restored per-variant `DATAFORSEO_RESPONSE_SCHEMAS["backlinks_summary"]`
+     (`target`, `backlinks`, `referring_domains`) and
+     `["backlinks_dofollow_summary"]` (`target`, `backlinks`); malformed/missing
+     aggregates now hard-fail validation instead of silently coercing to zero.
+   - Top-level `response.status_code == 20000` check added to
+     `raise_for_failed_dataforseo_tasks()` (shared across all DataForSEO
+     endpoints); per-task `cost` logging; exponential-backoff retry in
+     `execute_dataforseo_request()` on 429/5xx only, bounded attempts,
+     injectable `sleep`.
+
+2. **[x] Slice 2 — Two-call fetch, separate partitions, dedupe key (`cli.py`)**
+   - `fetch_dataforseo_backlinks_for_urls()` takes a `variants` sequence
+     (default: both) and issues one request per `(url, variant)`, tagging
+     full request metadata (`target`, `variant`, `include_subdomains`,
+     `backlinks_status_type`, `internal_list_limit`, `backlinks_filters`
+     when present).
+   - `backlink_raw_response_key()` is now a `(target_keyword, url, variant)`
+     3-tuple (previously 2-tuple) — the critical fix preventing one variant
+     from silently overwriting the other in
+     `merge_backlink_raw_response_rows()` / `rewrite_backlink_endpoint_partition()`;
+     missing `variant` defaults to `"summary"` for legacy rows.
+   - `persist_backlink_raw_responses()` splits records by endpoint and writes
+     each to its own partition directory
+     (`endpoint=backlinks_summary`, `endpoint=backlinks_dofollow_summary`).
+   - Resume/backfill (`build_resumed_keyword_result`) now tracks existing
+     `(url, variant)` pairs and fetches only the missing variant(s) per URL,
+     not always both.
+   - `raw_provider_data["dataforseo"]` carries two collections
+     (`backlinks_summary`, `backlinks_dofollow_summary`) everywhere a
+     keyword result's provider data is built, merged, or replayed
+     (`build_keyword_result_from_responses`, `build_raw_response_records`,
+     `merge_stored_run_cli_overlay`, textrazor-only/offline payload builders).
+
+3. **[x] Slice 3 — Curated merge, expanded schema, null semantics (`normalize.py`)**
+   - `build_backlinks_frame()` groups raw records from both partitions (plus
+     legacy `endpoint=backlinks` rows, read-compatibly as the summary
+     variant) by `(target_keyword, url)` and emits one curated row per URL.
+   - `backlinks_count` / `referring_domains_count` come from the summary
+     variant; `dofollow_backlinks_count` comes directly from the dofollow
+     variant's `backlinks` field (no subtraction). When the dofollow variant
+     is absent: `dofollow_backlinks_count = null`,
+     `backlinks_metrics_complete = false`.
+   - Curated schema gains: `rank`, `backlinks_spam_score`,
+     `target_spam_score`, `new_backlinks`, `lost_backlinks`,
+     `new_referring_domains`, `lost_referring_domains`, `referring_pages`,
+     `referring_main_domains`, `referring_ips`, `referring_subnets`,
+     `broken_backlinks`, `broken_pages`, `referring_domains_nofollow`,
+     `crawled_pages`, `internal_links_count`, `external_links_count`,
+     `first_seen`, `lost_date`, `dofollow_referring_domains_count`,
+     distribution maps as JSON-string columns (`referring_links_types_json`,
+     `referring_links_tld_json`, `referring_links_platform_types_json`,
+     `referring_links_semantic_locations_json`,
+     `referring_links_attributes_json`, `referring_links_countries_json`),
+     and traceability (`summary_response_id`, `dofollow_summary_response_id`,
+     `backlinks_metrics_complete`).
+   - Drops `_dofollow_backlinks_count()`'s items-loop and
+     `referring_links_attributes` subtraction path entirely.
+
+4. **[x] Slice 4 — Tests (TDD)**
+   - Request builders: exact unfiltered/dofollow bodies; target-format rules.
+   - Response handling: top-level and task-level failure surfacing; cost
+     logging; retry fires only on retryable errors, succeeds on 2nd attempt.
+   - Raw persistence: separate partitions; dedupe key includes `variant`
+     (fix `test_raw_response_merge.py`); resume fetches only missing
+     variants; mid-loop failure preserves completed rows (3 URLs, failure on
+     URL 3 → 4 rows persisted).
+   - Normalization: paired responses → one curated row with all three counts
+     plus expanded columns; missing dofollow → `null` +
+     `backlinks_metrics_complete = false` (remove any test asserting `0`);
+     malformed aggregates hard-fail; distribution maps serialize to JSON.
+   - Update stale `test_validate_dataforseo_response_accepts_backlinks_live_shape`
+     and siblings in `test_dataforseo_requests.py` to real new-shape fields.
+   - CLI: exactly 2 summary calls per SERP URL (3 URLs → 6 calls, 6 raw rows
+     split across two partitions); zero calls to `/v3/backlinks/backlinks/live`.
+
+5. **[x] Slice 5 — Docs**
+   - Updated `README.md`, `ROADMAP.md` backlog/history, `ARCHITECTURE.md`, and
+     `TESTING.md`: two-call pattern (`2 calls × N` SERP URLs), separate
+     `endpoint=backlinks_summary` / `endpoint=backlinks_dofollow_summary`
+     partitions, ~$0.04/target, null dofollow semantics.
+
+6. **[x] Slice 6 — Verification**
+   - Targeted backlinks test run, then full `tests/unit` suite (offline; green).
+   - Manual `--live-providers` trace with real DataForSEO credentials (operator
+     step; not CI-runnable): confirm 2 raw records per URL across the two
+     partitions and 1 correct curated row per URL. Offline `--dry-run` path is
+     covered by the unit suite.
+
+**Implementation order:** Slice 1 → Slice 2 → Slice 3 (each depends on the
+previous). Slice 4 can start once Slice 1 lands and grows alongside Slices
+2–3. Slice 5 after Slice 3. Slice 6 last.
+
+| Acceptance item | Slice(s) | Status |
+| --------------- | -------- | ------ |
+| Dofollow count sourced from a real filtered call, never fabricated | 1, 3 | Shipped |
+| Raw variants land in separate `endpoint=` partitions | 1, 2 | Shipped |
+| Dedupe key prevents one variant overwriting the other | 2 | Shipped |
+| Resume fetches only missing variant(s) per URL | 2 | Shipped |
+| Curated row has expanded columns + null/`backlinks_metrics_complete` semantics | 3 | Shipped |
+| Tests cover request bodies, persistence, normalization, and CLI call counts | 4 | Shipped |
+| Docs describe the two-call pattern and cost | 5 | Shipped |
+| Full unit suite green | 6 | Shipped |
+
 ### Phase 6 — Workflow Integrity Guardrails
 
 Standard:
@@ -1274,6 +1425,14 @@ path without splitting it into multiple families or bumping the panel schema.
 needed later, they belong to the dedicated Backlinks API endpoint, not this
 family.
 
+**Depends on Phase 5.91:** the raw response storage path is now split across
+`raw_responses/endpoint=backlinks_summary` and
+`raw_responses/endpoint=backlinks_dofollow_summary` (not the single
+`endpoint=backlinks` partition assumed by Slice 1 below), and
+`dofollow_backlinks_count` can be `null` when the dofollow variant is
+missing — Slice 1's bounded-validation and non-negative assumptions need a
+nullable carve-out before this phase starts.
+
 #### Dev slices
 
 **Progress:** 0 of 4 shipped.
@@ -1283,7 +1442,10 @@ family.
      analysis panel admits the three backlinks count columns.
    - Keep `schema_version` on `analysis_mart.v1`; add bounded non-negative
      validation for the new count columns.
-   - Preserve the raw response storage path under `raw_responses/endpoint=backlinks`.
+   - Preserve raw response storage under
+     `raw_responses/endpoint=backlinks_summary` and
+     `raw_responses/endpoint=backlinks_dofollow_summary` (normalize merges
+     both; legacy `endpoint=backlinks` remains read-compatible on normalize).
 
 2. **[ ] Slice 2 — Backlinks signal family registry**
    - Add one registry entry, `backlinks_counts`, with kind `backlinks_metric`
@@ -1304,8 +1466,9 @@ family.
 4. **[ ] Slice 4 — Fixtures and regressions**
    - Add golden fixtures for backlinks rows with known count relationships and
      null/edge-case handling.
-   - Add CLI regressions that confirm live/stored runs still write backlinks raw
-     responses and now emit backlinks family analysis.
+   - Add CLI regressions that confirm live/stored runs still write both backlinks
+     raw partitions (`backlinks_summary`, `backlinks_dofollow_summary`) and now
+     emit backlinks family analysis.
    - Cover the schema, family registry, and report rendering paths with unit
      tests.
 
@@ -1314,7 +1477,7 @@ family.
 | `analysis_mart.v1` admits backlinks count columns without schema bump | 1 | Open |
 | One backlinks family (`backlinks_counts`) is registered | 2 | Open |
 | Family-aware stats emit backlinks blocks in `stats_*` | 3 | Open |
-| Live/stored CLI regressions cover backlinks raw persistence + analysis | 4 | Open |
+| Live/stored CLI regressions cover backlinks raw persistence (both partitions) + analysis | 4 | Open |
 
 ## Deferred
 
@@ -1494,13 +1657,19 @@ family.
   ranking explainability (`textrazor_ranking_r2.py` similarity + TextRazor
   adjusted R², `ranking_r2.json`, curated-model PNG via
   `ranking_explainability_viz.py`, optional `matplotlib` dependency).
-- **Backlinks API + persistence (2026-07-03):** live runs call DataForSEO
-  `/v3/backlinks/backlinks/live` (replacing `backlinks/summary/live`); each URL
-  fetch persists immediately to `raw_responses/endpoint=backlinks` via
-  `persist_backlink_raw_response()`; normalization emits one curated row per
-  `target_keyword × URL` from `result.target` and `total_count`. Stored-run
-  replay overlays `--live-providers` onto offline runs; `--skip-textrazor` stays
-  sticky via `merge_stored_run_cli_overlay()`.
+- **Backlinks two-call summary API (2026-07-04, Phase 5.91):** live runs issue
+  two `POST /v3/backlinks/summary/live` calls per SERP URL (unfiltered summary
+  plus dofollow-filtered summary, ~$0.04/target combined). Each variant
+  persists immediately to `raw_responses/endpoint=backlinks_summary` or
+  `endpoint=backlinks_dofollow_summary` via `persist_backlink_raw_responses()`
+  (dedupe on `(target_keyword, url, variant)`). Normalization merges both into
+  one curated row per `target_keyword × URL`; `dofollow_backlinks_count` is
+  `null` and `backlinks_metrics_complete` is `false` when the dofollow variant
+  is missing. Legacy `endpoint=backlinks` rows (pre-5.91 `/backlinks/backlinks/live`
+  shape) remain read-compatible on normalize. Stored-run replay overlays
+  `--live-providers` onto offline runs; `--skip-textrazor` stays sticky via
+  `merge_stored_run_cli_overlay()`. Supersedes the 2026-07-03 single-partition
+  summary migration.
 - **Phase 6.1 Slice 3 partial (2026-07-03):** `src/seo_rank/data/ranks.py`
   ships Polars-lazy `add_within_keyword_similarity_ranks()` with unit tests in
   `tests/unit/test_within_keyword_ranks.py`; mart wiring remains Slice 4.

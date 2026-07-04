@@ -1,12 +1,15 @@
 import pytest
 
 from seo_rank.dataforseo import (
+    DataForSeoClientError,
     DataForSeoCredentialError,
     DataForSeoCredentials,
     DataForSeoParseError,
+    BACKLINKS_DOFOLLOW_FILTERS,
     decode_content_parsing_items,
+    build_backlinks_dofollow_summary_request,
+    build_backlinks_summary_request,
     build_keyword_expansion_request,
-    build_backlinks_request,
     build_page_text_request,
     build_serp_request,
     execute_dataforseo_request,
@@ -14,10 +17,12 @@ from seo_rank.dataforseo import (
     fixture_keyword_expansion_response,
     fixture_page_text_response,
     fixture_serp_response,
+    format_backlinks_target,
     parsed_page_text,
     validate_dataforseo_response,
     validate_dataforseo_credentials,
 )
+from seo_rank.cli import raise_for_failed_dataforseo_tasks
 
 
 def test_build_keyword_expansion_request_uses_dataforseo_live_endpoint() -> None:
@@ -79,100 +84,212 @@ def test_build_page_text_request_uses_content_parsing_endpoint() -> None:
     ]
 
 
-def test_build_backlinks_request_uses_backlinks_live_endpoint() -> None:
-    request = build_backlinks_request("https://example.com/technical-seo/1")
+def test_build_backlinks_summary_request_uses_backlinks_summary_endpoint() -> None:
+    request = build_backlinks_summary_request("https://example.com/technical-seo/1")
 
     assert request.method == "POST"
-    assert request.path == "/v3/backlinks/backlinks/live"
+    assert request.path == "/v3/backlinks/summary/live"
     assert request.body == [
         {
             "target": "https://example.com/technical-seo/1",
+            "include_subdomains": True,
+            "backlinks_status_type": "live",
+            "internal_list_limit": 1000,
         }
     ]
 
 
-def test_validate_dataforseo_response_accepts_backlinks_live_shape() -> None:
+def test_build_backlinks_dofollow_summary_request_uses_dofollow_filter() -> None:
+    request = build_backlinks_dofollow_summary_request("https://example.com/technical-seo/1")
+
+    assert request.path == "/v3/backlinks/summary/live"
+    assert request.body == [
+        {
+            "target": "https://example.com/technical-seo/1",
+            "include_subdomains": True,
+            "backlinks_status_type": "live",
+            "internal_list_limit": 1000,
+            "backlinks_filters": BACKLINKS_DOFOLLOW_FILTERS,
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("target", "expected"),
+    [
+        ("https://example.com/technical-seo/1", "https://example.com/technical-seo/1"),
+        ("https://www.example.com", "example.com"),
+        ("https://www.example.com/", "example.com"),
+        ("example.com", "example.com"),
+        ("www.example.com", "example.com"),
+    ],
+)
+def test_format_backlinks_target_preserves_page_urls_and_strips_domains(
+    target: str,
+    expected: str,
+) -> None:
+    assert format_backlinks_target(target) == expected
+
+
+def test_validate_dataforseo_response_accepts_backlinks_summary_shape() -> None:
     response = {
+        "status_code": 20000,
         "provider": "dataforseo",
-        "endpoint": "backlinks/backlinks/live",
+        "endpoint": "backlinks/summary/live",
         "tasks": [
             {
                 "status_code": 20000,
                 "result": [
                     {
                         "target": "https://example.com/technical-seo/1",
-                        "total_count": 42,
+                        "backlinks": 42,
                         "referring_domains": 12,
-                        "items": [
-                            {
-                                "type": "backlink",
-                                "domain_from": "www.example.org",
-                                "url_from": "https://www.example.org/post",
-                                "url_to": "https://example.com/technical-seo/1",
-                                "dofollow": True,
-                                "is_new": False,
-                                "is_lost": False,
-                            }
-                        ],
                     }
                 ],
             }
         ],
     }
 
-    assert validate_dataforseo_response("backlinks", response) is response
+    assert validate_dataforseo_response("backlinks_summary", response) is response
 
 
-def test_validate_dataforseo_response_accepts_backlinks_live_shape_without_referring_domains() -> None:
+def test_validate_dataforseo_response_accepts_backlinks_dofollow_summary_shape() -> None:
     response = {
+        "status_code": 20000,
         "provider": "dataforseo",
-        "endpoint": "backlinks/backlinks/live",
+        "endpoint": "backlinks/summary/live",
         "tasks": [
             {
                 "status_code": 20000,
                 "result": [
                     {
                         "target": "https://example.com/technical-seo/1",
-                        "total_count": 42,
-                        "items": [
-                            {
-                                "type": "backlink",
-                                "domain_from": "www.example.org",
-                                "url_from": "https://www.example.org/post",
-                                "url_to": "https://example.com/technical-seo/1",
-                                "dofollow": True,
-                                "is_new": False,
-                                "is_lost": False,
-                            }
-                        ],
+                        "backlinks": 35,
                     }
                 ],
             }
         ],
     }
 
-    assert validate_dataforseo_response("backlinks", response) is response
+    assert validate_dataforseo_response("backlinks_dofollow_summary", response) is response
 
 
-def test_validate_dataforseo_response_accepts_backlinks_live_shape_with_null_items() -> None:
+def test_validate_dataforseo_response_rejects_backlinks_summary_missing_backlinks() -> None:
     response = {
-        "provider": "dataforseo",
-        "endpoint": "backlinks/backlinks/live",
+        "status_code": 20000,
         "tasks": [
             {
                 "status_code": 20000,
                 "result": [
                     {
                         "target": "https://example.com/technical-seo/1",
-                        "total_count": 0,
-                        "items": None,
+                        "referring_domains": 12,
                     }
                 ],
             }
         ],
     }
 
-    assert validate_dataforseo_response("backlinks", response) is response
+    with pytest.raises(DataForSeoParseError) as exc_info:
+        validate_dataforseo_response("backlinks_summary", response)
+
+    assert exc_info.value.path == "tasks[0].result[0].backlinks"
+
+
+def test_raise_for_failed_dataforseo_tasks_surfaces_top_level_status_message() -> None:
+    response = {
+        "status_code": 40001,
+        "status_message": "Top-level failure",
+        "tasks": [],
+    }
+
+    with pytest.raises(DataForSeoClientError, match="Top-level failure") as exc_info:
+        raise_for_failed_dataforseo_tasks("backlinks_summary", response)
+
+    assert "status_code=40001" in str(exc_info.value)
+
+
+def test_raise_for_failed_dataforseo_tasks_surfaces_task_level_status_message() -> None:
+    response = {
+        "status_code": 20000,
+        "tasks": [
+            {
+                "status_code": 40002,
+                "status_message": "Task-level failure",
+            }
+        ],
+    }
+
+    with pytest.raises(DataForSeoClientError, match="Task-level failure") as exc_info:
+        raise_for_failed_dataforseo_tasks(
+            "backlinks_summary",
+            response,
+            target_keyword="technical seo",
+        )
+
+    assert "tasks[0]" in str(exc_info.value)
+
+
+def test_raise_for_failed_dataforseo_tasks_logs_task_cost(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import logging
+
+    response = {
+        "status_code": 20000,
+        "tasks": [
+            {
+                "status_code": 20000,
+                "cost": 0.02,
+            }
+        ],
+    }
+
+    with caplog.at_level(logging.INFO, logger="seo_rank.dataforseo.cost"):
+        raise_for_failed_dataforseo_tasks(
+            "backlinks_summary",
+            response,
+            target_keyword="technical seo",
+        )
+
+    assert len(caplog.records) == 1
+    assert (
+        caplog.records[0].getMessage()
+        == "DataForSEO backlinks_summary task[0] cost=0.02 target_keyword='technical seo'"
+    )
+
+
+def test_execute_dataforseo_request_retries_retryable_http_errors() -> None:
+    attempts = 0
+
+    def transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        nonlocal attempts
+        del method, url, headers, body, timeout
+        attempts += 1
+        if attempts == 1:
+            raise DataForSeoClientError("rate limited", status_code=429)
+        return {"status_code": 20000, "tasks": [{"result": [{"keyword": "technical seo"}]}]}
+
+    response = execute_dataforseo_request(
+        build_keyword_expansion_request(
+            "technical seo",
+            location_code=2840,
+            language_code="en",
+        ),
+        credentials=DataForSeoCredentials("login", "password"),
+        transport=transport,
+        sleep=lambda _seconds: None,
+    )
+
+    assert attempts == 2
+    assert response["status_code"] == 20000
 
 
 def test_validate_dataforseo_credentials_rejects_missing_values_without_secrets() -> None:
@@ -249,7 +366,7 @@ def test_execute_dataforseo_request_posts_json_with_basic_auth() -> None:
     [
         ("keyword_expansion", fixture_keyword_expansion_response("technical seo")),
         ("serp", fixture_serp_response("technical seo")),
-        ("backlinks", fixture_backlinks_response("https://example.com/technical-seo/1")),
+        ("backlinks_summary", fixture_backlinks_response("https://example.com/technical-seo/1")),
         (
             "page_text",
             fixture_page_text_response(
@@ -284,10 +401,10 @@ def test_validate_dataforseo_response_rejects_backlinks_target_type_drift() -> N
     response["tasks"][0]["result"][0]["target"] = True
 
     with pytest.raises(DataForSeoParseError) as exc_info:
-        validate_dataforseo_response("backlinks", response)
+        validate_dataforseo_response("backlinks_summary", response)
 
     error = exc_info.value
-    assert error.endpoint == "backlinks"
+    assert error.endpoint == "backlinks_summary"
     assert error.path == "tasks[0].result[0].target"
     assert error.expected == "str"
     assert "got bool" in str(error)

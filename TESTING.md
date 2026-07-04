@@ -50,10 +50,10 @@ placeholders only.
 
 | Test file | What it verifies |
 |-----------|------------------|
-| `test_cli_run.py` | CLI writes grouped per-keyword artifacts, including BGE, Gemini Doc Retrieval, and Gemini Semantic Similarity rows; run-scoped `raw_responses` Parquet + `run.json` catalog metadata; offline TextRazor include/skip; TextRazor entity confidence/relevance in `report.md`; TextRazor-only flags (`--live-textrazor-only`, `--refresh-textrazor`), env gates, and mutual-exclusion errors; explicit live-provider gates; DataForSEO `backlinks/backlinks/live` raw persistence (batched per keyword, partial progress on mid-loop failure, stored-run backfill, survives later provider failure); stored-run CLI overlay (`merge_stored_run_cli_overlay`, sticky `--skip-textrazor`, offline stored run + `--live-providers` backfill); stored-run partial resume/backfill, stale SERP refresh, and no-op replay coverage; opt-in live Gemini, BGE, and TextRazor orchestration |
+| `test_cli_run.py` | CLI writes grouped per-keyword artifacts, including BGE, Gemini Doc Retrieval, and Gemini Semantic Similarity rows; run-scoped `raw_responses` Parquet + `run.json` catalog metadata; offline TextRazor include/skip; TextRazor entity confidence/relevance in `report.md`; TextRazor-only flags (`--live-textrazor-only`, `--refresh-textrazor`), env gates, and mutual-exclusion errors; explicit live-provider gates; DataForSEO `backlinks/summary/live` two-call raw persistence (separate summary/dofollow partitions, batched per keyword, partial progress on mid-loop failure, stored-run backfill, survives later provider failure); stored-run CLI overlay (`merge_stored_run_cli_overlay`, sticky `--skip-textrazor`, offline stored run + `--live-providers` backfill); stored-run partial resume/backfill, stale SERP refresh, and no-op replay coverage; opt-in live Gemini, BGE, and TextRazor orchestration |
 | `test_run_progress.py` | `seo-rank run` stderr progress: run phases, per-keyword substeps, progress bar, artifact-write logs |
 | `test_cli_surfaces.py` | Phase 4.5 storage CLI: subcommand parser wiring, `normalize` / `build-features` / `analyze` / `replay` dispatch, missing feature-mart backfill on `analyze`, `run --stored-run` routing, exit code `2` on storage errors and unknown keyword/response |
-| `test_run_normalize.py` | Stored `raw_responses` normalize into curated Parquet tables (including `similarity_scores` copied from `run.json` `page_similarity`, `page_content_fields`, `backlinks` from `backlinks/backlinks/live` responses, and `textrazor_page_metrics_curated` from TextRazor page-metrics responses) via lazy scan + batch UDFs; TextRazor entailment scores above 1.0 validate; dataset-name validation errors; refresh the run catalog |
+| `test_run_normalize.py` | Stored `raw_responses` normalize into curated Parquet tables (including `similarity_scores` copied from `run.json` `page_similarity`, `page_content_fields`, `backlinks` from paired `backlinks/summary/live` responses, and `textrazor_page_metrics_curated` from TextRazor page-metrics responses) via lazy scan + batch UDFs; TextRazor entailment scores above 1.0 validate; dataset-name validation errors; refresh the run catalog |
 | `test_data_scans_validate.py` | Raw-response scans use `pl.scan_parquet()`, lazy curated frames are built, schema-only validation rejects missing columns, and materialized row-rule checks stay off the lazy edge |
 | `test_data_marts.py` | Analysis mart lazy join lives in `seo_rank.data.marts` and preserves the feature-mart contract |
 | `test_feature_marts.py` | Feature marts materialize lazy joins, validate before sink, sink feature marts lazily with Parquet statistics, audit the written parquet row rules, allow unbounded TextRazor entailment scores, surface dataset names on validation failure, and refresh the run catalog |
@@ -231,21 +231,28 @@ exist.
 
 ## Shipped tests — DataForSEO backlinks (Jul 2026)
 
-- **Backlinks live endpoint** — `tests/unit/test_dataforseo_requests.py` covers
-  `build_backlinks_request()` path `/v3/backlinks/backlinks/live`, schema
-  validation for the live response shape (with and without `referring_domains`,
-  null `items`), and target-type drift errors.
+- **Backlinks summary endpoint (two-call design)** —
+  `tests/unit/test_dataforseo_requests.py` covers
+  `build_backlinks_summary_request()` and `build_backlinks_dofollow_summary_request()`
+  against `/v3/backlinks/summary/live`, target formatting (page URL vs domain),
+  per-variant schema validation (`backlinks` + `referring_domains` vs dofollow-only
+  `backlinks`), top-level and task-level `status_code` failures, task `cost`
+  logging via `caplog`, and retry on 429/5xx.
 - **CLI persistence and stored-run backfill** — `tests/unit/test_cli_run.py`
-  covers batched `endpoint=backlinks` writes once per keyword (dedupe on
-  `(target_keyword, url)`), partial persistence on mid-loop failure via `finally`,
-  survival when a later provider step fails, stored-run `--live-providers` overlay
-  on offline runs, and sticky `--skip-textrazor` on replay.
+  covers two summary calls per SERP URL, separate
+  `endpoint=backlinks_summary` / `endpoint=backlinks_dofollow_summary` partitions
+  (dedupe on `(target_keyword, url, variant)`), partial persistence on mid-loop
+  failure via `finally`, resume fetching only missing variants, survival when a
+  later provider step fails, stored-run `--live-providers` overlay on offline runs,
+  and sticky `--skip-textrazor` on replay.
 - **Backlink merge** — `tests/unit/test_raw_response_merge.py` covers
-  `merge_backlink_raw_response_rows()` dedupe and
-  `persist_backlink_raw_responses()` single partition rewrite per batch.
+  `merge_backlink_raw_response_rows()` variant-aware dedupe and
+  `persist_backlink_raw_responses()` partition rewrite per batch.
 - **Curated normalization** — `tests/unit/test_run_normalize.py` covers
-  `backlinks` table materialization from raw responses (dofollow counts from
-  item rows, referring-domain fallback from `items`, null `items` tolerance).
+  `backlinks` table materialization from paired raw responses (42 / 12 / 35),
+  null `dofollow_backlinks_count` when the dofollow variant is absent,
+  legacy `endpoint=backlinks` read-compat, hard-fail on malformed summary
+  aggregates, and distribution maps as JSON-string columns.
 
 ## Shipped tests — Phase 6.1 partial (within-keyword ranks)
 
