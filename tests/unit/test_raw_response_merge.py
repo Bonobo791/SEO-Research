@@ -8,7 +8,10 @@ import pyarrow.parquet as pq
 
 from seo_rank.cli import RAW_RESPONSE_SCHEMA
 from seo_rank.cli import build_raw_response_record
+from seo_rank.cli import merge_backlink_raw_response_rows
 from seo_rank.cli import merge_raw_response_records
+from seo_rank.cli import persist_backlink_raw_responses
+from seo_rank.dataforseo import fixture_backlinks_response
 from seo_rank.textrazor import fixture_entity_response
 
 
@@ -348,3 +351,94 @@ def test_merge_raw_response_records_refreshes_entities_latest_wins(
     ] == catalog["datasets"]["raw_responses"]["file_checksums"][
         "parquet/raw_responses/endpoint=entities/part-0.parquet"
     ]
+
+
+def _backlink_raw_response_record(
+    *,
+    run_id: str,
+    response_id: str,
+    target_keyword: str,
+    url: str,
+) -> dict[str, object]:
+    row = build_raw_response_record(
+        run_id,
+        endpoint="backlinks",
+        provider="dataforseo",
+        response={**fixture_backlinks_response(url), "url": url},
+        target_keyword=target_keyword,
+        request_metadata={"target_keyword": target_keyword, "url": url},
+        recorded_at="2026-07-02T12:00:00+00:00",
+    )
+    row["response_id"] = response_id
+    return row
+
+
+def test_merge_backlink_raw_response_rows_dedupes_by_keyword_and_url() -> None:
+    existing = _backlink_raw_response_record(
+        run_id="artifacts",
+        response_id="backlink-a-old",
+        target_keyword="technical seo",
+        url="https://example.com/a",
+    )
+    incoming_duplicate = _backlink_raw_response_record(
+        run_id="artifacts",
+        response_id="backlink-a-new",
+        target_keyword=" technical seo ",
+        url="https://example.com/a",
+    )
+    incoming_new = _backlink_raw_response_record(
+        run_id="artifacts",
+        response_id="backlink-b",
+        target_keyword="technical seo",
+        url="https://example.com/b",
+    )
+
+    merged = merge_backlink_raw_response_rows(
+        [existing],
+        [incoming_duplicate, incoming_new],
+    )
+
+    assert len(merged) == 2
+    merged_by_id = {str(row["response_id"]): row for row in merged}
+    assert merged_by_id["backlink-a-new"]["response_id"] == "backlink-a-new"
+    assert merged_by_id["backlink-b"]["response_id"] == "backlink-b"
+
+
+def test_persist_backlink_raw_responses_rewrites_partition_once(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "artifacts"
+    backlinks_dir = run_dir / "parquet" / "raw_responses" / "endpoint=backlinks"
+    existing = _backlink_raw_response_record(
+        run_id="artifacts",
+        response_id="backlink-existing",
+        target_keyword="technical seo",
+        url="https://example.com/existing",
+    )
+    _write_raw_response_partition(backlinks_dir, [existing])
+    (run_dir / "run.json").write_text(
+        json.dumps({"run_id": "artifacts", "catalog": {"datasets": {}}}, indent=2)
+        + "\n",
+        encoding="utf-8",
+    )
+
+    incoming = [
+        _backlink_raw_response_record(
+            run_id="artifacts",
+            response_id=f"backlink-{index}",
+            target_keyword="technical seo",
+            url=f"https://example.com/{index}",
+        )
+        for index in range(3)
+    ]
+
+    persist_backlink_raw_responses(run_dir, incoming)
+
+    merged = pq.ParquetFile(backlinks_dir / "part-0.parquet").read().to_pylist()
+    assert len(merged) == 4
+    assert {str(row["response_id"]) for row in merged} == {
+        "backlink-existing",
+        "backlink-0",
+        "backlink-1",
+        "backlink-2",
+    }

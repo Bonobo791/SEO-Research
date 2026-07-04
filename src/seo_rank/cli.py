@@ -552,6 +552,7 @@ def replay_stored_run(
     expand_stored_run(
         stored_run,
         stored_payload,
+        cli_config=config,
         requested_keyword_limit=config.keyword_limit,
         progress=progress,
     )
@@ -636,6 +637,7 @@ def expand_stored_run(
     stored_run: Path,
     stored_payload: Mapping[str, object],
     *,
+    cli_config: RunConfig,
     requested_keyword_limit: int,
     progress: RunProgress | None = None,
 ) -> None:
@@ -644,10 +646,13 @@ def expand_stored_run(
         raise CliCommandError("Stored run payload is missing config")
 
     run_id = str(stored_payload.get("run_id") or stored_run.name)
-    base_config = run_config_from_payload(
-        stored_config,
-        output_dir=stored_run,
-        keyword_limit=requested_keyword_limit,
+    base_config = merge_stored_run_cli_overlay(
+        run_config_from_payload(
+            stored_config,
+            output_dir=stored_run,
+            keyword_limit=requested_keyword_limit,
+        ),
+        cli_config,
     )
     current_keywords = dedupe_keywords(
         [keyword for keyword in stored_payload.get("keywords", []) if isinstance(keyword, str)]
@@ -801,6 +806,29 @@ def run_config_from_payload(
         live_bge=bool(config.get("live_bge", False)),
         live_gemini=bool(config.get("live_gemini", False)),
         live_textrazor=bool(config.get("live_textrazor", False)),
+    )
+
+
+def merge_stored_run_cli_overlay(stored_config: RunConfig, cli_config: RunConfig) -> RunConfig:
+    """Apply replay overlays with sticky TextRazor skipping.
+
+    Live-provider flags remain additive across the stored config and replay
+    invocation, but `skip_textrazor` wins for TextRazor execution.
+    """
+
+    skip_textrazor = cli_config.skip_textrazor or stored_config.skip_textrazor
+    live_textrazor = (
+        cli_config.live_textrazor or stored_config.live_textrazor
+    ) and not skip_textrazor
+
+    return replace(
+        stored_config,
+        live_providers=cli_config.live_providers or stored_config.live_providers,
+        live_bge=cli_config.live_bge or stored_config.live_bge,
+        live_gemini=cli_config.live_gemini or stored_config.live_gemini,
+        live_textrazor=live_textrazor,
+        skip_textrazor=skip_textrazor,
+        refresh_textrazor=cli_config.refresh_textrazor or stored_config.refresh_textrazor,
     )
 
 
@@ -1011,18 +1039,11 @@ def rewrite_run_json_textrazor_entities(
         run_payload["network_calls"] = list(network_calls)
     elif isinstance(run_payload.get("network_calls"), list):
         run_payload["network_calls"] = list(run_payload["network_calls"])
-
-    catalog = run_payload.get("catalog", {})
-    if not isinstance(catalog, dict):
-        catalog = {}
-    dataset_catalog = catalog.setdefault("datasets", {})
-    assert isinstance(dataset_catalog, dict)
-    dataset_catalog["raw_responses"] = build_raw_response_catalog_from_disk(run_dir)
-    run_payload["catalog"] = catalog
     run_json_path.write_text(
         json.dumps(run_payload, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    refresh_run_json_raw_response_catalog(run_dir)
 
 
 def _load_textrazor_entities_by_keyword(
@@ -1108,18 +1129,19 @@ def build_resumed_keyword_result(
         for result in serp_results
         if str(result["url"]) not in existing_backlinks_by_url
     ]
-    if missing_backlink_urls and progress is not None:
-        progress.keyword_log(
-            target_keyword,
-            f"dataforseo backlinks ({len(missing_backlink_urls)} urls)",
-        )
     if missing_backlink_urls and config.live_providers and live_context is not None:
+        if progress is not None:
+            progress.keyword_log(
+                target_keyword,
+                f"dataforseo backlinks ({len(missing_backlink_urls)} urls)",
+            )
         fetched_backlinks = fetch_dataforseo_backlinks_for_urls(
             target_keyword,
             missing_backlink_urls,
             credentials=live_context["credentials"].dataforseo,
             transport=DEFAULT_DATAFORSEO_TRANSPORT,
             progress=None,
+            run_dir=config.output_dir,
         )
         if fetched_backlinks:
             network_calls.append("dataforseo.backlinks")
@@ -1606,14 +1628,6 @@ def build_offline_payload(
                 keyword_result["raw_provider_data"]["dataforseo"]["serp"]
                 for keyword_result in keyword_results
             ],
-            "backlinks": [
-                response
-                for keyword_result in keyword_results
-                for response in keyword_result["raw_provider_data"]["dataforseo"].get(
-                    "backlinks", []
-                )
-                if isinstance(response, Mapping)
-            ],
         },
     }
     textrazor_responses = [
@@ -1678,6 +1692,14 @@ def build_textrazor_only_payload(
             "serp": [
                 keyword_result["raw_provider_data"]["dataforseo"]["serp"]
                 for keyword_result in keyword_results
+            ],
+            "backlinks": [
+                response
+                for keyword_result in keyword_results
+                for response in keyword_result["raw_provider_data"]["dataforseo"].get(
+                    "backlinks", []
+                )
+                if isinstance(response, Mapping)
             ],
         },
     }
@@ -1953,6 +1975,14 @@ def build_live_payload(
                 keyword_result["raw_provider_data"]["dataforseo"]["serp"]
                 for keyword_result in keyword_results
             ],
+            "backlinks": [
+                response
+                for keyword_result in keyword_results
+                for response in keyword_result["raw_provider_data"]["dataforseo"].get(
+                    "backlinks", []
+                )
+                if isinstance(response, Mapping)
+            ],
         },
     }
     textrazor_responses = [
@@ -2029,6 +2059,7 @@ def build_live_keyword_result(
         credentials=credentials.dataforseo,
         transport=dataforseo_transport,
         progress=None,
+        run_dir=config.output_dir,
     )
     if backlinks_responses:
         network_calls.append("dataforseo.backlinks")
@@ -2212,23 +2243,45 @@ def fetch_dataforseo_backlinks_for_urls(
     credentials: DataForSeoCredentials,
     transport,
     progress: RunProgress | None = None,
+    run_dir: Path | None = None,
 ) -> list[dict[str, object]]:
     responses: list[dict[str, object]] = []
-    for url in urls:
-        if progress is not None:
-            progress.keyword_log(target_keyword, f"dataforseo backlinks ({url})")
-        response = execute_validated_dataforseo_request(
-            "backlinks",
-            build_backlinks_request(url),
-            credentials=credentials,
-            transport=transport,
-        )
-        raise_for_failed_dataforseo_tasks(
-            "backlinks",
-            response,
-            target_keyword=target_keyword,
-        )
-        responses.append(response)
+    new_records: list[dict[str, object]] = []
+    try:
+        for url in urls:
+            if progress is not None:
+                progress.keyword_log(target_keyword, f"dataforseo backlinks ({url})")
+            response = execute_validated_dataforseo_request(
+                "backlinks",
+                build_backlinks_request(url),
+                credentials=credentials,
+                transport=transport,
+            )
+            raise_for_failed_dataforseo_tasks(
+                "backlinks",
+                response,
+                target_keyword=target_keyword,
+            )
+            response_with_url = {**response, "url": url}
+            responses.append(response_with_url)
+            if run_dir is not None:
+                new_records.append(
+                    build_raw_response_record(
+                        run_dir.name,
+                        endpoint="backlinks",
+                        provider="dataforseo",
+                        response=response_with_url,
+                        target_keyword=target_keyword,
+                        request_metadata={
+                            "target_keyword": target_keyword,
+                            "url": url,
+                        },
+                        recorded_at=datetime.now(UTC).isoformat(),
+                    )
+                )
+    finally:
+        if run_dir is not None and new_records:
+            persist_backlink_raw_responses(run_dir, new_records)
     return responses
 
 
@@ -2848,24 +2901,6 @@ def extract_task_id(response: Mapping[str, object]) -> str | None:
     return None
 
 
-def extract_response_url(response: Mapping[str, object]) -> str | None:
-    url = response.get("url")
-    if isinstance(url, str):
-        return url
-    tasks = response.get("tasks")
-    if not isinstance(tasks, list) or not tasks:
-        return None
-    task = tasks[0]
-    if not isinstance(task, Mapping):
-        return None
-    task_url = task.get("url")
-    if isinstance(task_url, str):
-        return task_url
-    parsed_page = parsed_page_text(response)
-    parsed_url = parsed_page.get("url")
-    return parsed_url if isinstance(parsed_url, str) else None
-
-
 def load_raw_response_partition_rows(run_dir: Path, endpoint: str) -> list[dict[str, object]]:
     partition_dir = Path(run_dir) / "parquet" / "raw_responses" / f"endpoint={endpoint}"
     if not partition_dir.exists():
@@ -2875,6 +2910,102 @@ def load_raw_response_partition_rows(run_dir: Path, endpoint: str) -> list[dict[
     for file_path in sorted(partition_dir.glob("part-*.parquet")):
         rows.extend(pq.ParquetFile(file_path).read().to_pylist())
     return rows
+
+
+def backlink_raw_response_key(record: Mapping[str, object]) -> tuple[str, str]:
+    target_keyword = record.get("target_keyword")
+    if not isinstance(target_keyword, str) or not target_keyword.strip():
+        raise ValueError("raw response record is missing target_keyword")
+
+    metadata = json.loads(str(record["request_metadata_json"]))
+    url = metadata.get("url")
+    if not isinstance(url, str) or not url.strip():
+        response = json.loads(bytes(record["response_body_bytes"]).decode("utf-8"))
+        url = response.get("url")
+    if not isinstance(url, str) or not url.strip():
+        raise ValueError("raw response record is missing a usable url")
+
+    return target_keyword.casefold().strip(), url.strip()
+
+
+def rewrite_backlink_endpoint_partition(
+    run_dir: Path,
+    rows: Sequence[Mapping[str, object]],
+) -> None:
+    partition_dir = Path(run_dir) / "parquet" / "raw_responses" / "endpoint=backlinks"
+    if partition_dir.exists():
+        shutil.rmtree(partition_dir)
+    partition_dir.mkdir(parents=True, exist_ok=True)
+
+    sorted_rows = sorted(
+        (validate_raw_response_record(row, endpoint="backlinks") for row in rows),
+        key=lambda row: (
+            backlink_raw_response_key(row)[0],
+            backlink_raw_response_key(row)[1],
+            str(row.get("response_id", "")),
+        ),
+    )
+    pq.write_table(
+        pa.Table.from_pylist(sorted_rows, schema=RAW_RESPONSE_SCHEMA),
+        partition_dir / "part-0.parquet",
+        compression="zstd",
+        write_statistics=True,
+    )
+
+
+def merge_backlink_raw_response_rows(
+    existing_rows: Sequence[Mapping[str, object]],
+    new_records: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    merged_rows: dict[tuple[str, str], dict[str, object]] = {}
+    for row in existing_rows:
+        normalized_row = validate_raw_response_record(row, endpoint="backlinks")
+        merged_rows[backlink_raw_response_key(normalized_row)] = normalized_row
+    for row in new_records:
+        normalized_row = validate_raw_response_record(row, endpoint="backlinks")
+        merged_rows[backlink_raw_response_key(normalized_row)] = normalized_row
+    return sorted(
+        merged_rows.values(),
+        key=lambda row: (
+            backlink_raw_response_key(row)[0],
+            backlink_raw_response_key(row)[1],
+            str(row.get("response_id", "")),
+        ),
+    )
+
+
+def refresh_run_json_raw_response_catalog(run_dir: Path) -> None:
+    run_json_path = Path(run_dir) / "run.json"
+    if not run_json_path.exists():
+        return
+
+    run_payload = load_run_payload(run_dir)
+    catalog = run_payload.get("catalog", {})
+    if not isinstance(catalog, dict):
+        catalog = {}
+    dataset_catalog = catalog.setdefault("datasets", {})
+    assert isinstance(dataset_catalog, dict)
+    dataset_catalog["raw_responses"] = build_raw_response_catalog_from_disk(run_dir)
+    run_payload["catalog"] = catalog
+    run_json_path.write_text(
+        json.dumps(run_payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def persist_backlink_raw_responses(
+    run_dir: Path,
+    records: Sequence[Mapping[str, object]],
+) -> None:
+    if not records:
+        return
+    try:
+        existing_rows = load_raw_response_partition_rows(run_dir, "backlinks")
+        merged_rows = merge_backlink_raw_response_rows(existing_rows, records)
+        rewrite_backlink_endpoint_partition(run_dir, merged_rows)
+        refresh_run_json_raw_response_catalog(run_dir)
+    except STORAGE_COMMAND_EXCEPTIONS as error:
+        raise CliCommandError(str(error)) from error
 
 
 def merge_entity_raw_response_rows(

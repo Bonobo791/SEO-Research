@@ -38,7 +38,7 @@ Plackett-Luce is deferred backlog work only and is not wired in code today.
 
 #### Progress
 
-**Slices:** 27 of 42 shipped, 1 partial, 14 open.
+**Slices:** 27 of 42 shipped, 2 partial, 13 open.
 
 | # | Slice | Layer | Status | Primary deliverable |
 | - | ----- | ----- | ------ | ------------------- |
@@ -52,7 +52,7 @@ Plackett-Luce is deferred backlog work only and is not wired in code today.
 | 8 | Robustness appendix (influence) | Stats | Shipped | `influence_sensitivity` + influential-rows guardrail |
 | 9 | Stats artifacts & CLI | Stats | Shipped | `stats_*` wired; `seo-rank analyze` exit contract |
 | 10 | Golden fixtures & tests | Stats | Shipped | `test_stats_golden_fixtures.py` schema + boundary contracts |
-| 11 | Within-keyword rank transform | Data | Phase 6.1 | `data/ranks.py` rank + pct + z |
+| 11 | Within-keyword rank transform | Data | Phase 6.1 (partial) | `data/ranks.py` rank + pct + z |
 | 12 | Analysis mart v2 columns | Data | Phase 6.1 | `analysis_mart.v2` + validation |
 | 13 | Relative similarity sensitivity | Stats | Phase 6.1 | Robustness appendix on rank/pct/z |
 | 14 | Relative ranks in CLI & fixtures | CLI | Phase 6.1 | Keyword report + golden invariants |
@@ -102,7 +102,7 @@ schema drift).
 
 #### Dev slices
 
-**Progress:** 27 of 42 shipped, 1 partial, 14 open.
+**Progress:** 27 of 42 shipped, 2 partial, 13 open.
 
 1. **[x] Slice 1 — Estimand & analysis spec**
    - Add `analysis_spec.v1.yaml`: outcome (`-log(serp_rank)`), predictors,
@@ -200,18 +200,14 @@ schema drift).
       clustered vs IID SE guard; see `TESTING.md`.
     - Covered by `tests/unit/test_stats_golden_fixtures.py`.
 
-11. **[ ] Slice 11 — Within-keyword rank transform**
-    - Add `src/seo_rank/data/ranks.py` with
-      `add_within_keyword_similarity_ranks()` (Polars lazy).
-    - Per backend, derive from absolute scores within each `target_keyword_id`:
-      `{backend}_similarity_rank` (1 = highest; average rank on ties),
-      `{backend}_similarity_pct` (`(rank - 1) / (n - 1)` when `n > 1`; else
-      `null`), `{backend}_similarity_z` (within-keyword z-score; `null` when
-      `n < 2` or `σ = 0`).
-    - **Ranking source:** BGE on `bge_raw_score`; Gemini backends on
-      `*_normalized_score`.
-    - Unit tests: ties, `n = 1`, full top-20 panel, descending order, null
-      when backend score is null (`tests/unit/test_within_keyword_ranks.py`).
+11. **[~] Slice 11 — Within-keyword rank transform**
+    - **Done**
+      - `src/seo_rank/data/ranks.py` with Polars-lazy
+        `add_within_keyword_similarity_ranks()` (rank, pct, z per backend).
+      - Unit tests: ties, `n = 1`, full top-20 panel, null scores
+        (`tests/unit/test_within_keyword_ranks.py`).
+    - **Remaining**
+      - Wire into `marts.py` and `analysis_mart.v2` (Slice 12).
 
 12. **[ ] Slice 12 — Analysis mart v2 columns**
     - Wire rank transform in `marts.py` after `keyword_serp` ⨝ `page_features`
@@ -464,6 +460,14 @@ schema drift).
 - **Pooled regression secondary** — one backend per model; keyword-clustered SEs
   only in primary output; effect-size translation and `actionable_association`
   rule on BGE.
+- **Robustness appendix (slices 7–8 shipped)** — primary-depth multivariate VIF
+  sensitivity with spec-driven backend drop order; influence refit excluding
+  Cook's D > 4/n rows with `influence_sensitivity` coefficient comparison; not
+  used for BH or actionable flag.
+- **Stats artifacts (slice 9 shipped)** — `stats_summary.json`,
+  `stats_diagnostics.json`, and `stats_report.md` under `runs/{run_id}/stats/`;
+  wired through `seo-rank analyze` and post-run `materialize_run_tree()`; exit
+  `1` on guardrail hard-fail; dry-run skip.
 - **Limitations in JSON** — observational, depth-specific truncation (top 20 / 10 /
   5 / 3), measurement-error conservatism, no causal claims per rank depth in
   `stats_summary.json` and `stats_report.md`.
@@ -494,7 +498,8 @@ schema drift).
 - `seo-rank analyze --run RUN_ID` materialization and exit-code contract.
 - Unit tests and golden fixtures in `tests/unit/`.
 - Within-keyword relative similarity: `*_similarity_rank`, `*_similarity_pct`,
-  `*_similarity_z` in `analysis_mart.v2` (`src/seo_rank/data/ranks.py`) — **Phase 6.1**.
+  `*_similarity_z` via `src/seo_rank/data/ranks.py` (transform shipped; mart
+  columns in `analysis_mart.v2` — **Phase 6.1** Slice 12).
 - Stats robustness appendix for relative predictors — **Phase 6.1** (Slice 13).
 - OLS / PL scaling polish and PL spec runtime wiring — **Phase 6.1** (FIXUPS
   S5-14–S5-19; `ROADMAP.md` § Phase 6.1).
@@ -537,6 +542,8 @@ schema drift).
 - Phase 5.4 exploratory extensions (rank-decile segments; keyword holdout and
   time-split validation in Phase 5.6).
 - Expanded report sections and OLS/PL standardization (`ROADMAP.md` § Phase 6.1).
+- Backlinks count analysis (`ROADMAP.md` Phase 6.2: `backlinks_count`,
+  `referring_domains_count`, `dofollow_backlinks_count` on `analysis_mart.v1`).
 - Custom URL/text manifest ingestion for TextRazor-only runs (no fixture SERP).
 - Direct page fetching outside DataForSEO (TextRazor receives parsed text only).
 - Causal claims about ranking factors.
@@ -546,7 +553,7 @@ schema drift).
 
 ## Phase 5 acceptance criteria
 
-**Status:** 27 of 42 slices shipped, 1 partial, 14 open.
+**Status:** 27 of 42 slices shipped, 2 partial, 13 open.
 
 | Acceptance item | Slice(s) | Status |
 | --------------- | -------- | ------ |
@@ -562,7 +569,8 @@ schema drift).
 | Limitations in JSON and Markdown | 9, 19 | Shipped (per depth) |
 | `seo-rank analyze` exit code + dry-run skip | 9 | Shipped |
 | Golden fixture ρ/slope + schema/boundary contracts | 10 | Shipped |
-| Within-keyword rank/pct/z columns in `analysis_mart.v2` | 11, 12 | Phase 6.1 |
+| Within-keyword rank transform (`data/ranks.py`) | 11 | Phase 6.1 (partial) |
+| Within-keyword rank/pct/z columns in `analysis_mart.v2` | 12 | Phase 6.1 |
 | Relative similarity robustness in `stats_diagnostics.json` | 13 | Phase 6.1 |
 | CLI keyword report surfaces relative ranks | 14 | Phase 6.1 |
 | Plackett-Luce estimand runtime wiring from YAML | 15 | Phase 6.1 (partial) |

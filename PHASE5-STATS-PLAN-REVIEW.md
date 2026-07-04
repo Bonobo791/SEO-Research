@@ -159,11 +159,13 @@ content quality signals and rank. Ignoring it **confounds similarity coefficient
 `bge_normalized_score`, `gemini_doc_retrieval_normalized_score`, and
 `gemini_semantic_similarity_normalized_score` will be highly correlated.
 
-**Pre-specify:**
+**Pre-specify (shipped in slice 7):**
 
 1. **Primary:** separate model per backend (univariate + keyword FE + length).
 2. **Sensitivity:** one multivariate model; if VIF > 5, drop lowest-priority
-   backend per pre-registered order (e.g. semantic similarity first).
+   backend per pre-registered order (semantic similarity → doc retrieval → keep
+   BGE). Results land in `rank_depths.top_20.multivariate_sensitivity` and
+   `### Robustness` in `stats_report.md`.
 
 Do not treat joint OLS coefficients as primary evidence without this hierarchy.
 
@@ -203,11 +205,16 @@ prefer CIs over p-values alone.
 
 ### 10. Testing and artifacts
 
-`TESTING.md` lists future OLS + BH tests but not:
+**Shipped (slices 9–10, Jul 2026):**
 
-- Golden fixture: synthetic `analysis_mart` with known slope/ρ.
-- Deterministic stats JSON schema for `seo-rank analyze`.
-- Minimum gates that skip or downgrade stats when guardrails fail.
+- Golden fixture: synthetic `analysis_mart` with known slope/ρ in
+  `tests/unit/test_stats_golden_fixtures.py`.
+- Deterministic stats JSON schema contracts for `stats_summary.json` and
+  `stats_diagnostics.json` (nested `rank_depths`, per-family blocks).
+- Guardrail hard-fail skip path and actionable-association logic covered in
+  golden tests; `seo-rank analyze` exit `1` on hard-fail.
+
+**Still open:** TextRazor end-to-end golden fixtures (slice 31).
 
 ### 11. Relative similarity predictors (Phase 6.1 — `ROADMAP.md`)
 

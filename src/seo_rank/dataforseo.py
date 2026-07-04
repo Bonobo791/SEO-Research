@@ -16,7 +16,7 @@ DATAFORSEO_KEYWORD_EXPANSION_PATH = (
 )
 DATAFORSEO_SERP_PATH = "/v3/serp/google/organic/live/advanced"
 DATAFORSEO_PAGE_TEXT_PATH = "/v3/on_page/content_parsing/live"
-DATAFORSEO_BACKLINKS_PATH = "/v3/backlinks/summary/live"
+DATAFORSEO_BACKLINKS_PATH = "/v3/backlinks/backlinks/live"
 
 
 @dataclass(frozen=True)
@@ -80,7 +80,7 @@ DATAFORSEO_RESPONSE_SCHEMAS: dict[str, tuple[DataForSeoFieldSchema, ...]] = {
     "serp": (
         DataForSeoFieldSchema(("tasks",), list),
         DataForSeoFieldSchema(("tasks", "[]", "result"), (list, type(None))),
-        DataForSeoFieldSchema(("tasks", "[]", "result", "[]", "items"), list),
+        DataForSeoFieldSchema(("tasks", "[]", "result", "[]", "items"), (list, type(None))),
         DataForSeoFieldSchema(
             ("tasks", "[]", "result", "[]", "items", "[]", "type"),
             str,
@@ -97,10 +97,42 @@ DATAFORSEO_RESPONSE_SCHEMAS: dict[str, tuple[DataForSeoFieldSchema, ...]] = {
     "backlinks": (
         DataForSeoFieldSchema(("tasks",), list),
         DataForSeoFieldSchema(("tasks", "[]", "result"), (list, type(None))),
-        DataForSeoFieldSchema(("tasks", "[]", "result", "[]", "items"), list),
         DataForSeoFieldSchema(
-            ("tasks", "[]", "result", "[]", "items", "[]", "url"),
+            ("tasks", "[]", "result", "[]", "target"),
             str,
+        ),
+        DataForSeoFieldSchema(
+            ("tasks", "[]", "result", "[]", "total_count"),
+            int,
+        ),
+        DataForSeoFieldSchema(("tasks", "[]", "result", "[]", "items"), (list, type(None))),
+        DataForSeoFieldSchema(
+            ("tasks", "[]", "result", "[]", "items", "[]", "type"),
+            str,
+        ),
+        DataForSeoFieldSchema(
+            ("tasks", "[]", "result", "[]", "items", "[]", "domain_from"),
+            str,
+        ),
+        DataForSeoFieldSchema(
+            ("tasks", "[]", "result", "[]", "items", "[]", "url_from"),
+            str,
+        ),
+        DataForSeoFieldSchema(
+            ("tasks", "[]", "result", "[]", "items", "[]", "url_to"),
+            str,
+        ),
+        DataForSeoFieldSchema(
+            ("tasks", "[]", "result", "[]", "items", "[]", "dofollow"),
+            bool,
+        ),
+        DataForSeoFieldSchema(
+            ("tasks", "[]", "result", "[]", "items", "[]", "is_new"),
+            bool,
+        ),
+        DataForSeoFieldSchema(
+            ("tasks", "[]", "result", "[]", "items", "[]", "is_lost"),
+            bool,
         ),
     ),
 }
@@ -181,7 +213,7 @@ def build_page_text_request(
 def build_backlinks_request(
     url: str,
 ) -> ProviderRequest:
-    """Build a DataForSEO backlinks summary request without executing it."""
+    """Build a DataForSEO backlinks request without executing it."""
 
     return ProviderRequest(
         method="POST",
@@ -283,6 +315,10 @@ def _validate_dataforseo_field(
 
     def walk(current: object, parts: tuple[str, ...], rendered_path: str) -> None:
         if not parts:
+            if current is None and (
+                rendered_path == "items" or rendered_path.endswith(".items")
+            ):
+                return
             if not _matches_expected_type(current, schema.expected_type):
                 raise DataForSeoParseError(
                     endpoint=endpoint,
@@ -293,7 +329,10 @@ def _validate_dataforseo_field(
             return
 
         if current is None and (
-            rendered_path == "result" or rendered_path.endswith(".result")
+            rendered_path == "result"
+            or rendered_path.endswith(".result")
+            or rendered_path == "items"
+            or rendered_path.endswith(".items")
         ):
             return
 
@@ -544,29 +583,21 @@ def _validate_backlinks_response(response: Mapping[str, object]) -> None:
         for result_index, result in enumerate(results):
             if not isinstance(result, Mapping):
                 continue
-            items = result.get("items", [])
-            if not isinstance(items, list):
-                continue
-            for item_index, item in enumerate(items):
-                if not isinstance(item, Mapping):
-                    continue
-                item_path = (
-                    f"tasks[{task_index}].result[{result_index}].items[{item_index}]"
-                )
-                if "url" not in item:
-                    raise DataForSeoParseError(
-                        endpoint="backlinks",
-                        path=f"{item_path}.url",
-                        expected="present",
-                        actual=None,
-                        actual_type="field absent",
-                    )
-                _raise_unless_type(
-                    item["url"],
-                    str,
-                    f"{item_path}.url",
+            result_path = f"tasks[{task_index}].result[{result_index}]"
+            if "target" not in result:
+                raise DataForSeoParseError(
                     endpoint="backlinks",
+                    path=f"{result_path}.target",
+                    expected="present",
+                    actual=None,
+                    actual_type="field absent",
                 )
+            _raise_unless_type(
+                result["target"],
+                str,
+                f"{result_path}.target",
+                endpoint="backlinks",
+            )
 
 
 def _content_parsing_item_has_body(item: Mapping[str, object]) -> bool:
@@ -726,25 +757,39 @@ def fixture_serp_response(keyword: str) -> dict[str, object]:
 
 
 def fixture_backlinks_response(url: str) -> dict[str, object]:
-    """Return a deterministic DataForSEO-shaped backlink summary fixture."""
+    """Return a deterministic DataForSEO-shaped backlink fixture."""
 
     return {
         "provider": "dataforseo",
-        "endpoint": "backlinks/summary/live",
+        "endpoint": "backlinks/backlinks/live",
         "url": url,
         "tasks": [
             {
-                "url": url,
+                "status_code": 20000,
                 "result": [
                     {
+                        "target": url,
+                        "total_count": 42,
                         "items": [
                             {
-                                "url": url,
-                                "backlinks": 42,
-                                "referring_domains": 12,
-                                "dofollow_backlinks": 30,
-                            }
-                        ]
+                                "type": "backlink",
+                                "domain_from": "www.example.org",
+                                "url_from": "https://www.example.org/post",
+                                "url_to": url,
+                                "dofollow": True,
+                                "is_new": False,
+                                "is_lost": False,
+                            },
+                            {
+                                "type": "backlink",
+                                "domain_from": "www.example.net",
+                                "url_from": "https://www.example.net/article",
+                                "url_to": url,
+                                "dofollow": False,
+                                "is_new": False,
+                                "is_lost": False,
+                            },
+                        ],
                     }
                 ],
             }
@@ -933,6 +978,13 @@ def extract_response_url(response: Mapping[str, object]) -> str | None:
     task_url = task.get("url")
     if isinstance(task_url, str):
         return task_url
+    results = task.get("result")
+    if isinstance(results, list) and results:
+        first_result = results[0]
+        if isinstance(first_result, Mapping):
+            target = first_result.get("target")
+            if isinstance(target, str) and target.strip():
+                return target
     parsed_page = parsed_page_text(response)
     parsed_url = parsed_page.get("url")
     return parsed_url if isinstance(parsed_url, str) else None

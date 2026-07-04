@@ -14,7 +14,7 @@ Pytest configuration and verification contract for SEO-Research.
   interpreter
 - Lint / type-check / build / coverage: not configured
 - Expected test duration: fast (< 1s)
-- **Current verification status:** 304 unit tests pass (`python -m pytest tests/unit`); full suite collects 305 tests including 1 opt-in integration test
+- **Current verification status:** 331 unit tests pass (`python -m pytest tests/unit`); full suite collects 332 tests including 1 opt-in integration test
 
 ## Active Verification Command
 
@@ -50,10 +50,10 @@ placeholders only.
 
 | Test file | What it verifies |
 |-----------|------------------|
-| `test_cli_run.py` | CLI writes grouped per-keyword artifacts, including BGE, Gemini Doc Retrieval, and Gemini Semantic Similarity rows; run-scoped `raw_responses` Parquet + `run.json` catalog metadata; offline TextRazor include/skip; TextRazor entity confidence/relevance in `report.md`; TextRazor-only flags (`--live-textrazor-only`, `--refresh-textrazor`), env gates, and mutual-exclusion errors; explicit live-provider gates; stored-run partial resume/backfill, stale SERP refresh, and no-op replay coverage; opt-in live Gemini, BGE, and TextRazor orchestration |
+| `test_cli_run.py` | CLI writes grouped per-keyword artifacts, including BGE, Gemini Doc Retrieval, and Gemini Semantic Similarity rows; run-scoped `raw_responses` Parquet + `run.json` catalog metadata; offline TextRazor include/skip; TextRazor entity confidence/relevance in `report.md`; TextRazor-only flags (`--live-textrazor-only`, `--refresh-textrazor`), env gates, and mutual-exclusion errors; explicit live-provider gates; DataForSEO `backlinks/backlinks/live` raw persistence (batched per keyword, partial progress on mid-loop failure, stored-run backfill, survives later provider failure); stored-run CLI overlay (`merge_stored_run_cli_overlay`, sticky `--skip-textrazor`, offline stored run + `--live-providers` backfill); stored-run partial resume/backfill, stale SERP refresh, and no-op replay coverage; opt-in live Gemini, BGE, and TextRazor orchestration |
 | `test_run_progress.py` | `seo-rank run` stderr progress: run phases, per-keyword substeps, progress bar, artifact-write logs |
 | `test_cli_surfaces.py` | Phase 4.5 storage CLI: subcommand parser wiring, `normalize` / `build-features` / `analyze` / `replay` dispatch, missing feature-mart backfill on `analyze`, `run --stored-run` routing, exit code `2` on storage errors and unknown keyword/response |
-| `test_run_normalize.py` | Stored `raw_responses` normalize into curated Parquet tables (including `similarity_scores` copied from `run.json` `page_similarity`, `page_content_fields`, and `textrazor_page_metrics_curated` from TextRazor page-metrics responses) via lazy scan + batch UDFs; TextRazor entailment scores above 1.0 validate; dataset-name validation errors; refresh the run catalog |
+| `test_run_normalize.py` | Stored `raw_responses` normalize into curated Parquet tables (including `similarity_scores` copied from `run.json` `page_similarity`, `page_content_fields`, `backlinks` from `backlinks/backlinks/live` responses, and `textrazor_page_metrics_curated` from TextRazor page-metrics responses) via lazy scan + batch UDFs; TextRazor entailment scores above 1.0 validate; dataset-name validation errors; refresh the run catalog |
 | `test_data_scans_validate.py` | Raw-response scans use `pl.scan_parquet()`, lazy curated frames are built, schema-only validation rejects missing columns, and materialized row-rule checks stay off the lazy edge |
 | `test_data_marts.py` | Analysis mart lazy join lives in `seo_rank.data.marts` and preserves the feature-mart contract |
 | `test_feature_marts.py` | Feature marts materialize lazy joins, validate before sink, sink feature marts lazily with Parquet statistics, audit the written parquet row rules, allow unbounded TextRazor entailment scores, surface dataset names on validation failure, and refresh the run catalog |
@@ -109,7 +109,7 @@ Mock nondeterministic or destructive external effects (network, paid APIs,
 credentials). Prefer integration tests at real boundaries once live clients
 exist.
 
-## Shipped tests — Phase 5 slices 1–7 and 16–20
+## Shipped tests — Phase 5 slices 1–10 and 16–20
 
 - **`analysis_spec.v1.yaml` contract** — `tests/unit/test_sdlc_docs.py::
   test_phase_5_slice_1_defines_analysis_spec_v1` asserts estimand fields
@@ -151,20 +151,26 @@ exist.
   influence refit (`influence_sensitivity` block), small-sample Shapiro as
   informational, skipped-backend diagnostics, and
   `stats_diagnostics.json` / `stats_report.md` emission on passing panels.
-- **Influence robustness (slice 8 shipped)** — `tests/unit/test_stats_diagnostics.py`
-  and `tests/unit/test_stats_golden_fixtures.py` cover Cook's D trimming refits,
-  coefficient deltas, `### Influence robustness` report sections, and the
-  `influential_rows_rate` warn guardrail.
-- **Golden fixtures (slice 10 shipped)** — `tests/unit/test_stats_golden_fixtures.py`
-  pins synthetic `analysis_mart` panels with known Spearman ρ and pooled slopes,
-  schema metadata contracts, BH boundaries, hard-fail skip path, actionable flag
-  logic, influence refit delta, multivariate VIF drop order, and clustered vs
-  HC3 SE guards.
 - **Multivariate sensitivity (slice 7 shipped)** — `tests/unit/test_stats_spec.py`
   and `tests/unit/test_stats_diagnostics.py` cover the spec-driven VIF threshold
   and backend drop order, plus the primary-depth `multivariate_sensitivity`
   block in `stats_diagnostics.json` and the `### Robustness` section in
   `stats_report.md`.
+- **Influence robustness (slice 8 shipped)** — `tests/unit/test_stats_diagnostics.py`
+  and `tests/unit/test_stats_golden_fixtures.py` cover Cook's D trimming refits,
+  coefficient deltas, `### Influence robustness` report sections, and the
+  `influential_rows_rate` warn guardrail.
+- **Stats artifacts & CLI (slice 9 shipped)** — `tests/unit/test_stats_panel.py`,
+  `test_stats_spearman.py`, and `test_cli_surfaces.py` cover
+  `run_phase5_stats()` emission under `runs/{run_id}/stats/`, nested
+  `rank_depths` in summary and diagnostics JSON, `seo-rank analyze` dispatch,
+  guardrail hard-fail exit code `1`, and dry-run skip via
+  `run_manifest_is_dry_run()`.
+- **Golden fixtures (slice 10 shipped)** — `tests/unit/test_stats_golden_fixtures.py`
+  pins synthetic `analysis_mart` panels with known Spearman ρ and pooled slopes,
+  schema metadata contracts, BH boundaries, hard-fail skip path, actionable flag
+  logic, influence refit delta, multivariate VIF drop order, and clustered vs
+  HC3 SE guards.
 
 ## Shipped tests — Ranking explainability
 
@@ -223,6 +229,32 @@ exist.
   `tests/unit/test_stats_family_artifacts.py` covers `keyword_count` and
   `inference_mode` on single-keyword runs.
 
+## Shipped tests — DataForSEO backlinks (Jul 2026)
+
+- **Backlinks live endpoint** — `tests/unit/test_dataforseo_requests.py` covers
+  `build_backlinks_request()` path `/v3/backlinks/backlinks/live`, schema
+  validation for the live response shape (with and without `referring_domains`,
+  null `items`), and target-type drift errors.
+- **CLI persistence and stored-run backfill** — `tests/unit/test_cli_run.py`
+  covers batched `endpoint=backlinks` writes once per keyword (dedupe on
+  `(target_keyword, url)`), partial persistence on mid-loop failure via `finally`,
+  survival when a later provider step fails, stored-run `--live-providers` overlay
+  on offline runs, and sticky `--skip-textrazor` on replay.
+- **Backlink merge** — `tests/unit/test_raw_response_merge.py` covers
+  `merge_backlink_raw_response_rows()` dedupe and
+  `persist_backlink_raw_responses()` single partition rewrite per batch.
+- **Curated normalization** — `tests/unit/test_run_normalize.py` covers
+  `backlinks` table materialization from raw responses (dofollow counts from
+  item rows, referring-domain fallback from `items`, null `items` tolerance).
+
+## Shipped tests — Phase 6.1 partial (within-keyword ranks)
+
+- **Within-keyword rank transform (Phase 6.1 Slice 3 partial)** —
+  `tests/unit/test_within_keyword_ranks.py` covers Polars-lazy
+  `add_within_keyword_similarity_ranks()` in `src/seo_rank/data/ranks.py`: ties,
+  `n = 1`, null backend scores, zero variance, and full top-20 panels. Mart
+  wiring and `analysis_mart.v2` remain open (Phase 6.1 Slice 4).
+
 ## Planned tests (not yet in suite) — Phase 5 active scope
 
 See `GOALS.md` and `ROADMAP.md` § Phase 5 slice 31; standardization and
@@ -244,8 +276,6 @@ See `ROADMAP.md` § Phase 6.1.
 
 - **Scaling contract** — `test_stats_scaling_contract.py`: OLS and PL report the
   same `similarity_within_keyword_sd` on an identical panel; `stats.scale` export.
-- **Within-keyword ranks** — `test_within_keyword_ranks.py`: ties, `n = 1`, null
-  scores, zero variance (`data/ranks.py`).
 - **Analysis mart v2** — `test_analysis_mart_ranks.py`: rank/pct/z columns,
   bounded validation, rank invariants.
 - **Relative similarity sensitivity** — `test_stats_relative_similarity.py`:

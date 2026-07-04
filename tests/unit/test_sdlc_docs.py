@@ -73,7 +73,7 @@ def test_stored_run_docs_describe_partial_resume_and_current_suite_status() -> N
     assert "reuses existing raw responses" in readme
     assert "`--stored-run` resumes partial runs in place" in architecture
     assert "refreshes only missing work" in architecture
-    assert "304 unit tests pass" in testing or "304 unit tests" in testing
+    assert "331 unit tests pass" in testing or "331 unit tests" in testing
     assert "resumes from the saved raw lake" in roadmap
 
 
@@ -145,8 +145,8 @@ def test_phase_45_slice_9_regression_sweep_marks_mart_sink_docs_as_shipped() -> 
     assert "Phase 4.5 Slice 9 shipped" in roadmap
     assert "Phase 4.5 Slice 10 shipped" in roadmap
     assert "Phase 4.5 signed off" in roadmap
-    assert "304 unit tests" in architecture or "304 tests" in architecture or "304 unit tests pass" in architecture
-    assert "304 unit tests pass" in testing or "304 unit tests" in testing
+    assert "331 unit tests" in architecture or "331 tests" in architecture or "331 unit tests pass" in architecture
+    assert "331 unit tests pass" in testing or "331 unit tests" in testing
     assert "sink feature marts lazily with Parquet statistics" in testing
 
 
@@ -209,10 +209,10 @@ def test_phase_5_slice_5_ships_pooled_regression_secondary_path() -> None:
     assert "| 5 | Pooled regression (secondary) | Stats | Shipped |" in goals
     assert "Phase 5 Slice 5 shipped" in roadmap
     assert "**[x] Slice 5 — Pooled regression (secondary)**" in roadmap
-    assert "Phase 5 slices 1–7" in architecture
+    assert "Phase 5 slices 1–10" in architecture
     assert "keyword-clustered SEs" in architecture
     assert "test_stats_regression.py" in testing
-    assert "Phase 5 slices 1–7 and 16–20" in testing
+    assert "Phase 5 slices 1–10 and 16–20" in testing
 
 
 def test_phase_5_slice_6_ships_pooled_ols_diagnostics() -> None:
@@ -252,6 +252,59 @@ def test_phase_5_slice_7_ships_multivariate_sensitivity() -> None:
     assert "test_stats_diagnostics.py" in testing
     assert "multivariate sensitivity" in testing.lower()
     assert "### Robustness" in readme
+
+
+def test_phase_5_slice_8_ships_influence_robustness() -> None:
+    goals = (ROOT / "GOALS.md").read_text(encoding="utf-8")
+    roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
+    architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
+    testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "**[x] Slice 8 — Robustness appendix (influence)**" in goals
+    assert "| 8 | Robustness appendix (influence) | Stats | Shipped |" in goals
+    assert "Phase 5 Slices 8–10 shipped" in roadmap
+    assert "**[x] Slice 8 — Robustness appendix (influence)**" in roadmap
+    assert "influence_sensitivity" in architecture
+    assert "influential_rows_rate" in architecture
+    assert "### Influence robustness" in readme
+    assert "influence refit" in testing.lower()
+    assert "test_stats_golden_fixtures.py" in testing
+
+
+def test_phase_5_slice_9_ships_stats_artifacts_cli() -> None:
+    goals = (ROOT / "GOALS.md").read_text(encoding="utf-8")
+    roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
+    architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
+    testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "**[x] Slice 9 — Stats artifacts & CLI**" in goals
+    assert "| 9 | Stats artifacts & CLI | Stats | Shipped |" in goals
+    assert "Phase 5 Slices 8–10 shipped" in roadmap
+    assert "**[x] Slice 9 — Stats artifacts & CLI**" in roadmap
+    assert "run_phase5_stats()" in architecture
+    assert "materialize_run_tree" in readme
+    assert "run_manifest_is_dry_run()" in readme
+    assert "Stats artifacts & CLI (slice 9 shipped)" in testing
+    assert "test_cli_surfaces.py" in testing
+
+
+def test_phase_5_slice_10_ships_golden_fixtures() -> None:
+    goals = (ROOT / "GOALS.md").read_text(encoding="utf-8")
+    roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
+    testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "**[x] Slice 10 — Golden fixtures & tests**" in goals
+    assert "| 10 | Golden fixtures & tests | Stats | Shipped |" in goals
+    assert "Phase 5 Slices 8–10 shipped" in roadmap
+    assert "**[x] Slice 10 — Golden fixtures & tests**" in roadmap
+    assert "test_stats_golden_fixtures.py" in testing
+    assert "test_stats_golden_fixtures.py" in readme
+    assert "Golden fixture" in (ROOT / "PHASE5-STATS-PLAN-REVIEW.md").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_phase_5_page_level_plackett_luce_secondary_path_is_documented() -> None:
@@ -350,8 +403,8 @@ def test_phase_5_progress_counts_are_aligned() -> None:
     goals = (ROOT / "GOALS.md").read_text(encoding="utf-8")
     roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
 
-    assert "27 of 42 shipped, 1 partial, 14 open" in goals
-    assert "27 of 42 shipped, 1 partial, 14 open" in roadmap
+    assert "27 of 42 shipped, 2 partial, 13 open" in goals
+    assert "27 of 42 shipped, 2 partial, 13 open" in roadmap
 
 
 def test_ranking_explainability_docs_cross_link() -> None:

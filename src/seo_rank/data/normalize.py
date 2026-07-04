@@ -889,37 +889,27 @@ def build_backlinks_frame(
             for result in results:
                 if not isinstance(result, Mapping):
                     continue
-                items = result.get("items", [])
-                if not isinstance(items, list):
-                    continue
-                for item in items:
-                    if not isinstance(item, Mapping):
+                url = result.get("target")
+                if not isinstance(url, str) or not url.strip():
+                    if isinstance(response_url, str) and response_url.strip():
+                        url = response_url
+                    else:
                         continue
-                    url = item.get("url")
-                    if not isinstance(url, str) or not url.strip():
-                        if isinstance(response_url, str) and response_url.strip():
-                            url = response_url
-                        else:
-                            continue
-                    rows.append(
-                        {
-                            "run_id": run_id,
-                            "target_keyword_id": target_keyword_id,
-                            "target_keyword": target_keyword,
-                            "response_id": response_id,
-                            "backlink_id": stable_id(run_id, target_keyword, url),
-                            "canonical_url_hash": stable_id(url),
-                            "url": url,
-                            "backlinks_count": _backlink_metric(item, "backlinks"),
-                            "referring_domains_count": _backlink_metric(
-                                item, "referring_domains"
-                            ),
-                            "dofollow_backlinks_count": _backlink_metric(
-                                item, "dofollow_backlinks"
-                            ),
-                            "schema_version": CURATED_SCHEMA_VERSION,
-                        }
-                    )
+                rows.append(
+                    {
+                        "run_id": run_id,
+                        "target_keyword_id": target_keyword_id,
+                        "target_keyword": target_keyword,
+                        "response_id": response_id,
+                        "backlink_id": stable_id(run_id, target_keyword, url),
+                        "canonical_url_hash": stable_id(url),
+                        "url": url,
+                        "backlinks_count": _backlink_metric(result, "total_count"),
+                        "referring_domains_count": _referring_domains_count(result),
+                        "dofollow_backlinks_count": _dofollow_backlinks_count(result),
+                        "schema_version": CURATED_SCHEMA_VERSION,
+                    }
+                )
     if not rows:
         return pl.DataFrame(schema=CURATED_VALIDATION_RULES["backlinks"]["expected_schema"])
     return pl.DataFrame(rows, schema=CURATED_VALIDATION_RULES["backlinks"]["expected_schema"])
@@ -1248,6 +1238,40 @@ def _backlink_metric(item: Mapping[str, object], key: str) -> int:
         return int(str(value))
     except (TypeError, ValueError):
         return 0
+
+
+def _dofollow_backlinks_count(result: Mapping[str, object]) -> int:
+    items = result.get("items")
+    if isinstance(items, list):
+        return sum(
+            1
+            for item in items
+            if isinstance(item, Mapping) and item.get("dofollow") is True
+        )
+    backlinks = _backlink_metric(result, "backlinks")
+    attributes = result.get("referring_links_attributes")
+    if not isinstance(attributes, Mapping):
+        return 0
+    nofollow = attributes.get("nofollow")
+    if isinstance(nofollow, bool) or not isinstance(nofollow, (int, float)):
+        return 0
+    return max(backlinks - int(nofollow), 0)
+
+
+def _referring_domains_count(result: Mapping[str, object]) -> int:
+    explicit = _backlink_metric(result, "referring_domains")
+    if explicit:
+        return explicit
+    items = result.get("items")
+    if not isinstance(items, list):
+        return 0
+    domains = {
+        str(item.get("domain_from")).strip()
+        for item in items
+        if isinstance(item, Mapping) and isinstance(item.get("domain_from"), str)
+    }
+    domains.discard("")
+    return len(domains)
 
 
 def _validated_response_body(

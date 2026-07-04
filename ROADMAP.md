@@ -98,7 +98,7 @@ Plackett-Luce analysis.
 
 #### Dev slices
 
-**Progress:** 27 of 42 shipped, 1 partial, 14 open.
+**Progress:** 27 of 42 shipped, 2 partial, 13 open.
 
 1. **[x] Slice 1 — Estimand & analysis spec**
    - Add `analysis_spec.v1.yaml`: outcome (`-log(serp_rank)`), predictors,
@@ -192,18 +192,12 @@ Plackett-Luce analysis.
       clustered vs IID SE guard; see `TESTING.md`.
     - Covered by `tests/unit/test_stats_golden_fixtures.py`.
 
-11. **[ ] Slice 11 — Within-keyword rank transform** → **Phase 6.1 Slice 3**
-    - Add `src/seo_rank/data/ranks.py` with
-      `add_within_keyword_similarity_ranks()` (Polars lazy).
-    - Per backend, derive from absolute scores within each `target_keyword_id`:
-      `{backend}_similarity_rank` (1 = highest; average rank on ties),
-      `{backend}_similarity_pct` (`(rank - 1) / (n - 1)` when `n > 1`; else
-      `null`), `{backend}_similarity_z` (within-keyword z-score; `null` when
-      `n < 2` or `σ = 0`).
-    - **Ranking source:** BGE on `bge_raw_score`; Gemini backends on
-      `*_normalized_score`.
-    - Unit tests: ties, `n = 1`, full top-20 panel, descending order, null
-      when backend score is null (`tests/unit/test_within_keyword_ranks.py`).
+11. **[~] Slice 11 — Within-keyword rank transform** → **Phase 6.1 Slice 3**
+    - **Done:** `src/seo_rank/data/ranks.py` with Polars-lazy
+      `add_within_keyword_similarity_ranks()`; unit tests in
+      `tests/unit/test_within_keyword_ranks.py` (ties, `n = 1`, null scores,
+      full top-20 panel).
+    - **Remaining:** wire into `marts.py` and `analysis_mart.v2` (Slice 12).
 
 12. **[ ] Slice 12 — Analysis mart v2 columns** → **Phase 6.1 Slice 4**
     - Wire rank transform in `marts.py` after `keyword_serp` ⨝ `page_features`
@@ -1183,7 +1177,7 @@ source control (layout ships in Phase 4.5).
 
 #### Dev slices
 
-**Progress:** 0 of 7 shipped (Slice 15 partial baseline from Phase 5).
+**Progress:** 0 of 7 shipped, 2 partial (Slice 15 + Slice 3 from Phase 5 Slice 11).
 
 1. **[ ] Slice 1 — Scaling polish (FIXUPS S5-14–S5-18)**
    - Update `analysis_spec.v1.yaml` `effect_size.note` to document RMS of
@@ -1212,16 +1206,13 @@ source control (layout ships in Phase 4.5).
      - Tests: spec threshold edits change runtime convergence / IIA behavior.
    - FIXUPS **S5-19**.
 
-3. **[ ] Slice 3 — Within-keyword rank transform (Phase 5 Slice 11)**
-   - Add `src/seo_rank/data/ranks.py` with Polars-lazy
-     `add_within_keyword_similarity_ranks()`.
-   - Per backend within `target_keyword_id`: `{backend}_similarity_rank` (1 =
-     highest; average rank on ties), `{backend}_similarity_pct`
-     (`(rank - 1) / (n - 1)` when `n > 1`; else `null`), `{backend}_similarity_z`
-     (within-keyword z-score; `null` when `n < 2` or σ = 0).
-   - **Ranking source:** BGE on `bge_raw_score`; Gemini on `*_normalized_score`.
-   - Tests: `tests/unit/test_within_keyword_ranks.py` (ties, `n = 1`, null scores,
-     zero variance).
+3. **[~] Slice 3 — Within-keyword rank transform (Phase 5 Slice 11)**
+   - **Done:** `src/seo_rank/data/ranks.py` with Polars-lazy
+     `add_within_keyword_similarity_ranks()`; per backend within
+     `target_keyword_id`: `{backend}_similarity_rank`, `{backend}_similarity_pct`,
+     `{backend}_similarity_z` (BGE ranks on `bge_raw_score`; Gemini on
+     `*_normalized_score`). Tests: `tests/unit/test_within_keyword_ranks.py`.
+   - **Remaining:** wire into `marts.py` and `analysis_mart.v2` (Slice 4).
 
 4. **[ ] Slice 4 — Analysis mart v2 columns (Phase 5 Slice 12)**
    - Wire rank transform in `marts.py`; bump `schema_version` to `analysis_mart.v2`.
@@ -1267,6 +1258,63 @@ Slice 4. Slice 7 last.
 | `relative_similarity_sensitivity` in diagnostics JSON | 5 | Open |
 | CLI keyword report surfaces relative ranks | 6 | Open |
 | FIXUPS S5-14–S5-19 closed | 1, 2, 7 | Open |
+
+### Phase 6.2 — Backlinks count family and analysis surfacing
+
+Build a single backlinks-count signal family on top of the existing
+`analysis_mart` panel. This phase uses the curated backlinks counts already
+normalized from the DataForSEO backlinks endpoint, keeps `analysis_mart.v1` as
+the panel contract, and adds one family with three signals:
+`backlinks_count`, `referring_domains_count`, and
+`dofollow_backlinks_count`. The goal is to make backlinks a first-class analysis
+path without splitting it into multiple families or bumping the panel schema.
+
+**Out of scope for 6.2:** a separate referring-networks metric,
+`analysis_mart.v2`, or any new rank-depth contract. If exact network counts are
+needed later, they belong to the dedicated Backlinks API endpoint, not this
+family.
+
+#### Dev slices
+
+**Progress:** 0 of 4 shipped.
+
+1. **[ ] Slice 1 — Panel contract and feature validation**
+   - Extend `FEATURE_VALIDATION_RULES` and `ANALYSIS_REQUIRED_COLUMNS` so the
+     analysis panel admits the three backlinks count columns.
+   - Keep `schema_version` on `analysis_mart.v1`; add bounded non-negative
+     validation for the new count columns.
+   - Preserve the raw response storage path under `raw_responses/endpoint=backlinks`.
+
+2. **[ ] Slice 2 — Backlinks signal family registry**
+   - Add one registry entry, `backlinks_counts`, with kind `backlinks_metric`
+     and the three backlinks count columns.
+   - Teach `src/seo_rank/stats/families.py` and `analysis_spec.v1.yaml` to load
+     the family without introducing a second backlinks family.
+   - Keep family ordering explicit so reports and BH scope treat backlinks as a
+     single family.
+
+3. **[ ] Slice 3 — Family-aware stats and reporting**
+   - Wire the new backlinks family into `spearman`, `regression`,
+     `diagnostics`, and Plackett-Luce artifact generation.
+   - Surface the backlinks family in `stats_summary.json`,
+     `stats_diagnostics.json`, and `stats_report.md`.
+   - Make sure the CLI report shows all three backlinks count signals together
+     rather than as separate family blocks.
+
+4. **[ ] Slice 4 — Fixtures and regressions**
+   - Add golden fixtures for backlinks rows with known count relationships and
+     null/edge-case handling.
+   - Add CLI regressions that confirm live/stored runs still write backlinks raw
+     responses and now emit backlinks family analysis.
+   - Cover the schema, family registry, and report rendering paths with unit
+     tests.
+
+| Acceptance item | Slice(s) | Status |
+| --------------- | -------- | ------ |
+| `analysis_mart.v1` admits backlinks count columns without schema bump | 1 | Open |
+| One backlinks family (`backlinks_counts`) is registered | 2 | Open |
+| Family-aware stats emit backlinks blocks in `stats_*` | 3 | Open |
+| Live/stored CLI regressions cover backlinks raw persistence + analysis | 4 | Open |
 
 ## Deferred
 
@@ -1446,6 +1494,16 @@ Slice 4. Slice 7 last.
   ranking explainability (`textrazor_ranking_r2.py` similarity + TextRazor
   adjusted R², `ranking_r2.json`, curated-model PNG via
   `ranking_explainability_viz.py`, optional `matplotlib` dependency).
+- **Backlinks API + persistence (2026-07-03):** live runs call DataForSEO
+  `/v3/backlinks/backlinks/live` (replacing `backlinks/summary/live`); each URL
+  fetch persists immediately to `raw_responses/endpoint=backlinks` via
+  `persist_backlink_raw_response()`; normalization emits one curated row per
+  `target_keyword × URL` from `result.target` and `total_count`. Stored-run
+  replay overlays `--live-providers` onto offline runs; `--skip-textrazor` stays
+  sticky via `merge_stored_run_cli_overlay()`.
+- **Phase 6.1 Slice 3 partial (2026-07-03):** `src/seo_rank/data/ranks.py`
+  ships Polars-lazy `add_within_keyword_similarity_ranks()` with unit tests in
+  `tests/unit/test_within_keyword_ranks.py`; mart wiring remains Slice 4.
 - **Phase 5.6 planned (2026-07-03):** signal factor & proxy diagnostics —
   NDCG@k, incremental TextRazor-after-BGE regression ladder, partial
   correlation, leave-one-keyword-out stability, keyword holdout and optional

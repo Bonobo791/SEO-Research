@@ -79,16 +79,100 @@ def test_build_page_text_request_uses_content_parsing_endpoint() -> None:
     ]
 
 
-def test_build_backlinks_request_uses_backlinks_summary_endpoint() -> None:
+def test_build_backlinks_request_uses_backlinks_live_endpoint() -> None:
     request = build_backlinks_request("https://example.com/technical-seo/1")
 
     assert request.method == "POST"
-    assert request.path == "/v3/backlinks/summary/live"
+    assert request.path == "/v3/backlinks/backlinks/live"
     assert request.body == [
         {
             "target": "https://example.com/technical-seo/1",
         }
     ]
+
+
+def test_validate_dataforseo_response_accepts_backlinks_live_shape() -> None:
+    response = {
+        "provider": "dataforseo",
+        "endpoint": "backlinks/backlinks/live",
+        "tasks": [
+            {
+                "status_code": 20000,
+                "result": [
+                    {
+                        "target": "https://example.com/technical-seo/1",
+                        "total_count": 42,
+                        "referring_domains": 12,
+                        "items": [
+                            {
+                                "type": "backlink",
+                                "domain_from": "www.example.org",
+                                "url_from": "https://www.example.org/post",
+                                "url_to": "https://example.com/technical-seo/1",
+                                "dofollow": True,
+                                "is_new": False,
+                                "is_lost": False,
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+
+    assert validate_dataforseo_response("backlinks", response) is response
+
+
+def test_validate_dataforseo_response_accepts_backlinks_live_shape_without_referring_domains() -> None:
+    response = {
+        "provider": "dataforseo",
+        "endpoint": "backlinks/backlinks/live",
+        "tasks": [
+            {
+                "status_code": 20000,
+                "result": [
+                    {
+                        "target": "https://example.com/technical-seo/1",
+                        "total_count": 42,
+                        "items": [
+                            {
+                                "type": "backlink",
+                                "domain_from": "www.example.org",
+                                "url_from": "https://www.example.org/post",
+                                "url_to": "https://example.com/technical-seo/1",
+                                "dofollow": True,
+                                "is_new": False,
+                                "is_lost": False,
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+
+    assert validate_dataforseo_response("backlinks", response) is response
+
+
+def test_validate_dataforseo_response_accepts_backlinks_live_shape_with_null_items() -> None:
+    response = {
+        "provider": "dataforseo",
+        "endpoint": "backlinks/backlinks/live",
+        "tasks": [
+            {
+                "status_code": 20000,
+                "result": [
+                    {
+                        "target": "https://example.com/technical-seo/1",
+                        "total_count": 0,
+                        "items": None,
+                    }
+                ],
+            }
+        ],
+    }
+
+    assert validate_dataforseo_response("backlinks", response) is response
 
 
 def test_validate_dataforseo_credentials_rejects_missing_values_without_secrets() -> None:
@@ -195,16 +279,16 @@ def test_validate_dataforseo_response_rejects_schema_drift_with_typed_error() ->
     assert "expected list" in str(error)
 
 
-def test_validate_dataforseo_response_rejects_backlinks_url_type_drift() -> None:
+def test_validate_dataforseo_response_rejects_backlinks_target_type_drift() -> None:
     response = fixture_backlinks_response("https://example.com/technical-seo/1")
-    response["tasks"][0]["result"][0]["items"][0]["url"] = True
+    response["tasks"][0]["result"][0]["target"] = True
 
     with pytest.raises(DataForSeoParseError) as exc_info:
         validate_dataforseo_response("backlinks", response)
 
     error = exc_info.value
     assert error.endpoint == "backlinks"
-    assert error.path == "tasks[0].result[0].items[0].url"
+    assert error.path == "tasks[0].result[0].target"
     assert error.expected == "str"
     assert "got bool" in str(error)
 
