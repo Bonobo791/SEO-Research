@@ -73,7 +73,7 @@ def test_stored_run_docs_describe_partial_resume_and_current_suite_status() -> N
     assert "reuses existing raw responses" in readme
     assert "`--stored-run` resumes partial runs in place" in architecture
     assert "refreshes only missing work" in architecture
-    assert "287 unit tests pass" in testing or "287 unit tests" in testing
+    assert "304 unit tests pass" in testing or "304 unit tests" in testing
     assert "resumes from the saved raw lake" in roadmap
 
 
@@ -145,8 +145,8 @@ def test_phase_45_slice_9_regression_sweep_marks_mart_sink_docs_as_shipped() -> 
     assert "Phase 4.5 Slice 9 shipped" in roadmap
     assert "Phase 4.5 Slice 10 shipped" in roadmap
     assert "Phase 4.5 signed off" in roadmap
-    assert "287 unit tests" in architecture or "287 tests" in architecture or "287 unit tests pass" in architecture
-    assert "287 unit tests pass" in testing or "287 unit tests" in testing
+    assert "304 unit tests" in architecture or "304 tests" in architecture or "304 unit tests pass" in architecture
+    assert "304 unit tests pass" in testing or "304 unit tests" in testing
     assert "sink feature marts lazily with Parquet statistics" in testing
 
 
@@ -194,6 +194,7 @@ def test_phase_5_slice_2_ships_stats_package_scaffold() -> None:
     assert "test_stats_spec.py" in testing
     assert "statsmodels>=0.14" in pyproject["project"]["dependencies"]
     assert "PyYAML>=6.0" in pyproject["project"]["dependencies"]
+    assert "matplotlib>=3.8" in pyproject["project"]["dependencies"]
 
 
 def test_phase_5_slice_5_ships_pooled_regression_secondary_path() -> None:
@@ -262,7 +263,7 @@ def test_phase_5_page_level_plackett_luce_secondary_path_is_documented() -> None
 
     assert "Page-level Plackett-Luce / rank-ordered logit" in goals
     assert "Plackett-Luce (page-level, secondary)" in roadmap
-    assert "passage-level Plackett-Luce analysis" in roadmap
+    assert "passage-level Plackett-Luce" in roadmap
     assert "Slice 15 — Plackett-Luce estimand runtime wiring" in goals
     assert "Slice 15 — Plackett-Luce estimand runtime wiring" in roadmap
     assert "Plackett-Luce (page-level, secondary)" in architecture
@@ -340,6 +341,8 @@ def test_textrazor_signal_expansion_docs_cross_link() -> None:
     assert "**[x] Slice 30 — Fold families into CLI output and artifacts**" in goals
     assert "**[x] Slice 32 — TextRazor page-metrics completeness**" in goals
     assert "**[x] Slice 33 — Small-K exploratory status**" in goals
+    assert "Phase 5.7 — TextRazor structured signals" in roadmap
+    assert "**[ ] Slice 35 — Word/sense/spelling parse fix" in goals
     assert "Phase 5 Slices 29–30 shipped" in roadmap
 
 
@@ -347,8 +350,27 @@ def test_phase_5_progress_counts_are_aligned() -> None:
     goals = (ROOT / "GOALS.md").read_text(encoding="utf-8")
     roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
 
-    assert "24 of 33 shipped, 2 partial, 7 open" in goals
-    assert "24 of 33 shipped, 2 partial, 7 open" in roadmap
+    assert "27 of 42 shipped, 1 partial, 14 open" in goals
+    assert "27 of 42 shipped, 1 partial, 14 open" in roadmap
+
+
+def test_ranking_explainability_docs_cross_link() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
+    testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
+
+    assert "analysis/textrazor_ranking_r2.py" in readme
+    assert "stats/ranking_r2.json" in readme
+    assert "ranking_r2_curated_model.png" in readme
+    assert "ranking_explainability_viz.py" in architecture
+    assert "test_ranking_explainability_viz.py" in testing
+    assert "test_stats_golden_fixtures.py" in testing
+    assert "**[x] Slice 8 — Robustness appendix (influence)**" in (ROOT / "GOALS.md").read_text(
+        encoding="utf-8"
+    )
+    assert "**[x] Slice 10 — Golden fixtures & tests**" in (ROOT / "GOALS.md").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_phase_6_plans_workflow_integrity_guardrails() -> None:

@@ -188,15 +188,28 @@ configured, and optionally requests extended TextRazor analysis (entities, topic
 categories, relations, entailments, and more) per block. It is not part of the
 default CLI `run` flow.
 
-`analysis/textrazor_ranking_r2.py` measures how much TextRazor page metrics
-explain SERP rank on a completed run using pooled OLS adjusted R² (univariate per
-metric plus a joint multivariate model). Requires `parquet/analysis_mart` and
-`parquet/textrazor_page_metrics` from a prior `seo-rank analyze` pass:
+`analysis/textrazor_ranking_r2.py` measures how much similarity backends and
+TextRazor page metrics explain SERP rank on a completed run using pooled OLS
+adjusted R² (univariate per metric plus joint multivariate models). Requires
+`parquet/analysis_mart` and `parquet/textrazor_page_metrics` from a prior
+`seo-rank analyze` pass:
 
 ```bash
 python analysis/textrazor_ranking_r2.py --run runs/RUN_ID
 python analysis/textrazor_ranking_r2.py --run runs/RUN_ID --depth top_10
+python analysis/textrazor_ranking_r2.py --run runs/RUN_ID --no-show
 ```
+
+By default the script opens the curated final-model chart: it uses a matplotlib
+window when Tk/Qt is available, otherwise it opens the saved PNG in your default
+image viewer. Pass `--no-show` to skip display and only write the PNG.
+
+Writes `runs/{run_id}/stats/ranking_r2.json` with `similarity`, `textrazor`, a
+top-level `multivariate` block (all similarity + TextRazor predictors), and
+`multivariate_curated` (relation count, property count, entity relevance, Gemini
+semantic similarity). Also writes `stats/ranking_r2_curated_model.png` and
+`stats/ranking_r2_entity_relevance.png` — coefficient/fit charts for the curated
+model and the entity-relevance-only model.
 
 ```bash
 python -m pytest
@@ -350,14 +363,14 @@ response.
 |------|---------|
 | `src/seo_rank/` | CLI, provider boundaries, `progress.py` (stderr run logging) |
 | `src/seo_rank/data/` | Polars lake transforms: `scans`, `normalize`, `features`, `marts`, `validate` |
-| `src/seo_rank/stats/` | Phase 5 observational analysis (`spec`, `families`, `panel`, `rank_depth`, `spearman`, `regression`, `plackett_luce`, `diagnostics`, `scale`, `textrazor_explainability`, `artifacts`) |
+| `src/seo_rank/stats/` | Phase 5 observational analysis (`spec`, `families`, `panel`, `rank_depth`, `spearman`, `regression`, `plackett_luce`, `diagnostics`, `scale`, `textrazor_explainability`, `ranking_explainability_viz`, `artifacts`) |
 | `tests/unit/` | pytest unit tests |
 | `ARCHITECTURE.md` | Product architecture, data flow, planned pipeline |
 | `GOALS.md` | Active-scope contract |
 | `FIXUPS.md` | Slice-scoped small fixes backlog |
 | `ROADMAP.md` | Backlog and history |
 | `analysis/gemini_nwh_similarity.py` | Standalone Gemini/BGE/TextRazor block-scoring experiment |
-| `analysis/textrazor_ranking_r2.py` | Standalone TextRazor adjusted R² ranking explainability script |
+| `analysis/textrazor_ranking_r2.py` | Standalone similarity + TextRazor adjusted R² ranking explainability script (writes `stats/ranking_r2.json` and PNG charts) |
 | `TESTING.md` | Verification contract |
 
 ## Documentation

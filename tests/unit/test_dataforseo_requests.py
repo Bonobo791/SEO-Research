@@ -6,9 +6,11 @@ from seo_rank.dataforseo import (
     DataForSeoParseError,
     decode_content_parsing_items,
     build_keyword_expansion_request,
+    build_backlinks_request,
     build_page_text_request,
     build_serp_request,
     execute_dataforseo_request,
+    fixture_backlinks_response,
     fixture_keyword_expansion_response,
     fixture_page_text_response,
     fixture_serp_response,
@@ -73,6 +75,18 @@ def test_build_page_text_request_uses_content_parsing_endpoint() -> None:
             "accept_language": "en-US",
             "browser_preset": "desktop",
             "store_raw_html": True,
+        }
+    ]
+
+
+def test_build_backlinks_request_uses_backlinks_summary_endpoint() -> None:
+    request = build_backlinks_request("https://example.com/technical-seo/1")
+
+    assert request.method == "POST"
+    assert request.path == "/v3/backlinks/summary/live"
+    assert request.body == [
+        {
+            "target": "https://example.com/technical-seo/1",
         }
     ]
 
@@ -151,6 +165,7 @@ def test_execute_dataforseo_request_posts_json_with_basic_auth() -> None:
     [
         ("keyword_expansion", fixture_keyword_expansion_response("technical seo")),
         ("serp", fixture_serp_response("technical seo")),
+        ("backlinks", fixture_backlinks_response("https://example.com/technical-seo/1")),
         (
             "page_text",
             fixture_page_text_response(
@@ -178,6 +193,20 @@ def test_validate_dataforseo_response_rejects_schema_drift_with_typed_error() ->
     assert error.endpoint == "serp"
     assert error.path == "tasks"
     assert "expected list" in str(error)
+
+
+def test_validate_dataforseo_response_rejects_backlinks_url_type_drift() -> None:
+    response = fixture_backlinks_response("https://example.com/technical-seo/1")
+    response["tasks"][0]["result"][0]["items"][0]["url"] = True
+
+    with pytest.raises(DataForSeoParseError) as exc_info:
+        validate_dataforseo_response("backlinks", response)
+
+    error = exc_info.value
+    assert error.endpoint == "backlinks"
+    assert error.path == "tasks[0].result[0].items[0].url"
+    assert error.expected == "str"
+    assert "got bool" in str(error)
 
 
 def test_validate_dataforseo_response_rejects_bool_rank_group_as_int() -> None:

@@ -16,6 +16,7 @@ DATAFORSEO_KEYWORD_EXPANSION_PATH = (
 )
 DATAFORSEO_SERP_PATH = "/v3/serp/google/organic/live/advanced"
 DATAFORSEO_PAGE_TEXT_PATH = "/v3/on_page/content_parsing/live"
+DATAFORSEO_BACKLINKS_PATH = "/v3/backlinks/summary/live"
 
 
 @dataclass(frozen=True)
@@ -93,6 +94,15 @@ DATAFORSEO_RESPONSE_SCHEMAS: dict[str, tuple[DataForSeoFieldSchema, ...]] = {
         DataForSeoFieldSchema(("tasks",), list),
         DataForSeoFieldSchema(("tasks", "[]", "result"), (list, type(None))),
     ),
+    "backlinks": (
+        DataForSeoFieldSchema(("tasks",), list),
+        DataForSeoFieldSchema(("tasks", "[]", "result"), (list, type(None))),
+        DataForSeoFieldSchema(("tasks", "[]", "result", "[]", "items"), list),
+        DataForSeoFieldSchema(
+            ("tasks", "[]", "result", "[]", "items", "[]", "url"),
+            str,
+        ),
+    ),
 }
 
 
@@ -163,6 +173,23 @@ def build_page_text_request(
                 "accept_language": "en-US",
                 "browser_preset": "desktop",
                 "store_raw_html": True,
+            }
+        ],
+    )
+
+
+def build_backlinks_request(
+    url: str,
+) -> ProviderRequest:
+    """Build a DataForSEO backlinks summary request without executing it."""
+
+    return ProviderRequest(
+        method="POST",
+        path=DATAFORSEO_BACKLINKS_PATH,
+        headers={"Content-Type": "application/json"},
+        body=[
+            {
+                "target": url,
             }
         ],
     )
@@ -241,6 +268,8 @@ def validate_dataforseo_response(
         _validate_content_parsing_response(response)
     elif endpoint == "serp":
         _validate_serp_response(response)
+    elif endpoint == "backlinks":
+        _validate_backlinks_response(response)
     return response
 
 
@@ -502,6 +531,44 @@ def _validate_serp_response(response: Mapping[str, object]) -> None:
                 )
 
 
+def _validate_backlinks_response(response: Mapping[str, object]) -> None:
+    tasks = response.get("tasks", [])
+    if not isinstance(tasks, list):
+        return
+    for task_index, task in enumerate(tasks):
+        if not isinstance(task, Mapping):
+            continue
+        results = task.get("result", [])
+        if not isinstance(results, list):
+            continue
+        for result_index, result in enumerate(results):
+            if not isinstance(result, Mapping):
+                continue
+            items = result.get("items", [])
+            if not isinstance(items, list):
+                continue
+            for item_index, item in enumerate(items):
+                if not isinstance(item, Mapping):
+                    continue
+                item_path = (
+                    f"tasks[{task_index}].result[{result_index}].items[{item_index}]"
+                )
+                if "url" not in item:
+                    raise DataForSeoParseError(
+                        endpoint="backlinks",
+                        path=f"{item_path}.url",
+                        expected="present",
+                        actual=None,
+                        actual_type="field absent",
+                    )
+                _raise_unless_type(
+                    item["url"],
+                    str,
+                    f"{item_path}.url",
+                    endpoint="backlinks",
+                )
+
+
 def _content_parsing_item_has_body(item: Mapping[str, object]) -> bool:
     return any(
         item.get(key) is not None
@@ -651,6 +718,33 @@ def fixture_serp_response(keyword: str) -> dict[str, object]:
                 "result": [
                     {
                         "items": items,
+                    }
+                ],
+            }
+        ],
+    }
+
+
+def fixture_backlinks_response(url: str) -> dict[str, object]:
+    """Return a deterministic DataForSEO-shaped backlink summary fixture."""
+
+    return {
+        "provider": "dataforseo",
+        "endpoint": "backlinks/summary/live",
+        "url": url,
+        "tasks": [
+            {
+                "url": url,
+                "result": [
+                    {
+                        "items": [
+                            {
+                                "url": url,
+                                "backlinks": 42,
+                                "referring_domains": 12,
+                                "dofollow_backlinks": 30,
+                            }
+                        ]
                     }
                 ],
             }
@@ -824,6 +918,24 @@ def parsed_page_text_details(response: Mapping[str, Any]) -> dict[str, str]:
     if fallback_url:
         return {"url": fallback_url, "title": "", "text": "", "raw_html": ""}
     return {}
+
+
+def extract_response_url(response: Mapping[str, object]) -> str | None:
+    url = response.get("url")
+    if isinstance(url, str):
+        return url
+    tasks = response.get("tasks")
+    if not isinstance(tasks, list) or not tasks:
+        return None
+    task = tasks[0]
+    if not isinstance(task, Mapping):
+        return None
+    task_url = task.get("url")
+    if isinstance(task_url, str):
+        return task_url
+    parsed_page = parsed_page_text(response)
+    parsed_url = parsed_page.get("url")
+    return parsed_url if isinstance(parsed_url, str) else None
 
 
 def decode_content_parsing_items(

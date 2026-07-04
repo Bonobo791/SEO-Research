@@ -1,11 +1,14 @@
-from pathlib import Path
 import json
 import logging
+from pathlib import Path
+from types import SimpleNamespace
 import warnings
 
+import numpy as np
 import polars as pl
 import pytest
 
+import seo_rank.stats.artifacts as artifacts_module
 from seo_rank.stats.artifacts import run_phase5_stats
 from seo_rank.stats import diagnostics as diagnostics_module
 from seo_rank.stats.diagnostics import summarize_backend_diagnostics
@@ -120,6 +123,65 @@ def test_summarize_backend_diagnostics_reports_reset_bp_and_influence_metrics() 
     assert summary["breusch_pagan"]["recommended_se_type"] == "HC3"
     assert summary["influence"]["cook_d_threshold"] == pytest.approx(4 / summary["row_count"])
     assert summary["influence"]["influential_count"] >= 1
+    assert summary["influence_sensitivity"]["status"] == "computed"
+    assert summary["influence_sensitivity"]["row_count"] == summary["row_count"]
+    assert summary["influence_sensitivity"]["trimmed_row_count"] < summary["row_count"]
+    assert summary["influence_sensitivity"]["sensitivity_coefficient"] != summary[
+        "influence_sensitivity"
+    ]["confirmatory_coefficient"]
+    assert summary["influence_sensitivity"]["coefficient_delta"] == pytest.approx(
+        summary["influence_sensitivity"]["sensitivity_coefficient"]
+        - summary["influence_sensitivity"]["confirmatory_coefficient"]
+    )
+
+
+def test_summarize_backend_diagnostics_skips_influence_sensitivity_when_trimmed_subset_is_unusable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model_data = pl.DataFrame(
+        [
+            {
+                "target_keyword_id": "kw-1",
+                "serp_rank": 1,
+                "page_text_length": 100,
+                "bge_normalized_score": 1.0,
+            },
+            {
+                "target_keyword_id": "kw-1",
+                "serp_rank": 2,
+                "page_text_length": 101,
+                "bge_normalized_score": 0.9,
+            },
+            {
+                "target_keyword_id": "kw-1",
+                "serp_rank": 3,
+                "page_text_length": 102,
+                "bge_normalized_score": 0.8,
+            },
+        ]
+    ).to_pandas()
+    fit = SimpleNamespace(
+        backend="bge",
+        score_column="bge_normalized_score",
+        feature_result=SimpleNamespace(nobs=len(model_data)),
+        model_data=model_data,
+    )
+
+    monkeypatch.setattr(
+        diagnostics_module,
+        "_refit_backend_regression_from_model_data",
+        lambda *args, **kwargs: None,
+    )
+    summary = diagnostics_module._summarize_influence_sensitivity(
+        fit,
+        cooks_d=np.array([0.7, 0.8, 0.1], dtype=float),
+        cooks_d_threshold=0.5,
+    )
+
+    assert summary["status"] == "skipped"
+    assert summary["skipped_reason"] == "trimmed_subset_unusable"
+    assert summary["influential_row_count"] == 2
+    assert summary["row_count"] == 3
 
 
 def test_summarize_backend_diagnostics_marks_small_sample_shapiro_as_informational() -> None:
@@ -188,12 +250,18 @@ def test_run_phase5_stats_writes_stats_diagnostics_json_and_report_section(
     diagnostics_path = run_dir / "stats" / "stats_diagnostics.json"
     report_path = run_dir / "stats" / "stats_report.md"
     diagnostics = json.loads(diagnostics_path.read_text(encoding="utf-8"))
+    summary = json.loads((run_dir / "stats" / "stats_summary.json").read_text(encoding="utf-8"))
     report = report_path.read_text(encoding="utf-8")
 
     assert result.hard_fail is False
     assert diagnostics_path.exists()
     assert diagnostics["analysis_spec_version"]
     assert diagnostics["backends"]["bge"]["backend"] == "bge"
+    assert any(
+        guardrail["name"] == "influential_rows_rate"
+        for guardrail in summary["rank_depths"]["top_20"]["guardrails"]
+    )
+    assert "### Influence robustness" in report
     assert "## Diagnostics" in report
 
 
@@ -257,6 +325,65 @@ def test_run_phase5_stats_writes_multivariate_sensitivity_block_and_report_secti
         "unresolved",
     }
     assert "### Robustness" in report
+
+
+def test_append_influential_rows_guardrail_marks_pass_and_warn_at_threshold() -> None:
+    spec = load_analysis_spec()
+    base_guardrails = [
+        {
+            "name": "serp_rank_variance_within_keyword",
+            "status": "pass",
+            "value": 0.25,
+            "threshold": 0,
+        },
+        {
+            "name": "similarity_variance_within_keyword",
+            "status": "warn",
+            "value": {
+                "bge": 0.0,
+                "gemini_doc_retrieval": 0.0,
+                "gemini_semantic_similarity": 0.0,
+            },
+            "threshold": 0,
+        },
+    ]
+
+    pass_bundle = {"guardrails": [dict(guardrail) for guardrail in base_guardrails]}
+    artifacts_module._append_influential_rows_guardrail(
+        pass_bundle,
+        spec=spec,
+        regression_diagnostics={
+            "backends": {
+                "bge": {
+                    "status": "computed",
+                    "influence": {"cook_d_count": 2, "row_count": 40},
+                }
+            }
+        },
+    )
+
+    warn_bundle = {"guardrails": [dict(guardrail) for guardrail in base_guardrails]}
+    artifacts_module._append_influential_rows_guardrail(
+        warn_bundle,
+        spec=spec,
+        regression_diagnostics={
+            "backends": {
+                "bge": {
+                    "status": "computed",
+                    "influence": {"cook_d_count": 3, "row_count": 40},
+                }
+            }
+        },
+    )
+
+    assert pass_bundle["guardrails"][-1]["name"] == "influential_rows_rate"
+    assert pass_bundle["guardrails"][-1]["status"] == "pass"
+    assert pass_bundle["guardrails"][-1]["value"] == pytest.approx(0.05)
+    assert pass_bundle["guardrails"][-1]["threshold"] == 0.05
+    assert warn_bundle["guardrails"][-1]["name"] == "influential_rows_rate"
+    assert warn_bundle["guardrails"][-1]["status"] == "warn"
+    assert warn_bundle["guardrails"][-1]["value"] == pytest.approx(0.075)
+    assert warn_bundle["guardrails"][-1]["threshold"] == 0.05
 
 
 def test_summarize_backend_diagnostics_skips_when_backend_has_no_usable_rows() -> None:

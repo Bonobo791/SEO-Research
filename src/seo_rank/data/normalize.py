@@ -18,6 +18,7 @@ from seo_rank.dataforseo import (
     DATAFORSEO_RESPONSE_SCHEMAS,
     DEFAULT_KEYWORD_LIMIT,
     decode_content_parsing_items,
+    extract_response_url,
     normalize_keyword_expansion,
     normalize_serp_results,
     parsed_page_text,
@@ -186,6 +187,21 @@ CURATED_SCHEMAS = {
             ("gemini_doc_retrieval_normalized_score", pa.float64()),
             ("gemini_semantic_similarity_raw_score", pa.float64()),
             ("gemini_semantic_similarity_normalized_score", pa.float64()),
+            ("schema_version", pa.string()),
+        ]
+    ),
+    "backlinks": pa.schema(
+        [
+            ("run_id", pa.string()),
+            ("target_keyword_id", pa.string()),
+            ("target_keyword", pa.string()),
+            ("response_id", pa.string()),
+            ("backlink_id", pa.string()),
+            ("canonical_url_hash", pa.string()),
+            ("url", pa.string()),
+            ("backlinks_count", pa.int64()),
+            ("referring_domains_count", pa.int64()),
+            ("dofollow_backlinks_count", pa.int64()),
             ("schema_version", pa.string()),
         ]
     ),
@@ -512,6 +528,35 @@ CURATED_VALIDATION_RULES = {
             "gemini_semantic_similarity_normalized_score": (0, 1),
         },
     },
+    "backlinks": {
+        "expected_schema": {
+            "run_id": pl.Utf8,
+            "target_keyword_id": pl.Utf8,
+            "target_keyword": pl.Utf8,
+            "response_id": pl.Utf8,
+            "backlink_id": pl.Utf8,
+            "canonical_url_hash": pl.Utf8,
+            "url": pl.Utf8,
+            "backlinks_count": pl.Int64,
+            "referring_domains_count": pl.Int64,
+            "dofollow_backlinks_count": pl.Int64,
+            "schema_version": pl.Utf8,
+        },
+        "unique_columns": ("backlink_id",),
+        "non_null_columns": (
+            "run_id",
+            "target_keyword_id",
+            "target_keyword",
+            "response_id",
+            "backlink_id",
+            "canonical_url_hash",
+            "url",
+            "backlinks_count",
+            "referring_domains_count",
+            "dofollow_backlinks_count",
+            "schema_version",
+        ),
+    },
 }
 
 CURATED_PAGE_AND_PASSAGE_SCHEMA = {
@@ -647,6 +692,9 @@ def build_curated_lazyframes_from_raw_responses(
     serp_responses = raw_responses.filter(pl.col("endpoint") == "serp").select(
         ["run_id", "response_id", "target_keyword", "response_body_bytes"]
     )
+    backlink_responses = raw_responses.filter(pl.col("endpoint") == "backlinks").select(
+        ["run_id", "response_id", "target_keyword", "response_body_bytes"]
+    )
     page_responses = raw_responses.filter(pl.col("endpoint") == "page_text").select(
         ["run_id", "response_id", "target_keyword", "response_body_bytes"]
     )
@@ -666,6 +714,10 @@ def build_curated_lazyframes_from_raw_responses(
     serp_items = serp_responses.map_batches(
         lambda frame: build_serp_items_frame(frame, run_id=run_id, depth=depth),
         schema=CURATED_VALIDATION_RULES["serp_items"]["expected_schema"],
+    )
+    backlinks = backlink_responses.map_batches(
+        lambda frame: build_backlinks_frame(frame, run_id=run_id),
+        schema=CURATED_VALIDATION_RULES["backlinks"]["expected_schema"],
     )
     pages_and_passages = page_responses.map_batches(
         lambda frame: build_pages_and_passages_frame(frame, run_id=run_id),
@@ -733,6 +785,7 @@ def build_curated_lazyframes_from_raw_responses(
     return {
         "keywords": keywords,
         "serp_items": serp_items,
+        "backlinks": backlinks,
         "pages": pages,
         "page_html": page_html,
         "page_content_fields": page_content_field_rows,
@@ -808,8 +861,68 @@ def build_serp_items_frame(
                     "description": str(result["description"]),
                     "schema_version": CURATED_SCHEMA_VERSION,
                 }
-            )
+        )
     return pl.DataFrame(rows)
+
+
+def build_backlinks_frame(
+    frame: pl.DataFrame,
+    *,
+    run_id: str,
+) -> pl.DataFrame:
+    rows: list[dict[str, object]] = []
+    for record in frame.to_dicts():
+        response_id = str(record["response_id"])
+        target_keyword = str(record["target_keyword"])
+        target_keyword_id = stable_id(target_keyword)
+        body = _validated_response_body(record, endpoint="backlinks")
+        response_url = extract_response_url(body)
+        tasks = body.get("tasks", [])
+        if not isinstance(tasks, list):
+            continue
+        for task in tasks:
+            if not isinstance(task, Mapping):
+                continue
+            results = task.get("result", [])
+            if not isinstance(results, list):
+                continue
+            for result in results:
+                if not isinstance(result, Mapping):
+                    continue
+                items = result.get("items", [])
+                if not isinstance(items, list):
+                    continue
+                for item in items:
+                    if not isinstance(item, Mapping):
+                        continue
+                    url = item.get("url")
+                    if not isinstance(url, str) or not url.strip():
+                        if isinstance(response_url, str) and response_url.strip():
+                            url = response_url
+                        else:
+                            continue
+                    rows.append(
+                        {
+                            "run_id": run_id,
+                            "target_keyword_id": target_keyword_id,
+                            "target_keyword": target_keyword,
+                            "response_id": response_id,
+                            "backlink_id": stable_id(run_id, target_keyword, url),
+                            "canonical_url_hash": stable_id(url),
+                            "url": url,
+                            "backlinks_count": _backlink_metric(item, "backlinks"),
+                            "referring_domains_count": _backlink_metric(
+                                item, "referring_domains"
+                            ),
+                            "dofollow_backlinks_count": _backlink_metric(
+                                item, "dofollow_backlinks"
+                            ),
+                            "schema_version": CURATED_SCHEMA_VERSION,
+                        }
+                    )
+    if not rows:
+        return pl.DataFrame(schema=CURATED_VALIDATION_RULES["backlinks"]["expected_schema"])
+    return pl.DataFrame(rows, schema=CURATED_VALIDATION_RULES["backlinks"]["expected_schema"])
 
 
 def build_pages_and_passages_frame(
@@ -1121,6 +1234,20 @@ def _load_run_page_similarity_scores(
             raise ValueError("run.json page_similarity entries must contain scores")
         scores_by_keyword.setdefault(target_keyword, {})[url] = dict(page_score)
     return scores_by_keyword
+
+
+def _backlink_metric(item: Mapping[str, object], key: str) -> int:
+    value = item.get(key)
+    if value is None:
+        return 0
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, (int, float)):
+        return int(value)
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _validated_response_body(

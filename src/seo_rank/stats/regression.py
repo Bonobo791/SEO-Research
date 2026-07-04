@@ -371,6 +371,35 @@ def fit_regression_for_score_column(
         logger.debug("regression backend=%s skipped: no keywords", label)
         return None
 
+    fit = _fit_backend_regression_from_model_data(
+        model_data,
+        label=label,
+        score_column=score_column,
+    )
+    if fit is None:
+        logger.debug("regression backend=%s skipped: non-positive residual df", label)
+        return None
+    return fit
+
+
+def _score_column_for_backend(backend: str) -> str:
+    try:
+        return SIMILARITY_SCORE_COLUMNS[backend]
+    except KeyError as exc:
+        raise ValueError(f"unsupported backend {backend}") from exc
+
+
+def _fit_backend_regression_from_model_data(
+    model_data: pd.DataFrame,
+    *,
+    label: str,
+    score_column: str,
+) -> BackendRegressionFit | None:
+    model_data = model_data.copy()
+    keyword_count = int(model_data["target_keyword_id"].nunique())
+    if keyword_count < 1:
+        return None
+
     similarity_within_keyword_sd = within_keyword_sd_rms(model_data, score_column)
     model_data["outcome"] = -np.log(model_data["serp_rank"].astype(float))
 
@@ -380,7 +409,6 @@ def fit_regression_for_score_column(
         baseline_result = smf.ols(baseline_formula, data=model_data).fit()
         feature_result = smf.ols(feature_formula, data=model_data).fit()
         if feature_result.df_resid <= 0:
-            logger.debug("regression backend=%s skipped: non-positive residual df", label)
             return None
         clustered_result = feature_result.get_robustcov_results(
             cov_type="cluster",
@@ -392,7 +420,6 @@ def fit_regression_for_score_column(
         baseline_result = smf.ols(baseline_formula, data=model_data).fit()
         feature_result = smf.ols(feature_formula, data=model_data).fit()
         if feature_result.df_resid <= 0:
-            logger.debug("regression backend=%s skipped: non-positive residual df", label)
             return None
         clustered_result = feature_result.get_robustcov_results(cov_type="HC3")
 
@@ -407,13 +434,6 @@ def fit_regression_for_score_column(
         clustered_result=clustered_result,
         similarity_within_keyword_sd=similarity_within_keyword_sd,
     )
-
-
-def _score_column_for_backend(backend: str) -> str:
-    try:
-        return SIMILARITY_SCORE_COLUMNS[backend]
-    except KeyError as exc:
-        raise ValueError(f"unsupported backend {backend}") from exc
 
 
 def _prepare_regression_frame(

@@ -294,6 +294,11 @@ def build_rank_depth_bundles(
                 "regression": diagnostics,
                 "plackett_luce": plackett_luce_diagnostics,
             }
+            _append_influential_rows_guardrail(
+                bundle,
+                spec=spec,
+                regression_diagnostics=diagnostics,
+            )
             if depth_key == spec.primary_rank_depth:
                 depth_diagnostics["multivariate_sensitivity"] = summarize_multivariate_sensitivity(
                     depth_mart,
@@ -527,6 +532,8 @@ def _rank_depth_report_sections(
     if diagnostics is not None:
         lines.extend(["", "### Diagnostics"])
         lines.extend(_format_diagnostics_lines(diagnostics))
+        lines.extend(["", "### Influence robustness"])
+        lines.extend(_format_influence_sensitivity_lines(diagnostics))
 
     multivariate_sensitivity = depth_diagnostics.get("multivariate_sensitivity")
     if multivariate_sensitivity is not None:
@@ -770,6 +777,39 @@ def _format_diagnostics_lines(diagnostics: dict[str, object]) -> list[str]:
     return lines
 
 
+def _format_influence_sensitivity_lines(diagnostics: dict[str, object]) -> list[str]:
+    lines: list[str] = []
+    for backend, backend_summary in diagnostics["backends"].items():
+        backend_summary = dict(backend_summary)
+        influence_sensitivity = backend_summary.get("influence_sensitivity")
+        if not isinstance(influence_sensitivity, dict):
+            lines.append(f"- {backend}: status=skipped, skipped_reason=no_influence_sensitivity")
+            continue
+        if influence_sensitivity.get("status") == "skipped":
+            lines.append(
+                "- "
+                f"{backend}: status=skipped, "
+                f"skipped_reason={influence_sensitivity['skipped_reason']}, "
+                f"row_count={influence_sensitivity.get('row_count', 0)}, "
+                f"influential_row_count={influence_sensitivity.get('influential_row_count', 0)}, "
+                f"influential_row_rate={influence_sensitivity.get('influential_row_rate', 0.0)}"
+            )
+            continue
+        lines.append(
+            "- "
+            f"{backend}: status={influence_sensitivity['status']}, "
+            f"row_count={influence_sensitivity['row_count']}, "
+            f"trimmed_row_count={influence_sensitivity['trimmed_row_count']}, "
+            f"influential_row_count={influence_sensitivity['influential_row_count']}, "
+            f"influential_row_rate={influence_sensitivity['influential_row_rate']}, "
+            f"confirmatory_coefficient={influence_sensitivity['confirmatory_coefficient']}, "
+            f"sensitivity_coefficient={influence_sensitivity['sensitivity_coefficient']}, "
+            f"coefficient_delta={influence_sensitivity['coefficient_delta']}, "
+            f"sensitivity_ci={influence_sensitivity['sensitivity_confidence_interval']}"
+        )
+    return lines
+
+
 def _format_multivariate_sensitivity_lines(sensitivity: dict[str, object]) -> list[str]:
     lines: list[str] = []
     drop_path = " -> ".join(sensitivity.get("drop_path", [])) or "none"
@@ -848,6 +888,48 @@ def _compute_actionable_association(
         return False
     lower, upper = float(confidence_interval[0]), float(confidence_interval[1])
     return bool(lower > 0 or upper < 0)
+
+
+def _append_influential_rows_guardrail(
+    bundle: dict[str, object],
+    *,
+    spec: AnalysisSpec,
+    regression_diagnostics: dict[str, object],
+) -> None:
+    guardrail_threshold = _warn_guardrail_threshold(spec, "influential_rows_rate")
+    backend_summary = regression_diagnostics.get("backends", {}).get(spec.primary_backend)
+    if not isinstance(backend_summary, dict):
+        return
+    influence = backend_summary.get("influence")
+    if not isinstance(influence, dict):
+        return
+
+    row_count = int(influence.get("row_count", 0))
+    cook_d_count = int(influence.get("cook_d_count", 0))
+    if row_count <= 0:
+        return
+
+    value = float(cook_d_count / row_count)
+    guardrail = {
+        "name": "influential_rows_rate",
+        "status": "warn" if value > guardrail_threshold else "pass",
+        "value": value,
+        "threshold": guardrail_threshold,
+    }
+    guardrails = [
+        guardrail_item
+        for guardrail_item in bundle.get("guardrails", [])
+        if guardrail_item.get("name") != guardrail["name"]
+    ]
+    guardrails.append(guardrail)
+    bundle["guardrails"] = guardrails
+
+
+def _warn_guardrail_threshold(spec: AnalysisSpec, guardrail_name: str) -> float:
+    for guardrail in spec.data["guardrails"]["warn"]:
+        if guardrail["name"] == guardrail_name:
+            return float(guardrail["threshold"])
+    raise KeyError(f"unknown warn guardrail {guardrail_name}")
 
 
 def write_stats_artifacts(

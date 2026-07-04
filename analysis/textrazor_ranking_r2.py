@@ -12,16 +12,17 @@ if str(REPO_SRC) not in sys.path:
 
 from seo_rank.stats.spec import load_analysis_spec
 from seo_rank.stats.textrazor_explainability import (
+    load_similarity_explainability_panel,
     load_textrazor_explainability_panel,
-    summarize_textrazor_ranking_explainability,
+    summarize_ranking_explainability,
 )
 
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Measure how much TextRazor page metrics explain SERP rank "
-            "using pooled OLS adjusted R²."
+            "Measure how much similarity backends and TextRazor page metrics "
+            "explain SERP rank using pooled OLS adjusted R²."
         )
     )
     parser.add_argument(
@@ -35,6 +36,11 @@ def _parse_args() -> argparse.Namespace:
         default=None,
         choices=["top_20", "top_10", "top_5", "top_3"],
         help="Rank depth filter (default: analysis spec primary depth)",
+    )
+    parser.add_argument(
+        "--no-show",
+        action="store_true",
+        help="Skip the interactive plot window (still writes PNG when matplotlib is available)",
     )
     return parser.parse_args()
 
@@ -72,7 +78,7 @@ def _format_p_value(value: object) -> str:
 
 def _render_univariate_table(summary: dict[str, object]) -> str:
     header = (
-        f"{'metric':<20} {'n':>6} {'baseline R²':>12} "
+        f"{'metric':<28} {'n':>6} {'baseline R²':>12} "
         f"{'feature R²':>12} {'Δ R²':>10} {'coef':>10} {'p-value':>10}"
     )
     lines = [header, "-" * len(header)]
@@ -87,7 +93,7 @@ def _render_univariate_table(summary: dict[str, object]) -> str:
         row_count = entry.get("row_count", 0)
         if entry.get("status") != "computed":
             lines.append(
-                f"{label:<20} {int(row_count):>6} {'skipped':>12} "
+                f"{label:<28} {int(row_count):>6} {'skipped':>12} "
                 f"{str(entry.get('skipped_reason', '')):>12}"
             )
             continue
@@ -99,7 +105,7 @@ def _render_univariate_table(summary: dict[str, object]) -> str:
         if not isinstance(delta, dict):
             delta = {}
         lines.append(
-            f"{label:<20} {int(row_count):>6} "
+            f"{label:<28} {int(row_count):>6} "
             f"{_format_float(baseline.get('adjusted_r_squared')):>12} "
             f"{_format_float(feature.get('adjusted_r_squared')):>12} "
             f"{_format_float(delta.get('adjusted_r_squared')):>10} "
@@ -109,28 +115,27 @@ def _render_univariate_table(summary: dict[str, object]) -> str:
     return "\n".join(lines)
 
 
-def _render_multivariate_section(summary: dict[str, object]) -> str:
-    multivariate = summary.get("multivariate")
+def _render_multivariate_section(multivariate: object, *, title: str) -> str:
     if not isinstance(multivariate, dict):
-        return "Combined model: unavailable"
+        return f"{title}: unavailable"
 
     if multivariate.get("status") != "computed":
         reason = multivariate.get("skipped_reason", "unknown")
         row_count = multivariate.get("row_count", 0)
-        return f"Combined model: skipped ({reason}, n={row_count})"
+        return f"{title}: skipped ({reason}, n={row_count})"
 
     baseline = multivariate.get("baseline_model") or {}
     feature = multivariate.get("feature_model") or {}
     delta = multivariate.get("descriptive_fit_delta") or {}
     if not isinstance(baseline, dict) or not isinstance(feature, dict):
-        return "Combined model: unavailable"
+        return f"{title}: unavailable"
     if not isinstance(delta, dict):
         delta = {}
 
     lines = [
         "",
-        "Combined model (all five metrics)",
-        "-" * 40,
+        title,
+        "-" * len(title),
         f"rows: {multivariate.get('row_count', 0)}",
         f"keywords: {multivariate.get('keyword_count', 0)}",
         f"baseline adjusted R²: {_format_float(baseline.get('adjusted_r_squared'))}",
@@ -150,6 +155,56 @@ def _render_multivariate_section(summary: dict[str, object]) -> str:
     return "\n".join(lines)
 
 
+def _render_metric_group(
+    summary: dict[str, object],
+    *,
+    section_title: str,
+    combined_title: str,
+) -> str:
+    panel = summary.get("panel")
+    panel_rows = 0
+    panel_keywords = 0
+    if isinstance(panel, dict):
+        panel_rows = int(panel.get("rows", 0))
+        panel_keywords = int(panel.get("keywords", 0))
+
+    lines = [
+        section_title,
+        "-" * len(section_title),
+        f"panel rows: {panel_rows}  keywords: {panel_keywords}",
+        "",
+        _render_univariate_table(summary),
+        _render_multivariate_section(summary.get("multivariate"), title=combined_title),
+    ]
+    return "\n".join(lines)
+
+
+def _entity_relevance_univariate(summary: dict[str, object]) -> dict[str, object] | None:
+    textrazor = summary.get("textrazor")
+    if not isinstance(textrazor, dict):
+        return None
+    univariate = textrazor.get("univariate")
+    if not isinstance(univariate, list):
+        return None
+    for entry in univariate:
+        if isinstance(entry, dict) and entry.get("label") == "entity_relevance":
+            return entry
+    return None
+
+
+def _print_viz_result(viz_result: object, *, no_show: bool) -> None:
+    if viz_result is None:
+        return
+    output_path = getattr(viz_result, "output_path", None)
+    display_message = getattr(viz_result, "display_message", None)
+    if output_path is not None and no_show:
+        print(f"Wrote {output_path}")
+    elif display_message is not None:
+        print(display_message)
+    elif output_path is not None:
+        print(f"Wrote {output_path}")
+
+
 def main() -> None:
     args = _parse_args()
     run_dir = args.run.resolve()
@@ -157,34 +212,114 @@ def main() -> None:
         raise SystemExit(f"Run directory not found: {run_dir}")
 
     _require_run_artifacts(run_dir)
+    try:
+        from seo_rank.stats.ranking_explainability_viz import (
+            write_curated_model_visualization,
+            write_entity_relevance_visualization,
+        )
+    except ModuleNotFoundError as error:
+        if error.name != "matplotlib":
+            raise
+        write_curated_model_visualization = None
+        write_entity_relevance_visualization = None
     spec = load_analysis_spec()
-    panel, rank_depth, limitations, _ = load_textrazor_explainability_panel(
+    similarity_panel, rank_depth, limitations, _ = load_similarity_explainability_panel(
         run_dir,
         rank_depth=args.depth,
         spec=spec,
     )
-    summary = summarize_textrazor_ranking_explainability(
-        panel,
+    textrazor_panel, _, _, _ = load_textrazor_explainability_panel(
+        run_dir,
+        rank_depth=args.depth,
+        spec=spec,
+    )
+    summary = summarize_ranking_explainability(
+        similarity_panel,
+        textrazor_panel,
         run_id=run_dir.name,
         rank_depth=rank_depth,
         spec=spec,
         limitations=limitations,
     )
 
-    print(f"TextRazor ranking explainability — {run_dir.name} ({rank_depth})")
+    print(f"Ranking explainability — {run_dir.name} ({rank_depth})")
     print(f"outcome: {summary['estimand']['outcome']}")
     print(f"baseline: {summary['estimand']['baseline_formula']}")
-    print(f"panel rows: {summary['panel']['rows']}  keywords: {summary['panel']['keywords']}")
     print()
-    print(_render_univariate_table(summary))
-    print(_render_multivariate_section(summary))
+    print(
+        _render_metric_group(
+            summary["similarity"],
+            section_title="Similarity backends",
+            combined_title="Combined model (all similarity backends)",
+        )
+    )
+    print()
+    print(
+        _render_metric_group(
+            summary["textrazor"],
+            section_title="TextRazor page metrics",
+            combined_title="Combined model (TextRazor metrics only)",
+        )
+    )
+    print(
+        _render_multivariate_section(
+            summary["multivariate"],
+            title="Combined model (similarity + TextRazor metrics)",
+        )
+    )
+    print(
+        _render_multivariate_section(
+            summary["multivariate_curated"],
+            title=(
+                "Combined model (relation, property, entity relevance, "
+                "Gemini semantic similarity)"
+            ),
+        )
+    )
 
     stats_dir = run_dir / "stats"
     stats_dir.mkdir(parents=True, exist_ok=True)
-    output_path = stats_dir / "textrazor_ranking_r2.json"
+    output_path = stats_dir / "ranking_r2.json"
     output_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print()
     print(f"Wrote {output_path}")
+
+    viz_path = stats_dir / "ranking_r2_curated_model.png"
+    if write_curated_model_visualization is None:
+        print("Skipped curated model visualization (matplotlib unavailable)")
+    else:
+        viz_result = write_curated_model_visualization(
+            textrazor_panel,
+            summary["multivariate_curated"],
+            output_path=viz_path,
+            run_id=run_dir.name,
+            rank_depth=rank_depth,
+            show=not args.no_show,
+        )
+        if viz_result is None:
+            print("Skipped curated model visualization (model not computed)")
+        else:
+            _print_viz_result(viz_result, no_show=args.no_show)
+
+    entity_relevance_summary = _entity_relevance_univariate(summary)
+    entity_relevance_path = stats_dir / "ranking_r2_entity_relevance.png"
+    if write_entity_relevance_visualization is None:
+        print("Skipped entity relevance visualization (matplotlib unavailable)")
+    elif entity_relevance_summary is None:
+        print("Skipped entity relevance visualization (summary unavailable)")
+    else:
+        entity_viz_result = write_entity_relevance_visualization(
+            textrazor_panel,
+            entity_relevance_summary,
+            output_path=entity_relevance_path,
+            run_id=run_dir.name,
+            rank_depth=rank_depth,
+            show=not args.no_show,
+        )
+        if entity_viz_result is None:
+            print("Skipped entity relevance visualization (model not computed)")
+        else:
+            _print_viz_result(entity_viz_result, no_show=args.no_show)
 
 
 if __name__ == "__main__":

@@ -18,6 +18,9 @@ from statsmodels.stats.diagnostic import het_breuschpagan, linear_reset
 from seo_rank.stats.regression import (
     BackendRegressionFit,
     _regression_skip_reason,
+    _fit_backend_regression_from_model_data,
+    _parameter_confidence_interval,
+    _parameter_value,
     fit_regression_for_score_column,
     fit_regression_backends,
     fit_backend_regression,
@@ -486,6 +489,19 @@ def _summarize_backend_diagnostics_result(
     return summarize_backend_diagnostics_from_fit(fit)
 
 
+def _refit_backend_regression_from_model_data(
+    model_data: pd.DataFrame,
+    *,
+    backend: str,
+    score_column: str,
+) -> BackendRegressionFit | None:
+    return _fit_backend_regression_from_model_data(
+        model_data,
+        label=backend,
+        score_column=score_column,
+    )
+
+
 def summarize_backend_diagnostics_from_fit(
     fit: BackendRegressionFit,
 ) -> dict[str, object]:
@@ -536,6 +552,11 @@ def summarize_backend_diagnostics_from_fit(
         robust=True,
     )
     shapiro = _shapiro_summary(residuals)
+    influence_sensitivity = _summarize_influence_sensitivity(
+        fit,
+        cooks_d=cooks_d,
+        cooks_d_threshold=cooks_d_threshold,
+    )
 
     influential_count = len(influential_rows)
     logger.info(
@@ -581,6 +602,7 @@ def summarize_backend_diagnostics_from_fit(
             "influential_rate": float(len(influential_rows) / nobs),
             "rows": influential_rows,
         },
+        "influence_sensitivity": influence_sensitivity,
     } | ({"shapiro": shapiro} if shapiro is not None else {})
 
 
@@ -723,6 +745,70 @@ def _row_influence_summary(
             "dffits": abs(dffits) > dffits_threshold,
             "dfbeta": bool(np.max(np.abs(dfbetas)) > dfbeta_threshold),
         },
+    }
+
+
+def _summarize_influence_sensitivity(
+    fit: BackendRegressionFit,
+    *,
+    cooks_d: np.ndarray,
+    cooks_d_threshold: float,
+) -> dict[str, object]:
+    influential_row_indices = np.flatnonzero(cooks_d > cooks_d_threshold)
+    influential_row_count = int(influential_row_indices.size)
+    row_count = int(fit.feature_result.nobs)
+    keyword_count = int(fit.model_data["target_keyword_id"].nunique())
+    influential_row_rate = float(influential_row_count / row_count) if row_count else 0.0
+
+    trimmed_model_data = fit.model_data.drop(index=influential_row_indices).reset_index(drop=True)
+    trimmed_fit = _refit_backend_regression_from_model_data(
+        trimmed_model_data,
+        backend=fit.backend,
+        score_column=fit.score_column,
+    )
+    if trimmed_fit is None:
+        return {
+            "status": "skipped",
+            "skipped_reason": "trimmed_subset_unusable",
+            "cook_d_threshold": cooks_d_threshold,
+            "row_count": row_count,
+            "trimmed_row_count": int(trimmed_model_data.shape[0]),
+            "keyword_count": keyword_count,
+            "trimmed_keyword_count": int(trimmed_model_data["target_keyword_id"].nunique())
+            if not trimmed_model_data.empty
+            else 0,
+            "influential_row_count": influential_row_count,
+            "influential_row_rate": influential_row_rate,
+        }
+
+    confirmatory_coefficient = _parameter_value(fit.clustered_result, fit.score_column)
+    sensitivity_coefficient = _parameter_value(trimmed_fit.clustered_result, trimmed_fit.score_column)
+    sensitivity_confidence_interval = _parameter_confidence_interval(
+        trimmed_fit.clustered_result,
+        trimmed_fit.score_column,
+    )
+    trimmed_row_count = int(trimmed_fit.feature_result.nobs)
+    trimmed_keyword_count = int(trimmed_fit.model_data["target_keyword_id"].nunique())
+    logger.info(
+        "diagnostics backend=%s influence_sensitivity status=computed row_count=%d trimmed_row_count=%d influential_count=%d",
+        fit.backend,
+        row_count,
+        trimmed_row_count,
+        influential_row_count,
+    )
+    return {
+        "status": "computed",
+        "cook_d_threshold": cooks_d_threshold,
+        "row_count": row_count,
+        "trimmed_row_count": trimmed_row_count,
+        "keyword_count": keyword_count,
+        "trimmed_keyword_count": trimmed_keyword_count,
+        "influential_row_count": influential_row_count,
+        "influential_row_rate": influential_row_rate,
+        "confirmatory_coefficient": confirmatory_coefficient,
+        "sensitivity_coefficient": sensitivity_coefficient,
+        "sensitivity_confidence_interval": sensitivity_confidence_interval,
+        "coefficient_delta": float(sensitivity_coefficient - confirmatory_coefficient),
     }
 
 

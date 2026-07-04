@@ -14,7 +14,7 @@ Pytest configuration and verification contract for SEO-Research.
   interpreter
 - Lint / type-check / build / coverage: not configured
 - Expected test duration: fast (< 1s)
-- **Current verification status:** 287 unit tests pass (`python -m pytest tests/unit`); full suite collects 288 tests including 1 opt-in integration test
+- **Current verification status:** 304 unit tests pass (`python -m pytest tests/unit`); full suite collects 305 tests including 1 opt-in integration test
 
 ## Active Verification Command
 
@@ -60,7 +60,7 @@ placeholders only.
 | `test_analysis_mart.py` | Feature marts materialize the lazy analysis mart, preserve unmatched SERP rows with nullable feature columns, validate before sink, audit the written parquet row rules, and refresh the run catalog |
 | `test_stats_panel.py` | Guardrail evaluation (SERP-rank variance hard-fail, similarity-variance warn), panel grain filtering, full vs minimal stats artifact writing on pass/fail |
 | `test_stats_spearman.py` | Benjamini-Hochberg adjustment, backend Spearman summaries, and Spearman artifact emission on passing panels |
-| `test_stats_diagnostics.py` | Pooled OLS diagnostics, multivariate VIF sensitivity with spec drop order, small-sample Shapiro handling, diagnostic artifact emission on passing panels, and skipped-backend diagnostics behavior |
+| `test_stats_diagnostics.py` | Pooled OLS diagnostics, multivariate VIF sensitivity with spec drop order, influence refit (`influence_sensitivity`), small-sample Shapiro handling, diagnostic artifact emission on passing panels, and skipped-backend diagnostics behavior |
 | `test_stats_regression.py` | Pooled baseline and per-backend feature regressions with keyword-clustered SEs, effect-size translation, two-way-cluster sensitivity, and regression artifact emission on passing panels |
 | `test_stats_plackett_luce.py` | Page-level Plackett-Luce rank-ordered logit summaries, partial-ranking handling, optimizer / leave-one-out IIA diagnostics, and PL artifact emission on passing panels |
 | `test_stats_families.py` | Declarative signal-family registry loading, ordered enumeration, panel-grain preservation, and malformed-entry rejection |
@@ -80,7 +80,9 @@ placeholders only.
 | `test_passage_normalization.py` | Passage split, short-text filter |
 | `test_similarity_features.py` | Fixture passage aggregation plus BGE, Gemini Doc Retrieval, and Gemini Semantic Similarity page scoring |
 | `test_analysis_gemini_nwh_similarity.py` | Analysis script block scoring with BGE, Gemini document relevance, Gemini semantic similarity, extended TextRazor summaries, and provider error handling |
-| `test_textrazor_ranking_explainability.py` | TextRazor ranking explainability summaries: univariate and multivariate adjusted R², metric coverage |
+| `test_stats_golden_fixtures.py` | Synthetic `analysis_mart` golden panel: `stats_summary.json` / `stats_diagnostics.json` schema contracts, BH when K ≥ 10 vs underpowered, hard-fail skip path, influence refit delta, multivariate VIF drop order, clustered vs HC3 SE guard |
+| `test_textrazor_ranking_explainability.py` | Ranking explainability summaries: similarity + TextRazor univariate and multivariate adjusted R², curated multivariate model, metric coverage |
+| `test_ranking_explainability_viz.py` | Curated final-model and entity-relevance PNG visualizations (coefficients + fit diagnostics) |
 | `test_textrazor_normalization.py` | Entity schema normalization and TextRazor page-metrics aggregation into `textrazor_page_metrics_curated` |
 | `test_textrazor_requests.py` | TextRazor parsed-text request construction, credential validation, HTTP execution |
 | `test_sdlc_docs.py` | GOALS/ROADMAP/README/TESTING/ARCHITECTURE guards, manifest pytest commands, and the Slice 7 round-trip regression sweep |
@@ -146,19 +148,33 @@ exist.
   `## Rank depth:` report sections.
 - **Pooled OLS diagnostics** — `tests/unit/test_stats_diagnostics.py` covers
   RESET, Breusch–Pagan with HC3 recommendation, Cook's D and influence flags,
-  small-sample Shapiro as informational, skipped-backend diagnostics, and
+  influence refit (`influence_sensitivity` block), small-sample Shapiro as
+  informational, skipped-backend diagnostics, and
   `stats_diagnostics.json` / `stats_report.md` emission on passing panels.
+- **Influence robustness (slice 8 shipped)** — `tests/unit/test_stats_diagnostics.py`
+  and `tests/unit/test_stats_golden_fixtures.py` cover Cook's D trimming refits,
+  coefficient deltas, `### Influence robustness` report sections, and the
+  `influential_rows_rate` warn guardrail.
+- **Golden fixtures (slice 10 shipped)** — `tests/unit/test_stats_golden_fixtures.py`
+  pins synthetic `analysis_mart` panels with known Spearman ρ and pooled slopes,
+  schema metadata contracts, BH boundaries, hard-fail skip path, actionable flag
+  logic, influence refit delta, multivariate VIF drop order, and clustered vs
+  HC3 SE guards.
 - **Multivariate sensitivity (slice 7 shipped)** — `tests/unit/test_stats_spec.py`
   and `tests/unit/test_stats_diagnostics.py` cover the spec-driven VIF threshold
   and backend drop order, plus the primary-depth `multivariate_sensitivity`
   block in `stats_diagnostics.json` and the `### Robustness` section in
   `stats_report.md`.
 
-## Shipped tests — TextRazor ranking explainability
+## Shipped tests — Ranking explainability
 
-- **TextRazor adjusted R² summaries** — `tests/unit/test_textrazor_ranking_explainability.py`
-  covers univariate and multivariate pooled OLS adjusted R² for TextRazor page
-  metrics via `seo_rank.stats.textrazor_explainability`.
+- **Similarity + TextRazor adjusted R² summaries** — `tests/unit/test_textrazor_ranking_explainability.py`
+  covers univariate and multivariate pooled OLS adjusted R² for similarity backends
+  and TextRazor page metrics via `seo_rank.stats.textrazor_explainability`.
+- **Curated-model PNG charts** — `tests/unit/test_ranking_explainability_viz.py`
+  covers coefficient/fit visualizations for the curated multivariate model and the
+  entity-relevance-only model (`ranking_explainability_viz.py`; optional
+  `matplotlib` display via `analysis/textrazor_ranking_r2.py --no-show`).
 
 ## Shipped tests — TextRazor-only ingestion (slices 21–25)
 
@@ -198,7 +214,8 @@ exist.
   `summarize_spearman_families()` with per-family BH boundaries.
   `tests/unit/test_stats_family_artifacts.py` covers combined `stats_*` output,
   hard-fail family skip path, and underpowered `inference_mode` labeling.
-  Golden fixtures remain open (slice 31).
+  Similarity golden fixtures shipped (slice 10); TextRazor end-to-end golden
+  path remains open (slice 31).
 - **TextRazor page-metrics completeness (slice 32 shipped)** —
   `tests/unit/test_textrazor_normalization.py` and `test_feature_marts.py`
   cover `textrazor_page_metrics_complete` and null-not-zero section counts.
@@ -208,37 +225,18 @@ exist.
 
 ## Planned tests (not yet in suite) — Phase 5 active scope
 
-See `GOALS.md` and `ROADMAP.md` § Phase 5 slices 8–10; standardization and
+See `GOALS.md` and `ROADMAP.md` § Phase 5 slice 31; standardization and
 relative ranks are Phase 6.1.
 
 - Feature marts and `analysis_mart` join keys (`run_id`, `target_keyword_id`,
   `canonical_url_hash`, `response_id`, `passage_id`)
 - Passage / domain similarity scopes (feature marts; Phase 5.5 scoring)
 
-### Phase 5 — statistical analysis (see `ROADMAP.md` slices 8–15)
+### Phase 5 — statistical analysis (see `ROADMAP.md` slices 31+)
 
-- **Golden `analysis_mart` fixture** — synthetic panel with known Spearman ρ and
-  pooled slope per backend; tolerance bands for regression coefficients,
-  correlation summaries, and effect-size translation.
-- **`stats_summary.json` schema** — estimand version, `primary_rank_depth`,
-  `confirmatory_rank_depths`, nested `rank_depths` (guardrails, limitations,
-  per-backend ρ median/IQR, BH q-values or `bh_skipped_reason`, pooled
-  coefficients + clustered CIs, `actionable_association`,
-  `actionable_association_by_rank_depth`); top-level compat shim mirrors
-  `rank_depths.top_20`; assert naive IID SEs absent.
-- **`stats_diagnostics.json` schema** — nested `rank_depths` with RESET/BP
-  flags, influence counts and %, leverage/DFFITS/DFBETAs, primary-depth
-  multivariate VIF + drop log, `influence_sensitivity` block, optional
-  two-way-cluster CIs; leave-one-out IIA under
-  `rank_depths.top_20.plackett_luce` only.
-- **Guardrail gates** — hard-fail skips BH and actionable flag; warn still emits
-  full stats; CLI exit 1 on hard-fail unless `--no-fail-on-guardrails`.
-- **BH policy** — within-backend family only; skipped when K < 10; diagnostics
-  excluded from BH.
-- **Influence robustness** — refit without Cook's D > 4/n rows; coefficient
-  delta vs confirmatory model.
-- **Dry-run / fixture skip** — `seo-rank analyze` on documented fixture modes
-  does not require full stats output.
+- **TextRazor golden fixture** — end-to-end panel with TextRazor families and
+  known rank relationships (slice 31; complements slice 10 similarity golden
+  fixtures).
 
 ## Planned tests (not yet in suite) — Phase 6.1 standardization and reporting
 

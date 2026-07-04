@@ -92,22 +92,21 @@ The repository contains an **offline-verifiable CLI scaffold** (Phase 1 shipped)
   `build-features`, `analyze`, `replay`, and `run --stored-run`, which resumes
   partial runs in place from the stored lake before re-materializing downstream
   marts
-- **Tests:** 287 unit tests under `tests/unit/`; full suite collects 288 tests
+- **Tests:** 304 unit tests under `tests/unit/`; full suite collects 305 tests
   (1 opt-in integration); gate: `python -m pytest tests/unit`; Phase 4.5 Slice 7
   shipped the round-trip regression sweep in `test_sdlc_docs.py`
 - **Product docs:** `ARCHITECTURE.md`, `GOALS.md`, `ROADMAP.md`, `README.md`,
   `TESTING.md`
-- **Not yet:** influence robustness appendix, golden fixtures, and
-  `--no-fail-on-guardrails` (Phase 5 slices 8, 10; slice 9 partial; slice 26
-  shipped for TextRazor cross-doc schema)
+- **Not yet:** `--no-fail-on-guardrails` (Phase 5 slice 9 follow-up); TextRazor
+  golden fixtures (slice 31)
 
 Module and artifact details are in [Application Surface](#application-surface)
 and [Key Product Components](#key-product-components) below. Phase 5 slices 1–7
 and 16–20 ship the estimand spec, stats package, guardrails, Spearman/BH primary
 path, pooled regression, pooled diagnostics, multivariate VIF sensitivity, and
 parallel confirmatory rank depths (top 20 / 10 / 5 / 3); slices 29–30 add
-family-aware `stats_*` artifacts. Influence robustness, golden fixtures, and
-remaining CLI polish continue in slices 8, 10, and 9 (partial).
+family-aware `stats_*` artifacts. Slices 8–10 ship influence refit, golden
+fixtures, and stats artifacts; TextRazor golden fixtures (slice 31) remain open.
 
 ## Key Product Components
 
@@ -143,8 +142,9 @@ remaining CLI polish continue in slices 8, 10, and 9 (partial).
   diagnostics, primary-depth multivariate VIF sensitivity (robustness appendix),
   parallel confirmatory rank-depth bundles at top 20 / 10 / 5 / 3, and
   family-aware `stats_*` artifacts for similarity and TextRazor signal families.
-  Influence robustness, golden fixtures, and remaining CLI polish (slice 9
-  partial) remain in slices 8 and 10 — see
+  Influence refit appendix (slice 8) and golden fixture contracts (slice 10)
+  shipped. TextRazor golden fixtures (slice 31) and optional CLI polish remain —
+  see
   [Planned Per-Run Statistical Analysis](#planned-per-run-statistical-analysis).
   OLS / Plackett-Luce standardization, `analysis_mart.v2` relative ranks, and
   expanded reporting are **Phase 6.1** (`ROADMAP.md`).
@@ -206,8 +206,8 @@ family → pooled OLS with clustered SEs and diagnostics → primary-depth
 multivariate VIF sensitivity (`rank_depths.top_20.multivariate_sensitivity`
 plus a `### Robustness` report section) → page-level Plackett-Luce per depth →
 `runs/{run_id}/stats/` artifacts with `keyword_count` and `inference_mode`
-labeling. Influence refit, golden fixtures, and `--no-fail-on-guardrails` remain
-open (slices 8, 10; slice 9 partial).
+labeling. Influence refit (slice 8) and similarity golden fixtures (slice 10)
+shipped; TextRazor golden fixtures (slice 31) remain open.
 
 **Planned workflow integrity (Phase 6):** every required accounting unit must
 reach a permitted terminal disposition at each applicable boundary, proven from
@@ -419,7 +419,8 @@ src/seo_rank/stats/   # Phase 5 observational analysis (see ROADMAP.md)
   diagnostics.py  # RESET, BP, influence, multivariate VIF sensitivity
   scale.py        # within-keyword SD RMS and z-score helpers (effect-size contract)
   bh.py           # Benjamini–Hochberg within backend family
-  textrazor_explainability.py  # exploratory TextRazor adjusted R² summaries
+  textrazor_explainability.py  # exploratory similarity + TextRazor adjusted R² summaries
+  ranking_explainability_viz.py  # curated final-model coefficient + fit PNG
   artifacts.py    # stats_summary.json, stats_diagnostics.json, stats_report.md
 ```
 
@@ -431,23 +432,30 @@ src/seo_rank/stats/   # Phase 5 observational analysis (see ROADMAP.md)
 | `marts.py` | Join feature marts into `analysis_mart` at `target_keyword × SERP URL` grain |
 | `validate.py` | Schema contracts plus row-level uniqueness, null, and range audits; used before every mart write or at the sink edge |
 
-**Phase 5 stats package** (`src/seo_rank/stats/`): **slices 1–7, 16–20, and
+**Phase 5 stats package** (`src/seo_rank/stats/`): **slices 1–10, 16–20, and
 29–30 shipped** — `spec.py` loads `analysis_spec.v1.yaml` (including
 `rank_depths`, `limitations_by_depth`, `signal_families`, and multivariate
 sensitivity accessors); `families.py` keeps the family registry ordered at the
 `target_keyword_id × canonical_url_hash` grain; `rank_depth.py` filters panels
 by max SERP rank; `panel.py` prepares per-depth guardrails and limitations;
-`diagnostics.py` fits the joint three-backend VIF sensitivity model with spec
-drop order on the primary rank depth; `artifacts.py` runs `run_phase5_stats()`
+`diagnostics.py` fits pooled OLS diagnostics, influence refit sensitivity, and
+the joint three-backend VIF sensitivity model with spec drop order on the primary
+rank depth; `artifacts.py` runs `run_phase5_stats()`
 with nested `rank_depths` JSON (including per-family Spearman, OLS, diagnostics,
 Plackett-Luce, and primary-depth `multivariate_sensitivity` blocks), four
 `## Rank depth:` report sections with `### Diagnostics`, `### Robustness`
-(primary depth only), and `### Families` subsections, `keyword_count` /
-`inference_mode` labeling, and a top-20 compat shim. Influence robustness
-remains in slice 8; slice 9 (partial) still needs `--no-fail-on-guardrails` and
-a `report.md` link to `stats/stats_report.md`. `textrazor_explainability.py`
-powers the standalone `analysis/textrazor_ranking_r2.py` exploratory script.
-Dependencies: `statsmodels`, `numpy`, `scipy`, `PyYAML` in `pyproject.toml`.
+(primary depth only), `### Influence robustness`, and `### Families` subsections,
+`keyword_count` / `inference_mode`
+labeling. Influence refit (`influence_sensitivity` block,
+`### Influence robustness` report section, `influential_rows_rate` guardrail;
+slice 8 shipped) and similarity golden fixtures (`test_stats_golden_fixtures.py`;
+slice 10 shipped) ship alongside slice 9 artifacts. `textrazor_explainability.py`
+powers the standalone `analysis/textrazor_ranking_r2.py` exploratory script
+(similarity backends + TextRazor metrics; writes `stats/ranking_r2.json`,
+`stats/ranking_r2_curated_model.png`, and `stats/ranking_r2_entity_relevance.png`
+via `ranking_explainability_viz.py`).
+Dependencies: `statsmodels`, `numpy`, `scipy`, `PyYAML`, `matplotlib` in
+`pyproject.toml`.
 Spec: `analysis_spec.v1.yaml`.
 
 **Execution model:** scan lazily, filter/select early, join on IDs only, validate
@@ -594,7 +602,7 @@ runs full stats:
 | --------- | ------- | -------- |
 | Within-keyword `serp_rank` variance | > 0 | hard-fail |
 | Within-keyword similarity variance | > 0 | warn |
-| Influential rows (Cook's D > 4/n) | report %; warn if > 5% | warn (deferred — influence counts in `stats_diagnostics.json`; guardrail evaluation in Slice 8) |
+| Influential rows (Cook's D > 4/n) | report %; warn if > 5% | warn (shipped — `influential_rows_rate` guardrail, Slice 8) |
 
 **Limitations** (required per rank depth in `stats_summary.json` `rank_depths.*.limitations`
 **and** `stats_report.md`): observational only; depth-specific truncation
@@ -638,7 +646,7 @@ on guardrail hard-fail (overridable); skip stats on `--dry-run` and documented
 fixture modes only.
 
 **Deferred (Phase 5.1):** rank-decile segments, keyword heterogeneity deep-dives,
-confirmatory keyword holdout, IV / `PanelOLS`, URL fixed effects.
+confirmatory keyword holdout and time-split validation (Phase 5.6), IV / `PanelOLS`, URL fixed effects.
 
 ### Pipeline steps
 
@@ -654,7 +662,7 @@ confirmatory keyword holdout, IV / `PanelOLS`, URL fixed effects.
    per 1 SD, optimizer stability, Hessian conditioning; leave-one-out IIA on
    `top_20` only.
 6. Run pooled diagnostics per depth; primary-depth multivariate VIF sensitivity
-   (slice 7 shipped); influence refit appendix (Slice 8).
+   (slice 7 shipped); influence refit appendix (slice 8 shipped).
 7. Emit nested `stats_*` artifacts; link from `report.md`; set
    `actionable_association` and `actionable_association_by_rank_depth` per BGE
    rule.

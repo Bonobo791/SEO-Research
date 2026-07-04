@@ -5,7 +5,11 @@ import json
 import polars as pl
 
 from seo_rank.stats.textrazor_explainability import (
+    CURATED_RANKING_SCORE_COLUMNS,
+    SIMILARITY_RANKING_METRICS,
     TEXTRAZOR_RANKING_METRICS,
+    summarize_ranking_explainability,
+    summarize_similarity_ranking_explainability,
     summarize_textrazor_ranking_explainability,
 )
 
@@ -84,6 +88,98 @@ def test_summarize_textrazor_ranking_explainability_computes_univariate_and_mult
     )
 
     json.dumps(summary)
+
+
+def test_summarize_similarity_ranking_explainability_computes_univariate_and_multivariate() -> None:
+    panel = _textrazor_panel_frame()
+    summary = summarize_similarity_ranking_explainability(
+        panel,
+        run_id="run-1",
+        rank_depth="top_20",
+    )
+
+    assert summary["run_id"] == "run-1"
+    assert summary["rank_depth"] == "top_20"
+    assert len(summary["univariate"]) == len(SIMILARITY_RANKING_METRICS)
+
+    computed = [entry for entry in summary["univariate"] if entry["status"] == "computed"]
+    assert len(computed) == len(SIMILARITY_RANKING_METRICS)
+    assert any(
+        entry["descriptive_fit_delta"]["adjusted_r_squared"] > 0 for entry in computed
+    )
+
+    multivariate = summary["multivariate"]
+    assert multivariate["status"] == "computed"
+    assert multivariate["row_count"] == panel.height
+    assert multivariate["keyword_count"] == 10
+    assert len(multivariate["score_columns"]) == len(SIMILARITY_RANKING_METRICS)
+
+
+def test_summarize_ranking_explainability_includes_similarity_and_textrazor() -> None:
+    panel = _textrazor_panel_frame()
+    summary = summarize_ranking_explainability(
+        panel,
+        panel,
+        run_id="run-1",
+        rank_depth="top_20",
+    )
+
+    assert summary["run_id"] == "run-1"
+    assert summary["rank_depth"] == "top_20"
+    assert len(summary["similarity"]["univariate"]) == len(SIMILARITY_RANKING_METRICS)
+    assert len(summary["textrazor"]["univariate"]) == len(TEXTRAZOR_RANKING_METRICS)
+    assert summary["similarity"]["multivariate"]["status"] == "computed"
+    assert summary["textrazor"]["multivariate"]["status"] == "computed"
+
+    combined = summary["multivariate"]
+    assert combined["status"] == "computed"
+    similarity_columns = {column for _, column in SIMILARITY_RANKING_METRICS}
+    textrazor_columns = {column for _, column in TEXTRAZOR_RANKING_METRICS}
+    assert similarity_columns.issubset(set(combined["score_columns"]))
+    assert textrazor_columns.issubset(set(combined["score_columns"]))
+    assert len(combined["score_columns"]) == len(SIMILARITY_RANKING_METRICS) + len(
+        TEXTRAZOR_RANKING_METRICS
+    )
+    json.dumps(summary)
+
+
+def test_summarize_ranking_explainability_includes_curated_multivariate() -> None:
+    panel = _textrazor_panel_frame()
+    summary = summarize_ranking_explainability(
+        panel,
+        panel,
+        run_id="run-1",
+        rank_depth="top_20",
+    )
+
+    curated = summary["multivariate_curated"]
+    assert curated["status"] == "computed"
+    assert curated["score_columns"] == list(CURATED_RANKING_SCORE_COLUMNS)
+    assert curated["label"] == "relation_property_relevance_gemini_semantic"
+    coefficients = curated["feature_model"]["coefficients"]
+    assert set(coefficients) == set(CURATED_RANKING_SCORE_COLUMNS)
+
+
+def test_summarize_ranking_explainability_combined_multivariate_renders() -> None:
+    from analysis.textrazor_ranking_r2 import _render_multivariate_section
+
+    panel = _textrazor_panel_frame()
+    summary = summarize_ranking_explainability(
+        panel,
+        panel,
+        run_id="run-1",
+        rank_depth="top_20",
+    )
+
+    rendered = _render_multivariate_section(
+        summary["multivariate"],
+        title="Combined model (similarity + TextRazor metrics)",
+    )
+    assert "unavailable" not in rendered
+    assert "skipped" not in rendered
+    assert "baseline adjusted R²:" in rendered
+    assert "bge_normalized_score" in rendered
+    assert "textrazor_entity_confidence_score" in rendered
 
 
 def test_summarize_textrazor_ranking_explainability_reports_metric_coverage() -> None:

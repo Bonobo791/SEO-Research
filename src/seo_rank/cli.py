@@ -29,6 +29,7 @@ from seo_rank.dataforseo import (
     DataForSeoParseError,
     DataForSeoCredentials,
     DEFAULT_KEYWORD_LIMIT,
+    build_backlinks_request,
     build_keyword_expansion_request,
     build_page_text_request,
     build_serp_request,
@@ -36,6 +37,7 @@ from seo_rank.dataforseo import (
     fixture_keyword_expansion_response,
     fixture_page_text_response,
     fixture_serp_response,
+    extract_response_url,
     normalize_keyword_expansion,
     normalize_serp_results,
     parsed_page_text,
@@ -744,6 +746,17 @@ def expand_stored_run(
     merged_dataforseo["keyword_expansion"] = load_stored_keyword_expansion_response(
         stored_run
     )
+    merged_dataforseo["backlinks"] = [
+        response
+        for keyword_result in merged_payload.get("keyword_results", [])
+        if isinstance(keyword_result, Mapping)
+        for response in (
+            keyword_result.get("raw_provider_data", {})
+            if isinstance(keyword_result.get("raw_provider_data", {}), Mapping)
+            else {}
+        ).get("dataforseo", {}).get("backlinks", [])
+        if isinstance(response, Mapping)
+    ]
     merged_raw_provider_data["dataforseo"] = merged_dataforseo
     merged_payload["raw_provider_data"] = merged_raw_provider_data
     raw_response_records = build_raw_response_records(run_id, merged_payload)
@@ -1080,6 +1093,45 @@ def build_resumed_keyword_result(
         keyword=target_keyword,
         depth=config.depth,
     )
+    existing_backlinks_by_url: dict[str, dict[str, object]] = {}
+    for record in raw_keyword_records.get("backlinks", []):
+        response_body_bytes = record.get("response_body_bytes")
+        if not isinstance(response_body_bytes, (bytes, bytearray)):
+            continue
+        response = json.loads(bytes(response_body_bytes).decode("utf-8"))
+        url = extract_response_url(response)
+        if isinstance(url, str):
+            existing_backlinks_by_url[url] = response
+
+    missing_backlink_urls = [
+        str(result["url"])
+        for result in serp_results
+        if str(result["url"]) not in existing_backlinks_by_url
+    ]
+    if missing_backlink_urls and progress is not None:
+        progress.keyword_log(
+            target_keyword,
+            f"dataforseo backlinks ({len(missing_backlink_urls)} urls)",
+        )
+    if missing_backlink_urls and config.live_providers and live_context is not None:
+        fetched_backlinks = fetch_dataforseo_backlinks_for_urls(
+            target_keyword,
+            missing_backlink_urls,
+            credentials=live_context["credentials"].dataforseo,
+            transport=DEFAULT_DATAFORSEO_TRANSPORT,
+            progress=None,
+        )
+        if fetched_backlinks:
+            network_calls.append("dataforseo.backlinks")
+            for response in fetched_backlinks:
+                url = extract_response_url(response)
+                if isinstance(url, str):
+                    existing_backlinks_by_url[url] = response
+    backlinks_responses = [
+        existing_backlinks_by_url[str(result["url"])]
+        for result in serp_results
+        if str(result["url"]) in existing_backlinks_by_url
+    ]
     existing_page_text_by_url: dict[str, dict[str, object]] = {}
     for record in raw_keyword_records.get("page_text", []):
         response_body_bytes = record.get("response_body_bytes")
@@ -1165,6 +1217,7 @@ def build_resumed_keyword_result(
             target_keyword,
             serp_response=serp_response,
             page_text_responses=page_text_responses,
+            backlinks_responses=backlinks_responses,
             similarity_scores=stored_page_similarity,
             passages=passages,
             serp_results=serp_results,
@@ -1195,6 +1248,7 @@ def build_resumed_keyword_result(
         target_keyword,
         serp_response=serp_response,
         page_text_responses=page_text_responses,
+        backlinks_responses=backlinks_responses,
         similarity_scores=complete_scores,
         passages=passages,
         serp_results=serp_results,
@@ -1551,6 +1605,14 @@ def build_offline_payload(
             "serp": [
                 keyword_result["raw_provider_data"]["dataforseo"]["serp"]
                 for keyword_result in keyword_results
+            ],
+            "backlinks": [
+                response
+                for keyword_result in keyword_results
+                for response in keyword_result["raw_provider_data"]["dataforseo"].get(
+                    "backlinks", []
+                )
+                if isinstance(response, Mapping)
             ],
         },
     }
@@ -1959,6 +2021,21 @@ def build_live_keyword_result(
     if progress is not None:
         progress.keyword_log(
             target_keyword,
+            f"dataforseo backlinks ({len(serp_results)} urls)",
+        )
+    backlinks_responses = fetch_dataforseo_backlinks_for_urls(
+        target_keyword,
+        [str(result["url"]) for result in serp_results],
+        credentials=credentials.dataforseo,
+        transport=dataforseo_transport,
+        progress=None,
+    )
+    if backlinks_responses:
+        network_calls.append("dataforseo.backlinks")
+
+    if progress is not None:
+        progress.keyword_log(
+            target_keyword,
             f"dataforseo page text ({len(serp_results)} urls)",
         )
     page_text_responses = [
@@ -2059,6 +2136,7 @@ def build_live_keyword_result(
         target_keyword,
         serp_response=serp_response,
         page_text_responses=page_text_responses,
+        backlinks_responses=backlinks_responses,
         similarity_scores=similarity_scores,
         passages=passages,
         serp_results=serp_results,
@@ -2125,6 +2203,33 @@ def execute_validated_dataforseo_request(
         timeout=DATAFORSEO_LIVE_REQUEST_TIMEOUT,
     )
     return validate_dataforseo_response(endpoint, response)
+
+
+def fetch_dataforseo_backlinks_for_urls(
+    target_keyword: str,
+    urls: Sequence[str],
+    *,
+    credentials: DataForSeoCredentials,
+    transport,
+    progress: RunProgress | None = None,
+) -> list[dict[str, object]]:
+    responses: list[dict[str, object]] = []
+    for url in urls:
+        if progress is not None:
+            progress.keyword_log(target_keyword, f"dataforseo backlinks ({url})")
+        response = execute_validated_dataforseo_request(
+            "backlinks",
+            build_backlinks_request(url),
+            credentials=credentials,
+            transport=transport,
+        )
+        raise_for_failed_dataforseo_tasks(
+            "backlinks",
+            response,
+            target_keyword=target_keyword,
+        )
+        responses.append(response)
+    return responses
 
 
 def annotate_target_keyword(
@@ -2236,6 +2341,7 @@ def build_keyword_result_from_responses(
     *,
     serp_response: Mapping[str, object],
     page_text_responses: Sequence[Mapping[str, object]],
+    backlinks_responses: Sequence[Mapping[str, object]] | None = None,
     similarity_scores: Sequence[Mapping[str, object]],
     passages: Sequence[Mapping[str, object]] | None = None,
     serp_results: Sequence[Mapping[str, object]] | None = None,
@@ -2272,6 +2378,8 @@ def build_keyword_result_from_responses(
             "serp": serp_response,
         },
     }
+    if backlinks_responses is not None:
+        raw_provider_data["dataforseo"]["backlinks"] = list(backlinks_responses)
     if textrazor_responses:
         raw_provider_data["textrazor"] = {
             "entities": list(textrazor_responses),
@@ -2619,6 +2727,25 @@ def build_raw_response_records(
                         build_raw_response_record(
                             run_id,
                             endpoint="page_text",
+                            provider="dataforseo",
+                            response=response,
+                            target_keyword=target_keyword,
+                            request_metadata={
+                                "target_keyword": target_keyword,
+                                "url": extract_response_url(response),
+                            },
+                            recorded_at=recorded_at,
+                        )
+                    )
+            backlinks_responses = dataforseo_data.get("backlinks", [])
+            if isinstance(backlinks_responses, list):
+                for response in backlinks_responses:
+                    if not isinstance(response, Mapping):
+                        continue
+                    records.append(
+                        build_raw_response_record(
+                            run_id,
+                            endpoint="backlinks",
                             provider="dataforseo",
                             response=response,
                             target_keyword=target_keyword,
