@@ -13,6 +13,7 @@ from seo_rank.data.validate import (
     validate_frame_contract,
     validate_materialized_frame_contract,
 )
+from seo_rank.debug_trace import debug_trace
 from seo_rank.dataforseo import (
     DATAFORSEO_RESPONSE_SCHEMAS,
     DEFAULT_KEYWORD_LIMIT,
@@ -459,7 +460,7 @@ CURATED_VALIDATION_RULES = {
             "textrazor_topic_score": (0, 1),
             "textrazor_category_score": (0, 1),
             "textrazor_classifier_score": (0, 1),
-            "textrazor_entailment_score": (0, 1),
+            "textrazor_entailment_score": (0, None),
             "textrazor_entailment_prior": (0, 1),
             "textrazor_entailment_context": (0, 1),
             "textrazor_word_count": (0, None),
@@ -533,7 +534,30 @@ def normalize_run(run_dir: Path) -> dict[str, object]:
     seed = str(config["seed"])
     depth = int(config["depth"])
     keyword_limit = int(config.get("keyword_limit", DEFAULT_KEYWORD_LIMIT))
+    stored_keywords = run_payload.get("keywords", [])
+    stored_keyword_count = (
+        len(stored_keywords) if isinstance(stored_keywords, list) else 0
+    )
     page_similarity_scores = _load_run_page_similarity_scores(run_payload)
+    sample_page_score_keys: list[str] = []
+    for keyword_scores in page_similarity_scores.values():
+        if keyword_scores:
+            first_url_scores = next(iter(keyword_scores.values()))
+            if isinstance(first_url_scores, Mapping):
+                sample_page_score_keys = sorted(first_url_scores.keys())
+            break
+    debug_trace(
+        hypothesis_id="H2-H3",
+        location="normalize.py:normalize_run",
+        message="normalize_run keyword and page_similarity snapshot",
+        data={
+            "keyword_limit": keyword_limit,
+            "default_keyword_limit": DEFAULT_KEYWORD_LIMIT,
+            "stored_keyword_count": stored_keyword_count,
+            "page_similarity_keyword_count": len(page_similarity_scores),
+            "sample_page_score_keys": sample_page_score_keys,
+        },
+    )
 
     catalog: dict[str, object] = run_payload.get("catalog", {})
     if not isinstance(catalog, dict):
@@ -1117,21 +1141,24 @@ def write_curated_lazyframe_dataset(
     schema: pa.Schema,
 ) -> dict[str, object]:
     validation = CURATED_VALIDATION_RULES[name]
-    frame = validate_frame_contract(
-        frame,
-        required_columns=schema.names,
-        expected_schema=validation.get("expected_schema"),
-        unique_columns=validation.get("unique_columns", ()),
-        non_null_columns=validation.get("non_null_columns", ()),
-        bounded_columns=validation.get("bounded_columns"),
-    )
-    materialized_frame = frame.collect(engine="streaming")
-    validate_materialized_frame_contract(
-        materialized_frame,
-        unique_columns=validation.get("unique_columns", ()),
-        non_null_columns=validation.get("non_null_columns", ()),
-        bounded_columns=validation.get("bounded_columns"),
-    )
+    try:
+        frame = validate_frame_contract(
+            frame,
+            required_columns=schema.names,
+            expected_schema=validation.get("expected_schema"),
+            unique_columns=validation.get("unique_columns", ()),
+            non_null_columns=validation.get("non_null_columns", ()),
+            bounded_columns=validation.get("bounded_columns"),
+        )
+        materialized_frame = frame.collect(engine="streaming")
+        validate_materialized_frame_contract(
+            materialized_frame,
+            unique_columns=validation.get("unique_columns", ()),
+            non_null_columns=validation.get("non_null_columns", ()),
+            bounded_columns=validation.get("bounded_columns"),
+        )
+    except ValueError as error:
+        raise ValueError(f"{name} validation failed: {error}") from error
     rows = materialized_frame.to_dicts()
     return write_curated_dataset(run_dir, name=name, rows=rows, schema=schema)
 

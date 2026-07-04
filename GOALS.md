@@ -38,7 +38,7 @@ Plackett-Luce is deferred backlog work only and is not wired in code today.
 
 #### Progress
 
-**Slices:** 23 of 33 shipped, 2 partial, 8 open.
+**Slices:** 24 of 33 shipped, 2 partial, 7 open.
 
 | # | Slice | Layer | Status | Primary deliverable |
 | - | ----- | ----- | ------ | ------------------- |
@@ -48,7 +48,7 @@ Plackett-Luce is deferred backlog work only and is not wired in code today.
 | 4 | Spearman primary path | Stats | Shipped | Per-keyword ρ + BH per backend |
 | 5 | Pooled regression (secondary) | Stats | Shipped | Keyword FE + clustered SEs |
 | 6 | Pooled OLS diagnostics | Stats | Shipped (S5-11 open) | RESET, BP, Cook's D, influence flags |
-| 7 | Multivariate sensitivity | Stats | Open | Joint model + VIF drop order |
+| 7 | Multivariate sensitivity | Stats | Shipped | Joint model + VIF drop order |
 | 8 | Robustness appendix (influence) | Stats | Open | Refit excluding influential rows |
 | 9 | Stats artifacts & CLI | Stats | Partial | `stats_*` wired; `--no-fail-on-guardrails` + `report.md` link open |
 | 10 | Golden fixtures & tests | Stats | Open | Synthetic mart + schema contracts |
@@ -76,7 +76,7 @@ Plackett-Luce is deferred backlog work only and is not wired in code today.
 | 32 | TextRazor page-metrics completeness | Data | Shipped | `textrazor_page_metrics_complete` + null-not-zero counts |
 | 33 | Small-K exploratory status | Stats | Shipped | `keyword_count` + `inference_mode` in `stats_*` |
 
-**Remaining to close the core similarity delivery:** slices 7–10 (see
+**Remaining to close the core similarity delivery:** slices 8–10 (see
 `ROADMAP.md`). OLS / Plackett-Luce standardization and relative-rank work (former
 Phase 5 slices 11–15) is **Phase 6.1** in `ROADMAP.md`. TextRazor-only ingestion:
 slices 21–26 shipped; shared raw-response schema contract (slice 26) is shipped.
@@ -86,7 +86,7 @@ schema drift).
 
 #### Dev slices
 
-**Progress:** 23 of 33 shipped, 2 partial, 8 open.
+**Progress:** 24 of 33 shipped, 2 partial, 7 open.
 
 1. **[x] Slice 1 — Estimand & analysis spec**
    - Add `analysis_spec.v1.yaml`: outcome (`-log(serp_rank)`), predictors,
@@ -152,7 +152,7 @@ schema drift).
      `seo-rank run --seed "seo company columbus" --live-providers --live-gemini
      --live-bge`. Tracked in `FIXUPS.md` **S5-11**.
 
-7. **[ ] Slice 7 — Multivariate sensitivity**
+7. **[x] Slice 7 — Multivariate sensitivity**
    - Joint model: all three `*_normalized_score` + length + keyword FE.
    - Compute VIF; if any VIF > 5, drop backends in spec order (semantic
      similarity → doc retrieval → keep BGE last).
@@ -434,6 +434,13 @@ schema drift).
 - TextRazor page-metrics completeness flag (`textrazor_page_metrics_complete`;
   slice 32 shipped).
 - Small-K inference labeling (`keyword_count`, `inference_mode`; slice 33 shipped).
+- Phase 5 slice 33 follow-up: streaming TextRazor persistence
+  - Flush each pulled TextRazor entity/section to disk as it arrives instead of
+    buffering the full run in memory.
+  - Keep curated normalization and feature-mart materialization as a downstream
+    end-of-run step.
+  - Use deterministic per-response writes so `--refresh-textrazor` and stored-run
+    re-materialization rewrite the same raw partitions cleanly.
 
 ## Out Of Scope
 
@@ -453,7 +460,7 @@ schema drift).
 
 ## Phase 5 acceptance criteria
 
-**Status:** 23 of 33 slices shipped, 2 partial, 8 open.
+**Status:** 24 of 33 slices shipped, 2 partial, 7 open.
 
 | Acceptance item | Slice(s) | Status |
 | --------------- | -------- | ------ |
@@ -464,7 +471,7 @@ schema drift).
 | Effect-size translation + `actionable_association` rule | 5, 9, 17 | Shipped (per depth) |
 | Pooled diagnostics + influence % in diagnostics JSON | 6, 8, 17 | Shipped (per depth; influence guardrail Slice 8 open) |
 | `page_text` accepts `tasks[].result: null`; live run continues (S5-11) | 6 | Open |
-| Multivariate sensitivity with VIF drop order | 7 | Open |
+| Multivariate sensitivity with VIF drop order | 7 | Shipped |
 | Limitations in JSON and Markdown | 9, 19 | Shipped (per depth) |
 | `seo-rank analyze` exit code + dry-run skip | 9 | Partial (`--no-fail-on-guardrails` open) |
 | Golden fixture ρ/slope within tolerance | 10 | Open |

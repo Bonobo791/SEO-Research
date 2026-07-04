@@ -8,8 +8,11 @@ import warnings
 from collections.abc import Sequence
 
 import numpy as np
+import pandas as pd
 import polars as pl
+import statsmodels.formula.api as smf
 from scipy import stats
+from statsmodels.stats.outliers_influence import variance_inflation_factor
 from statsmodels.stats.diagnostic import het_breuschpagan, linear_reset
 
 from seo_rank.stats.regression import (
@@ -30,6 +33,21 @@ RESET_POWER = 2
 MIN_DF_RESID_FOR_RESET = RESET_POWER
 BREUSCH_PAGAN_P_VALUE_THRESHOLD = 0.05
 STUDENTIZED_RESIDUAL_THRESHOLD = 3.0
+MULTIVARIATE_LENGTH_TERM = "np.log(page_text_length + 1)"
+MULTIVARIATE_SCORE_COLUMNS = (
+    "bge_normalized_score",
+    "gemini_doc_retrieval_normalized_score",
+    "gemini_semantic_similarity_normalized_score",
+)
+MULTIVARIATE_SCORE_COLUMNS_TO_BACKEND = {
+    "bge_normalized_score": "bge",
+    "gemini_doc_retrieval_normalized_score": "gemini_doc_retrieval",
+    "gemini_semantic_similarity_normalized_score": "gemini_semantic_similarity",
+}
+SIMILARITY_SCORE_COLUMNS = {
+    backend: score_column
+    for score_column, backend in MULTIVARIATE_SCORE_COLUMNS_TO_BACKEND.items()
+}
 
 
 def summarize_diagnostics_backends(
@@ -120,6 +138,270 @@ def summarize_diagnostics_for_score_column(
         fit=fit,
         score_column=score_column,
     )
+
+
+def summarize_multivariate_sensitivity(
+    analysis_mart: pl.DataFrame,
+    *,
+    vif_threshold: float,
+    backend_drop_order: Sequence[str],
+) -> dict[str, object]:
+    """Fit the joint multivariate sensitivity model and apply the configured drop order."""
+
+    logger.info(
+        "summarizing multivariate sensitivity vif_threshold=%s backend_drop_order=%s",
+        vif_threshold,
+        list(backend_drop_order),
+    )
+    active_backends = _multivariate_active_backends(backend_drop_order)
+    if not active_backends:
+        return _skipped_multivariate_sensitivity_summary(
+            skipped_reason="no_supported_backends",
+            vif_threshold=vif_threshold,
+            backend_drop_order=backend_drop_order,
+        )
+
+    model_data, skipped_reason = _prepare_multivariate_sensitivity_data(
+        analysis_mart,
+        active_backends=active_backends,
+    )
+    if model_data is None:
+        return _skipped_multivariate_sensitivity_summary(
+            skipped_reason=skipped_reason,
+            vif_threshold=vif_threshold,
+            backend_drop_order=backend_drop_order,
+        )
+
+    protected_backend = str(backend_drop_order[-1]) if backend_drop_order else active_backends[-1]
+    drop_log: list[dict[str, object]] = []
+    dropped_backends: list[str] = []
+    current_backends = active_backends
+
+    while True:
+        fit = _fit_multivariate_sensitivity_model(model_data, current_backends)
+        fit_summary = _summarize_multivariate_sensitivity_fit(fit, model_data, current_backends)
+        max_vif = float(fit_summary["max_vif"])
+        if max_vif <= float(vif_threshold):
+            return {
+                **fit_summary,
+                "status": "computed",
+                "vif_threshold": float(vif_threshold),
+                "backend_drop_order": list(backend_drop_order),
+                "drop_path": list(dropped_backends),
+                "drop_log": drop_log,
+                "dropped_backends": list(dropped_backends),
+            }
+
+        next_drop_backend = _next_multivariate_drop_backend(
+            current_backends,
+            backend_drop_order,
+            protected_backend=protected_backend,
+        )
+        if next_drop_backend is None:
+            final_log = {
+                "status": "unresolved",
+                "kept_backends": list(current_backends),
+                "max_vif": fit_summary["max_vif"],
+                "max_vif_term": fit_summary["max_vif_term"],
+                "vif_threshold": float(vif_threshold),
+                "unresolved_reason": "threshold_exceeded_with_protected_backend_only",
+            }
+            drop_log.append(final_log)
+            return {
+                **fit_summary,
+                "status": "unresolved",
+                "unresolved_reason": "threshold_exceeded_with_protected_backend_only",
+                "vif_threshold": float(vif_threshold),
+                "backend_drop_order": list(backend_drop_order),
+                "drop_path": list(dropped_backends),
+                "drop_log": drop_log,
+                "dropped_backends": list(dropped_backends),
+            }
+
+        drop_log.append(
+            {
+                "status": "dropped",
+                "kept_backends": list(current_backends),
+                "dropped_backend": next_drop_backend,
+                "max_vif": fit_summary["max_vif"],
+                "max_vif_term": fit_summary["max_vif_term"],
+                "vif_threshold": float(vif_threshold),
+            }
+        )
+        dropped_backends.append(next_drop_backend)
+        current_backends = tuple(
+            backend for backend in current_backends if backend != next_drop_backend
+        )
+
+
+def _prepare_multivariate_sensitivity_data(
+    analysis_mart: pl.DataFrame,
+    *,
+    active_backends: Sequence[str],
+) -> tuple[pd.DataFrame | None, str]:
+    required_columns = [
+        "target_keyword_id",
+        "serp_rank",
+        "page_text_length",
+        *[SIMILARITY_SCORE_COLUMNS[backend] for backend in active_backends],
+    ]
+    missing_columns = [column for column in required_columns if column not in analysis_mart.columns]
+    if missing_columns:
+        return None, "missing_required_columns"
+
+    model_frame = analysis_mart.drop_nulls(required_columns)
+    if model_frame.is_empty():
+        return None, "no_usable_rows"
+    if model_frame.height < 3:
+        return None, "insufficient_rows"
+
+    model_data = model_frame.select(required_columns).to_pandas().copy()
+    model_data["outcome"] = -np.log(model_data["serp_rank"].astype(float))
+    return model_data, ""
+
+
+def _fit_multivariate_sensitivity_model(
+    model_data: pd.DataFrame,
+    active_backends: Sequence[str],
+):
+    formula = _multivariate_formula(active_backends)
+    return smf.ols(formula, data=model_data).fit()
+
+
+def _summarize_multivariate_sensitivity_fit(
+    fit,
+    model_data: pd.DataFrame,
+    active_backends: Sequence[str],
+) -> dict[str, object]:
+    parameter_table = _multivariate_parameter_table(fit)
+    vif_table = _multivariate_vif_table(fit, active_backends)
+    max_vif_entry = max(vif_table, key=lambda row: row["vif"])
+    max_vif = float(max_vif_entry["vif"])
+    return {
+        "row_count": int(fit.nobs),
+        "keyword_count": int(model_data["target_keyword_id"].nunique()),
+        "model_formula": fit.model.formula,
+        "kept_backends": list(active_backends),
+        "parameter_table": parameter_table,
+        "vif_table": vif_table,
+        "max_vif": max_vif,
+        "max_vif_term": max_vif_entry["term"],
+    }
+
+
+def _multivariate_parameter_table(fit) -> list[dict[str, object]]:
+    conf_int = np.asarray(fit.conf_int())
+    parameters: list[dict[str, object]] = []
+    exog_names = list(fit.model.exog_names)
+    for index, term in enumerate(exog_names):
+        parameters.append(
+            {
+                "term": term,
+                "estimate": _json_value(np.asarray(fit.params)[index]),
+                "standard_error": _json_value(np.asarray(fit.bse)[index]),
+                "t_value": _json_value(np.asarray(fit.tvalues)[index]),
+                "p_value": _json_value(np.asarray(fit.pvalues)[index]),
+                "confidence_interval": [
+                    _json_value(conf_int[index, 0]),
+                    _json_value(conf_int[index, 1]),
+                ],
+                "term_kind": _multivariate_term_kind(term),
+            }
+        )
+    return parameters
+
+
+def _multivariate_vif_table(
+    fit,
+    active_backends: Sequence[str],
+) -> list[dict[str, object]]:
+    exog_names = list(fit.model.exog_names)
+    exog = np.asarray(fit.model.exog, dtype=float)
+    selected_terms = [
+        *[SIMILARITY_SCORE_COLUMNS[backend] for backend in active_backends],
+        MULTIVARIATE_LENGTH_TERM,
+    ]
+    selected_indices = [
+        exog_names.index(term)
+        for term in selected_terms
+        if term in exog_names
+    ]
+    selected_exog = exog[:, selected_indices]
+    vif_rows: list[dict[str, object]] = []
+    for vif_index, term in enumerate(term for term in selected_terms if term in exog_names):
+        if term not in exog_names:
+            continue
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            vif = variance_inflation_factor(selected_exog, vif_index)
+        vif_rows.append(
+            {
+                "term": term,
+                "vif": float(vif),
+                "term_kind": _multivariate_term_kind(term),
+            }
+        )
+    return vif_rows
+
+
+def _multivariate_formula(active_backends: Sequence[str]) -> str:
+    score_terms = [SIMILARITY_SCORE_COLUMNS[backend] for backend in active_backends]
+    return (
+        "outcome ~ "
+        + " + ".join([*score_terms, MULTIVARIATE_LENGTH_TERM, "C(target_keyword_id)"])
+    )
+
+
+def _multivariate_active_backends(backend_drop_order: Sequence[str]) -> tuple[str, ...]:
+    configured = {str(backend) for backend in backend_drop_order}
+    return tuple(
+        backend for backend in SIMILARITY_SCORE_COLUMNS.keys() if backend in configured
+    )
+
+
+def _next_multivariate_drop_backend(
+    active_backends: Sequence[str],
+    backend_drop_order: Sequence[str],
+    *,
+    protected_backend: str,
+) -> str | None:
+    active = set(active_backends)
+    for backend in backend_drop_order:
+        backend = str(backend)
+        if backend == protected_backend:
+            continue
+        if backend in active:
+            return backend
+    return None
+
+
+def _multivariate_term_kind(term: str) -> str:
+    if term == "Intercept":
+        return "intercept"
+    if term == MULTIVARIATE_LENGTH_TERM:
+        return "page_text_length"
+    if term in MULTIVARIATE_SCORE_COLUMNS_TO_BACKEND:
+        return "similarity_backend"
+    if term.startswith("C(target_keyword_id)"):
+        return "keyword_fixed_effect"
+    return "other"
+
+
+def _skipped_multivariate_sensitivity_summary(
+    *,
+    skipped_reason: str,
+    vif_threshold: float,
+    backend_drop_order: Sequence[str],
+) -> dict[str, object]:
+    return {
+        "status": "skipped",
+        "skipped_reason": skipped_reason,
+        "vif_threshold": float(vif_threshold),
+        "backend_drop_order": list(backend_drop_order),
+        "drop_path": [],
+        "drop_log": [],
+        "dropped_backends": [],
+    }
 
 
 def summarize_diagnostics_family(

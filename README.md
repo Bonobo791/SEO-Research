@@ -53,8 +53,10 @@ seo-rank run --seed "technical seo" --stored-run runs/RUN_ID
 
 This resumes stored runs in place, reuses existing raw responses and completed
 measurements, and only backfills missing keywords or backend scores before the
-downstream chain is re-materialized. Pair it with a higher `--keyword-limit`
-to extend the original seed in place.
+downstream chain is re-materialized. When the stored run already contains more
+keywords than the current `--keyword-limit`, the CLI expands the limit to match
+the stored keyword count. Pair it with a higher `--keyword-limit` to extend the
+original seed in place.
 
 **Expand existing run**
 
@@ -101,7 +103,11 @@ seo-rank analyze --run runs/RUN_ID
 
 `analyze` backfills missing feature marts automatically. On non–dry-run runs it
 also writes `runs/{run_id}/stats/` (`stats_summary.json`, `stats_diagnostics.json`,
-`stats_report.md`) and exits `1` when guardrails hard-fail.
+`stats_report.md`) and exits `1` when guardrails hard-fail. After the post-run
+materialization chain finishes, the CLI syncs TextRazor entity confidence and
+relevance from `textrazor_page_metrics` into `run.json` `page_similarity` and
+refreshes `report.md` so page-level reports show TextRazor scores alongside the
+three similarity backends.
 
 ### What `seo-rank run` executes
 
@@ -166,18 +172,31 @@ every registered signal family (similarity backends plus TextRazor page-signal
 families) into `runs/{run_id}/stats/`, including nested `rank_depths` and
 `rank_depths.*.families` in `stats_summary.json` and
 `stats_diagnostics.json`, four `## Rank depth:` sections with `### Families`
-subsections in `stats_report.md`, and `actionable_association_by_rank_depth`.
+subsections plus a primary-depth `### Robustness` block in `stats_report.md`,
+and `actionable_association_by_rank_depth`.
 Each depth and backend reports `keyword_count` and `inference_mode`
 (`confirmatory` when K ≥ 10, `exploratory` when 2 ≤ K < 10, `underpowered`
 when K = 1). Top-level summary fields mirror `rank_depths.top_20` for
 compatibility. Passage-level Plackett-Luce remains deferred backlog work and
 is not wired into `analyze` today.
 
-### Standalone script
+### Standalone scripts
 
 `analysis/gemini_nwh_similarity.py` is a one-off experiment for a fixed keyword
-and hand-picked text blocks. It can call live Gemini and BGE when configured; it
-is not part of the default CLI `run` flow.
+and hand-picked realtor homepage text blocks. It can call live Gemini and BGE when
+configured, and optionally requests extended TextRazor analysis (entities, topics,
+categories, relations, entailments, and more) per block. It is not part of the
+default CLI `run` flow.
+
+`analysis/textrazor_ranking_r2.py` measures how much TextRazor page metrics
+explain SERP rank on a completed run using pooled OLS adjusted R² (univariate per
+metric plus a joint multivariate model). Requires `parquet/analysis_mart` and
+`parquet/textrazor_page_metrics` from a prior `seo-rank analyze` pass:
+
+```bash
+python analysis/textrazor_ranking_r2.py --run runs/RUN_ID
+python analysis/textrazor_ranking_r2.py --run runs/RUN_ID --depth top_10
+```
 
 ```bash
 python -m pytest
@@ -331,13 +350,14 @@ response.
 |------|---------|
 | `src/seo_rank/` | CLI, provider boundaries, `progress.py` (stderr run logging) |
 | `src/seo_rank/data/` | Polars lake transforms: `scans`, `normalize`, `features`, `marts`, `validate` |
-| `src/seo_rank/stats/` | Phase 5 observational analysis (`spec`, `families`, `panel`, `rank_depth`, `spearman`, `regression`, `plackett_luce`, `diagnostics`, `scale`, `artifacts`) |
+| `src/seo_rank/stats/` | Phase 5 observational analysis (`spec`, `families`, `panel`, `rank_depth`, `spearman`, `regression`, `plackett_luce`, `diagnostics`, `scale`, `textrazor_explainability`, `artifacts`) |
 | `tests/unit/` | pytest unit tests |
 | `ARCHITECTURE.md` | Product architecture, data flow, planned pipeline |
 | `GOALS.md` | Active-scope contract |
 | `FIXUPS.md` | Slice-scoped small fixes backlog |
 | `ROADMAP.md` | Backlog and history |
-| `analysis/gemini_nwh_similarity.py` | Standalone Gemini/BGE block-scoring experiment |
+| `analysis/gemini_nwh_similarity.py` | Standalone Gemini/BGE/TextRazor block-scoring experiment |
+| `analysis/textrazor_ranking_r2.py` | Standalone TextRazor adjusted R² ranking explainability script |
 | `TESTING.md` | Verification contract |
 
 ## Documentation

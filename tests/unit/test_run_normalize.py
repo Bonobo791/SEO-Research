@@ -21,10 +21,13 @@ from seo_rank.data.normalize import (
     build_page_content_fields_frame,
     build_similarity_scores_frame,
     build_pages_and_passages_frame,
+    build_textrazor_page_metrics_frame,
     normalize_run,
     stable_id,
     write_curated_dataset,
+    write_curated_lazyframe_dataset,
 )
+from seo_rank.textrazor import fixture_page_metrics_response
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -141,6 +144,75 @@ def test_dry_run_materializes_textrazor_topic_and_page_metrics(
     assert metrics["textrazor_topics_present"].all()
     assert metrics["textrazor_topic_score"].null_count() == 0
     assert metrics["textrazor_page_metrics_complete"].all()
+
+
+def test_write_curated_lazyframe_dataset_allows_textrazor_entailment_scores_above_one(
+    tmp_path: Path,
+) -> None:
+    response = fixture_page_metrics_response(
+        url="https://example.com/technical-seo/1",
+        text="Technical SEO helps crawlers discover important pages.",
+    )
+    response["response"]["entailments"][0]["score"] = 7.317
+    response["response"]["entailments"][0]["priorScore"] = 1.0
+    response["response"]["entailments"][0]["contextScore"] = 1.0
+
+    frame = build_textrazor_page_metrics_frame(
+        pl.DataFrame(
+            [
+                {
+                    "run_id": "run-1",
+                    "response_id": "page-resp-1",
+                    "target_keyword": "Technical SEO",
+                    "response_body_bytes": json.dumps(response).encode("utf-8"),
+                }
+            ]
+        ),
+        run_id="run-1",
+    ).lazy()
+
+    catalog = write_curated_lazyframe_dataset(
+        tmp_path,
+        name="textrazor_page_metrics_curated",
+        frame=frame,
+        schema=CURATED_SCHEMAS["textrazor_page_metrics_curated"],
+    )
+
+    assert catalog["row_count"] == 1
+
+
+def test_write_curated_lazyframe_dataset_includes_dataset_name_on_validation_failure(
+    tmp_path: Path,
+) -> None:
+    response = fixture_page_metrics_response(
+        url="https://example.com/technical-seo/1",
+        text="Technical SEO helps crawlers discover important pages.",
+    )
+
+    frame = build_textrazor_page_metrics_frame(
+        pl.DataFrame(
+            [
+                {
+                    "run_id": "run-1",
+                    "response_id": "page-resp-1",
+                    "target_keyword": "Technical SEO",
+                    "response_body_bytes": json.dumps(response).encode("utf-8"),
+                }
+            ]
+        ),
+        run_id="run-1",
+    ).with_columns(pl.lit(2.0).alias("textrazor_topic_score")).lazy()
+
+    with pytest.raises(
+        ValueError,
+        match="textrazor_page_metrics_curated validation failed: Column textrazor_topic_score is above maximum 1",
+    ):
+        write_curated_lazyframe_dataset(
+            tmp_path,
+            name="textrazor_page_metrics_curated",
+            frame=frame,
+            schema=CURATED_SCHEMAS["textrazor_page_metrics_curated"],
+        )
 
 
 def test_normalize_run_preserves_run_json_page_similarity_scores(

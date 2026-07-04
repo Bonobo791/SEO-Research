@@ -92,22 +92,22 @@ The repository contains an **offline-verifiable CLI scaffold** (Phase 1 shipped)
   `build-features`, `analyze`, `replay`, and `run --stored-run`, which resumes
   partial runs in place from the stored lake before re-materializing downstream
   marts
-- **Tests:** 271 unit tests under `tests/unit/`; full suite collects 272 tests
+- **Tests:** 287 unit tests under `tests/unit/`; full suite collects 288 tests
   (1 opt-in integration); gate: `python -m pytest tests/unit`; Phase 4.5 Slice 7
   shipped the round-trip regression sweep in `test_sdlc_docs.py`
 - **Product docs:** `ARCHITECTURE.md`, `GOALS.md`, `ROADMAP.md`, `README.md`,
   `TESTING.md`
-- **Not yet:** multivariate sensitivity, influence robustness appendix, golden
-  fixtures, and `--no-fail-on-guardrails` (Phase 5 slices 7–8, 10; slice 9 partial;
-  slice 26 shipped for TextRazor cross-doc schema)
+- **Not yet:** influence robustness appendix, golden fixtures, and
+  `--no-fail-on-guardrails` (Phase 5 slices 8, 10; slice 9 partial; slice 26
+  shipped for TextRazor cross-doc schema)
 
 Module and artifact details are in [Application Surface](#application-surface)
-and [Key Product Components](#key-product-components) below. Phase 5 slices 1–6
+and [Key Product Components](#key-product-components) below. Phase 5 slices 1–7
 and 16–20 ship the estimand spec, stats package, guardrails, Spearman/BH primary
-path, pooled regression, pooled diagnostics, and parallel confirmatory rank
-depths (top 20 / 10 / 5 / 3); slices 29–30 add family-aware `stats_*` artifacts.
-Multivariate sensitivity, influence robustness, golden fixtures, and remaining
-CLI polish continue in slices 7–8, 10, and 9 (partial).
+path, pooled regression, pooled diagnostics, multivariate VIF sensitivity, and
+parallel confirmatory rank depths (top 20 / 10 / 5 / 3); slices 29–30 add
+family-aware `stats_*` artifacts. Influence robustness, golden fixtures, and
+remaining CLI polish continue in slices 8, 10, and 9 (partial).
 
 ## Key Product Components
 
@@ -136,14 +136,16 @@ CLI polish continue in slices 7–8, 10, and 9 (partial).
   `--live-gemini`; local **BGE** (`BAAI/bge-reranker-v2-m3`) behind
   `--live-bge` — see [Live similarity backends (Phase 4)](#live-similarity-backends-phase-4)
   and [Planned Page Similarity Run](#planned-page-similarity-run).
-- **Analysis engine (in progress, Phase 5):** slices 1–6, 16–20, and 29–30 shipped —
-  `analysis_spec.v1.yaml`, `src/seo_rank/stats/` (including `rank_depth.py` and
-  `families.py`), guardrails/panel prep, Spearman + BH, pooled OLS with clustered
-  regression summaries, pooled OLS diagnostics, parallel confirmatory rank-depth
-  bundles at top 20 / 10 / 5 / 3, and family-aware `stats_*` artifacts for
-  similarity and TextRazor signal families. Multivariate sensitivity, influence
-  robustness, golden fixtures, and remaining CLI polish (slice 9 partial) remain
-  in slices 7–8 and 10 — see [Planned Per-Run Statistical Analysis](#planned-per-run-statistical-analysis).
+- **Analysis engine (in progress, Phase 5):** slices 1–7, 16–20, and 29–30 shipped —
+  `analysis_spec.v1.yaml`, `src/seo_rank/stats/` (including `rank_depth.py`,
+  `families.py`, and `textrazor_explainability.py`), guardrails/panel prep,
+  Spearman + BH, pooled OLS with clustered regression summaries, pooled OLS
+  diagnostics, primary-depth multivariate VIF sensitivity (robustness appendix),
+  parallel confirmatory rank-depth bundles at top 20 / 10 / 5 / 3, and
+  family-aware `stats_*` artifacts for similarity and TextRazor signal families.
+  Influence robustness, golden fixtures, and remaining CLI polish (slice 9
+  partial) remain in slices 8 and 10 — see
+  [Planned Per-Run Statistical Analysis](#planned-per-run-statistical-analysis).
   OLS / Plackett-Luce standardization, `analysis_mart.v2` relative ranks, and
   expanded reporting are **Phase 6.1** (`ROADMAP.md`).
 - **Reporters (shipped):** JSON + Markdown under the selected run root;
@@ -188,18 +190,24 @@ downstream chain. `run --stored-run --live-textrazor-only` backfills live
 TextRazor entities from stored `page_text` without DataForSEO HTTP (slice 24).
 TextRazor-only ingestion writes the same `RAW_RESPONSE_SCHEMA` into the existing lake, partitioned only by `endpoint`.
 `analyze` backfills missing feature marts before writing `analysis_mart` and
-runs Phase 5 stats unless the run manifest is dry-run. `raw_responses` stays
-out of normal analytical joins (replay/re-normalization only). Live DataForSEO
-payloads are not retained by the provider long-term.
+runs Phase 5 stats unless the run manifest is dry-run. After materialization,
+`sync_textrazor_page_similarity_artifacts()` merges TextRazor entity
+confidence/relevance from `textrazor_page_metrics` into `run.json`
+`page_similarity` and refreshes `report.md`. `run --stored-run` auto-expands
+`keyword_limit` when the stored run already contains more keywords than the
+current limit. `raw_responses` stays out of normal analytical joins
+(replay/re-normalization only). Live DataForSEO payloads are not retained by the
+provider long-term.
 
 **Phase 5 stats today:** lazy Polars joins on `analysis_mart` and
 `textrazor_page_metrics` → guardrails → parallel confirmatory rank-depth bundles
 (top 20 / 10 / 5 / 3) per signal family → keyword-level Spearman ρ with BH per
-family → pooled OLS with clustered SEs and diagnostics → page-level
-Plackett-Luce per depth → `runs/{run_id}/stats/` artifacts with
-`keyword_count` and `inference_mode` labeling. Multivariate sensitivity,
-influence refit, golden fixtures, and `--no-fail-on-guardrails` remain open
-(slices 7–8, 10; slice 9 partial).
+family → pooled OLS with clustered SEs and diagnostics → primary-depth
+multivariate VIF sensitivity (`rank_depths.top_20.multivariate_sensitivity`
+plus a `### Robustness` report section) → page-level Plackett-Luce per depth →
+`runs/{run_id}/stats/` artifacts with `keyword_count` and `inference_mode`
+labeling. Influence refit, golden fixtures, and `--no-fail-on-guardrails` remain
+open (slices 8, 10; slice 9 partial).
 
 **Planned workflow integrity (Phase 6):** every required accounting unit must
 reach a permitted terminal disposition at each applicable boundary, proven from
@@ -408,9 +416,10 @@ src/seo_rank/stats/   # Phase 5 observational analysis (see ROADMAP.md)
   spearman.py     # per-keyword ρ + BH
   regression.py   # pooled OLS, clustered SEs, effect size
   plackett_luce.py # page-level rank-ordered logit per depth
-  diagnostics.py  # RESET, BP, influence, multivariate VIF
+  diagnostics.py  # RESET, BP, influence, multivariate VIF sensitivity
   scale.py        # within-keyword SD RMS and z-score helpers (effect-size contract)
   bh.py           # Benjamini–Hochberg within backend family
+  textrazor_explainability.py  # exploratory TextRazor adjusted R² summaries
   artifacts.py    # stats_summary.json, stats_diagnostics.json, stats_report.md
 ```
 
@@ -422,18 +431,22 @@ src/seo_rank/stats/   # Phase 5 observational analysis (see ROADMAP.md)
 | `marts.py` | Join feature marts into `analysis_mart` at `target_keyword × SERP URL` grain |
 | `validate.py` | Schema contracts plus row-level uniqueness, null, and range audits; used before every mart write or at the sink edge |
 
-**Phase 5 stats package** (`src/seo_rank/stats/`): **slices 1–6, 16–20, and
+**Phase 5 stats package** (`src/seo_rank/stats/`): **slices 1–7, 16–20, and
 29–30 shipped** — `spec.py` loads `analysis_spec.v1.yaml` (including
-`rank_depths`, `limitations_by_depth`, and `signal_families`); `families.py`
-keeps the family registry ordered at the `target_keyword_id × canonical_url_hash`
-grain; `rank_depth.py` filters panels by max SERP rank; `panel.py` prepares
-per-depth guardrails and limitations; `artifacts.py` runs `run_phase5_stats()`
+`rank_depths`, `limitations_by_depth`, `signal_families`, and multivariate
+sensitivity accessors); `families.py` keeps the family registry ordered at the
+`target_keyword_id × canonical_url_hash` grain; `rank_depth.py` filters panels
+by max SERP rank; `panel.py` prepares per-depth guardrails and limitations;
+`diagnostics.py` fits the joint three-backend VIF sensitivity model with spec
+drop order on the primary rank depth; `artifacts.py` runs `run_phase5_stats()`
 with nested `rank_depths` JSON (including per-family Spearman, OLS, diagnostics,
-and Plackett-Luce blocks), four `## Rank depth:` report sections with a
-`### Families` subsection, `keyword_count` / `inference_mode` labeling, and a
-top-20 compat shim. Multivariate sensitivity and influence robustness remain in
-slices 7–8; slice 9 (partial) still needs `--no-fail-on-guardrails` and a
-`report.md` link to `stats/stats_report.md`.
+Plackett-Luce, and primary-depth `multivariate_sensitivity` blocks), four
+`## Rank depth:` report sections with `### Diagnostics`, `### Robustness`
+(primary depth only), and `### Families` subsections, `keyword_count` /
+`inference_mode` labeling, and a top-20 compat shim. Influence robustness
+remains in slice 8; slice 9 (partial) still needs `--no-fail-on-guardrails` and
+a `report.md` link to `stats/stats_report.md`. `textrazor_explainability.py`
+powers the standalone `analysis/textrazor_ranking_r2.py` exploratory script.
 Dependencies: `statsmodels`, `numpy`, `scipy`, `PyYAML` in `pyproject.toml`.
 Spec: `analysis_spec.v1.yaml`.
 
@@ -564,8 +577,11 @@ in `analysis_spec.v1.yaml`, tune after golden fixtures).
 **Baseline (descriptive):** keyword FE + `log(page_text_length + 1)` only.
 Compare adjusted R² or AIC to feature model; not BH-adjusted.
 
-**Multivariate sensitivity (not confirmatory):** joint three-backend model; if
-VIF > 5, drop backends in order semantic similarity → doc retrieval → keep BGE.
+**Multivariate sensitivity (not confirmatory, slice 7 shipped):** joint
+three-backend model on the primary rank depth; if VIF > threshold from spec,
+drop backends in order semantic similarity → doc retrieval → keep BGE. Results
+land in `rank_depths.top_20.multivariate_sensitivity` and a `### Robustness`
+section of `stats_report.md`.
 
 **Robustness appendix:** refit pooled models excluding Cook's D > 4/n rows;
 optional two-way-cluster CIs; diagnostic-driven spec changes never replace the
@@ -637,8 +653,8 @@ confirmatory keyword holdout, IV / `PanelOLS`, URL fixed effects.
 5. Fit page-level Plackett-Luce rank-ordered logit per depth; report odds ratios
    per 1 SD, optimizer stability, Hessian conditioning; leave-one-out IIA on
    `top_20` only.
-6. Run pooled diagnostics per depth; multivariate VIF sensitivity; influence
-   refit appendix (Slice 8).
+6. Run pooled diagnostics per depth; primary-depth multivariate VIF sensitivity
+   (slice 7 shipped); influence refit appendix (Slice 8).
 7. Emit nested `stats_*` artifacts; link from `report.md`; set
    `actionable_association` and `actionable_association_by_rank_depth` per BGE
    rule.

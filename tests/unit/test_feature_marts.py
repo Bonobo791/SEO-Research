@@ -5,6 +5,7 @@ import polars as pl
 import pyarrow as pa
 import pyarrow.dataset as ds
 import pyarrow.parquet as pq
+import pytest
 
 from seo_rank.cli import main
 from seo_rank.data.features import build_feature_marts, write_feature_dataset
@@ -268,3 +269,109 @@ def test_write_feature_dataset_uses_lazy_sink_parquet_with_statistics(
     assert captured["path"] == run_dir / "parquet" / "keyword_serp" / "part-0.parquet"
     assert captured["kwargs"] == {"compression": "zstd", "statistics": True}
     assert catalog["row_count"] == 1
+
+
+def test_write_feature_dataset_allows_textrazor_entailment_scores_above_one(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "run-1"
+    frame = pl.DataFrame(
+        [
+            {
+                "run_id": "run-1",
+                "target_keyword_id": "kw-1",
+                "target_keyword": "technical seo",
+                "response_id": "page-resp-1",
+                "canonical_url_hash": "hash-1",
+                "url": "https://example.com",
+                "page_metrics_row_id": "metrics-1",
+                "textrazor_entity_confidence_score": 7.5,
+                "textrazor_entity_relevance_score": 0.92,
+                "textrazor_topic_score": 0.66,
+                "textrazor_category_score": 0.83,
+                "textrazor_classifier_score": 0.74,
+                "textrazor_entailment_score": 7.317,
+                "textrazor_entailment_prior": 1.0,
+                "textrazor_entailment_context": 1.0,
+                "textrazor_word_count": 2,
+                "textrazor_grammar_count": 1,
+                "textrazor_sense_count": 1,
+                "textrazor_spelling_count": 1,
+                "textrazor_relation_count": 2,
+                "textrazor_property_count": 1,
+                "textrazor_noun_phrase_count": 3,
+                "textrazor_entities_present": True,
+                "textrazor_topics_present": True,
+                "textrazor_categories_present": True,
+                "textrazor_entailments_present": True,
+                "textrazor_words_present": True,
+                "textrazor_relations_present": True,
+                "textrazor_properties_present": True,
+                "textrazor_noun_phrases_present": True,
+                "textrazor_page_metrics_complete": True,
+                "schema_version": "feature_marts.v1",
+            }
+        ]
+    ).lazy()
+
+    catalog = write_feature_dataset(
+        run_dir,
+        name="textrazor_page_metrics",
+        frame=frame,
+    )
+
+    assert catalog["row_count"] == 1
+
+
+def test_write_feature_dataset_includes_dataset_name_on_validation_failure(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "run-1"
+    frame = pl.DataFrame(
+        [
+            {
+                "run_id": "run-1",
+                "target_keyword_id": "kw-1",
+                "target_keyword": "technical seo",
+                "response_id": "page-resp-1",
+                "canonical_url_hash": "hash-1",
+                "url": "https://example.com",
+                "page_metrics_row_id": "metrics-1",
+                "textrazor_entity_confidence_score": 7.5,
+                "textrazor_entity_relevance_score": 0.92,
+                "textrazor_topic_score": 2.0,
+                "textrazor_category_score": 0.83,
+                "textrazor_classifier_score": 0.74,
+                "textrazor_entailment_score": 0.61,
+                "textrazor_entailment_prior": 0.34,
+                "textrazor_entailment_context": 0.27,
+                "textrazor_word_count": 2,
+                "textrazor_grammar_count": 1,
+                "textrazor_sense_count": 1,
+                "textrazor_spelling_count": 1,
+                "textrazor_relation_count": 2,
+                "textrazor_property_count": 1,
+                "textrazor_noun_phrase_count": 3,
+                "textrazor_entities_present": True,
+                "textrazor_topics_present": True,
+                "textrazor_categories_present": True,
+                "textrazor_entailments_present": True,
+                "textrazor_words_present": True,
+                "textrazor_relations_present": True,
+                "textrazor_properties_present": True,
+                "textrazor_noun_phrases_present": True,
+                "textrazor_page_metrics_complete": True,
+                "schema_version": "feature_marts.v1",
+            }
+        ]
+    ).lazy()
+
+    with pytest.raises(
+        ValueError,
+        match="textrazor_page_metrics validation failed: Column textrazor_topic_score is above maximum 1",
+    ):
+        write_feature_dataset(
+            run_dir,
+            name="textrazor_page_metrics",
+            frame=frame,
+        )

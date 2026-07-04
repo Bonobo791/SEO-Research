@@ -11,9 +11,11 @@ from typing import Any
 import numpy as np
 import polars as pl
 
+from seo_rank.debug_trace import debug_trace
 from seo_rank.data.scans import scan_curated_table
 from seo_rank.stats.diagnostics import summarize_diagnostics_backends_from_fits
 from seo_rank.stats.diagnostics import summarize_diagnostics_families
+from seo_rank.stats.diagnostics import summarize_multivariate_sensitivity
 from seo_rank.stats.panel import (
     AnalysisPanelResult,
     load_analysis_panel,
@@ -156,6 +158,22 @@ def merge_analysis_mart_with_textrazor_page_metrics(
         on=["run_id", "target_keyword_id", "canonical_url_hash"],
         how="left",
     )
+    confidence_column = "textrazor_entity_confidence_score"
+    if confidence_column in merged.columns:
+        debug_trace(
+            hypothesis_id="H4-H5",
+            location="artifacts.py:merge_analysis_mart_with_textrazor_page_metrics",
+            message="textrazor join coverage",
+            data={
+                "analysis_mart_rows": analysis_mart.height,
+                "textrazor_rows": textrazor_page_metrics.height,
+                "merged_rows": merged.height,
+                "confidence_non_null": int(
+                    merged[confidence_column].is_not_null().sum()
+                ),
+                "confidence_null": int(merged[confidence_column].is_null().sum()),
+            },
+        )
     sort_columns = ["target_keyword_id", "canonical_url_hash", "serp_rank", "serp_item_id"]
     if all(column in merged.columns for column in sort_columns):
         merged = merged.sort(sort_columns)
@@ -272,6 +290,16 @@ def build_rank_depth_bundles(
                 result.backend_order,
                 fits=regression_fits,
             )
+            depth_diagnostics: dict[str, object] = {
+                "regression": diagnostics,
+                "plackett_luce": plackett_luce_diagnostics,
+            }
+            if depth_key == spec.primary_rank_depth:
+                depth_diagnostics["multivariate_sensitivity"] = summarize_multivariate_sensitivity(
+                    depth_mart,
+                    vif_threshold=spec.multivariate_vif_threshold,
+                    backend_drop_order=spec.backend_drop_order,
+                )
             bundle["spearman"] = spearman
             bundle["regression"] = regression
             bundle["plackett_luce"] = plackett_luce
@@ -281,10 +309,7 @@ def build_rank_depth_bundles(
                 spearman=spearman,
                 regression=regression,
             )
-            diagnostics_by_depth[depth_key] = {
-                "regression": diagnostics,
-                "plackett_luce": plackett_luce_diagnostics,
-            }
+            diagnostics_by_depth[depth_key] = depth_diagnostics
         bundle = _annotate_inference_modes(bundle)
         if not hard_fail:
             diagnostics_by_depth[depth_key] = _annotate_inference_modes(
@@ -502,6 +527,11 @@ def _rank_depth_report_sections(
     if diagnostics is not None:
         lines.extend(["", "### Diagnostics"])
         lines.extend(_format_diagnostics_lines(diagnostics))
+
+    multivariate_sensitivity = depth_diagnostics.get("multivariate_sensitivity")
+    if multivariate_sensitivity is not None:
+        lines.extend(["", "### Robustness"])
+        lines.extend(_format_multivariate_sensitivity_lines(multivariate_sensitivity))
 
     families = bundle.get("families")
     if isinstance(families, dict) and families:
@@ -737,6 +767,27 @@ def _format_diagnostics_lines(diagnostics: dict[str, object]) -> list[str]:
                 f"shapiro_p_value={shapiro['p_value']}"
             )
         lines.append(line)
+    return lines
+
+
+def _format_multivariate_sensitivity_lines(sensitivity: dict[str, object]) -> list[str]:
+    lines: list[str] = []
+    drop_path = " -> ".join(sensitivity.get("drop_path", [])) or "none"
+    kept_backends = ", ".join(sensitivity.get("kept_backends", [])) or "none"
+    max_vif = sensitivity.get("max_vif", "n/a")
+    max_vif_term = sensitivity.get("max_vif_term", "n/a")
+    line = (
+        f"- status={sensitivity['status']}, "
+        f"kept_backends={kept_backends}, "
+        f"max_vif={max_vif}, "
+        f"max_vif_term={max_vif_term}, "
+        f"vif_threshold={sensitivity.get('vif_threshold', 'n/a')}, "
+        f"drop_path={drop_path}"
+    )
+    unresolved_reason = sensitivity.get("unresolved_reason")
+    if unresolved_reason is not None:
+        line += f", unresolved_reason={unresolved_reason}"
+    lines.append(line)
     return lines
 
 

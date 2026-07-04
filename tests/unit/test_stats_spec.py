@@ -81,6 +81,17 @@ def test_load_analysis_spec_exposes_signal_family_metadata() -> None:
     )
 
 
+def test_load_analysis_spec_exposes_multivariate_sensitivity_settings() -> None:
+    analysis_spec = load_analysis_spec()
+
+    assert analysis_spec.multivariate_vif_threshold == 5
+    assert analysis_spec.backend_drop_order == (
+        "gemini_semantic_similarity",
+        "gemini_doc_retrieval",
+        "bge",
+    )
+
+
 def test_load_analysis_spec_logs_version_and_rank_depths(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

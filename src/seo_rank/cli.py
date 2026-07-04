@@ -17,6 +17,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import polars as pl
 
+from seo_rank.debug_trace import debug_trace
 from seo_rank.env import ensure_project_env_loaded
 from seo_rank.data import build_analysis_mart, build_feature_marts, normalize_run
 from seo_rank.data.scans import scan_curated_table, scan_raw_responses
@@ -517,6 +518,8 @@ def replay_stored_run(
     deduped_keywords = dedupe_keywords(
         [keyword for keyword in stored_keywords if isinstance(keyword, str)]
     )
+    if deduped_keywords and config.keyword_limit < len(deduped_keywords):
+        config = replace(config, keyword_limit=len(deduped_keywords))
     if progress is not None and config.keyword_limit > len(deduped_keywords):
         progress.log(
             f"replay: expanding stored run from {len(deduped_keywords)} "
@@ -532,6 +535,17 @@ def replay_stored_run(
             progress=progress,
         )
         return
+
+    debug_trace(
+        hypothesis_id="H3",
+        location="cli.py:replay_stored_run",
+        message="stored-run replay starting",
+        data={
+            "stored_keyword_count": len(deduped_keywords),
+            "requested_keyword_limit": config.keyword_limit,
+            "stored_run": str(stored_run),
+        },
+    )
 
     expand_stored_run(
         stored_run,
@@ -1255,6 +1269,28 @@ def emit_keyword_analysis(run_dir: Path, keyword: str) -> None:
         analysis_mart = scan_analysis_mart(run_dir).filter(pl.col("target_keyword") == keyword).collect()
         textrazor_page_metrics = _load_textrazor_page_metrics_for_keyword_analysis(run_dir)
         merged_frame = merge_keyword_analysis_frame(analysis_mart, textrazor_page_metrics)
+        confidence_values = (
+            merged_frame["textrazor_entity_confidence_score"].null_count()
+            if "textrazor_entity_confidence_score" in merged_frame.columns
+            else None
+        )
+        debug_trace(
+            hypothesis_id="H1-H4",
+            location="cli.py:emit_keyword_analysis",
+            message="keyword analysis textrazor merge",
+            data={
+                "keyword": keyword,
+                "analysis_rows": analysis_mart.height,
+                "textrazor_rows": 0 if textrazor_page_metrics is None else textrazor_page_metrics.height,
+                "merged_rows": merged_frame.height,
+                "confidence_null_count": confidence_values,
+                "output_columns": [
+                    column
+                    for column in merged_frame.columns
+                    if column.startswith("textrazor_")
+                ][:6],
+            },
+        )
         rows = (
             merged_frame.select(_keyword_analysis_output_columns(merged_frame))
             .sort(_keyword_analysis_sort_columns(merged_frame))
@@ -1404,6 +1440,7 @@ def materialize_run_tree(
             run_phase5_stats(run_dir)
         elif progress is not None:
             progress.log(f"{phase_label}: skipping phase 5 stats for dry run")
+        sync_textrazor_page_similarity_artifacts(run_dir, progress=progress)
         if progress is not None:
             progress.log(f"{phase_label}: finished -> {run_dir}")
     except STORAGE_COMMAND_EXCEPTIONS as error:
@@ -2308,6 +2345,127 @@ def serialized_config(config: RunConfig) -> dict[str, object]:
     return serialized
 
 
+def _textrazor_page_score_block(raw_value: object) -> dict[str, float] | None:
+    if raw_value is None:
+        return None
+    rounded = round(float(raw_value), 6)
+    return {"raw_score": rounded, "normalized_score": rounded}
+
+
+def build_textrazor_page_metrics_lookup(
+    run_dir: Path,
+) -> dict[str, dict[str, dict[str, object]]]:
+    metrics_path = Path(run_dir) / "parquet" / "textrazor_page_metrics"
+    if not metrics_path.exists():
+        return {}
+    try:
+        frame = scan_curated_table(run_dir, "textrazor_page_metrics").collect()
+    except STORAGE_COMMAND_EXCEPTIONS:
+        return {}
+    lookup: dict[str, dict[str, dict[str, object]]] = {}
+    for row in frame.to_dicts():
+        keyword = str(row["target_keyword"])
+        url = str(row["url"])
+        scores: dict[str, object] = {}
+        confidence = _textrazor_page_score_block(
+            row.get("textrazor_entity_confidence_score")
+        )
+        relevance = _textrazor_page_score_block(
+            row.get("textrazor_entity_relevance_score")
+        )
+        if confidence is not None:
+            scores["textrazor_entity_confidence_score"] = confidence
+        if relevance is not None:
+            scores["textrazor_entity_relevance_score"] = relevance
+        if scores:
+            lookup.setdefault(keyword, {})[url] = scores
+    return lookup
+
+
+def enrich_run_payload_page_similarity(
+    run_payload: dict[str, object],
+    textrazor_lookup: Mapping[str, Mapping[str, Mapping[str, object]]],
+) -> int:
+    enriched_count = 0
+    keyword_results = run_payload.get("keyword_results")
+    if not isinstance(keyword_results, list):
+        return enriched_count
+    for keyword_result in keyword_results:
+        if not isinstance(keyword_result, Mapping):
+            continue
+        target_keyword = str(keyword_result.get("target_keyword", ""))
+        per_url = textrazor_lookup.get(target_keyword, {})
+        page_similarity = keyword_result.get("page_similarity")
+        if not isinstance(page_similarity, list):
+            continue
+        for score in page_similarity:
+            if not isinstance(score, Mapping):
+                continue
+            url = score.get("url")
+            page_scores = score.get("page_similarity")
+            if not isinstance(url, str) or not isinstance(page_scores, dict):
+                continue
+            textrazor_scores = per_url.get(url)
+            if not isinstance(textrazor_scores, Mapping):
+                continue
+            page_scores.update(dict(textrazor_scores))
+            enriched_count += 1
+    run_payload["page_similarity"] = [
+        score
+        for keyword_result in keyword_results
+        if isinstance(keyword_result, Mapping)
+        for score in keyword_result.get("page_similarity", [])
+        if isinstance(score, Mapping)
+    ]
+    return enriched_count
+
+
+def sync_textrazor_page_similarity_artifacts(
+    run_dir: Path,
+    *,
+    progress: RunProgress | None = None,
+) -> int:
+    run_json_path = Path(run_dir) / "run.json"
+    run_payload = json.loads(run_json_path.read_text(encoding="utf-8"))
+    lookup = build_textrazor_page_metrics_lookup(run_dir)
+    enriched_count = enrich_run_payload_page_similarity(run_payload, lookup)
+    sample_keys: list[str] = []
+    page_similarity = run_payload.get("page_similarity")
+    if isinstance(page_similarity, list) and page_similarity:
+        first_scores = page_similarity[0].get("page_similarity", {})
+        if isinstance(first_scores, Mapping):
+            sample_keys = sorted(first_scores.keys())
+    debug_trace(
+        hypothesis_id="H1-H2",
+        location="cli.py:sync_textrazor_page_similarity_artifacts",
+        message="synced textrazor into page_similarity",
+        data={
+            "enriched_count": enriched_count,
+            "lookup_keywords": len(lookup),
+            "sample_page_score_keys": sample_keys,
+        },
+        run_id="post-fix",
+    )
+    run_json_path.write_text(
+        json.dumps(run_payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    report_payload = {
+        "config": run_payload.get("config", {}),
+        "keyword_results": run_payload.get("keyword_results", []),
+        "network_calls": run_payload.get("network_calls", []),
+    }
+    (Path(run_dir) / "report.md").write_text(
+        render_markdown_report(report_payload),
+        encoding="utf-8",
+    )
+    if progress is not None:
+        progress.log(
+            f"sync: enriched {enriched_count} page_similarity rows with TextRazor metrics"
+        )
+    return enriched_count
+
+
 def render_markdown_report(payload: dict[str, object]) -> str:
     config = payload["config"]
     assert isinstance(config, dict)
@@ -2347,6 +2505,21 @@ def render_markdown_report(payload: dict[str, object]) -> str:
         lines.append("")
         page_similarity = keyword_result["page_similarity"]
         assert isinstance(page_similarity, list)
+        report_page_score_keys: list[str] = []
+        if page_similarity:
+            first_scores = page_similarity[0].get("page_similarity", {})
+            if isinstance(first_scores, Mapping):
+                report_page_score_keys = sorted(first_scores.keys())
+        debug_trace(
+            hypothesis_id="H1-H2",
+            location="cli.py:render_markdown_report",
+            message="report page_similarity backend keys",
+            data={
+                "target_keyword": keyword_result.get("target_keyword"),
+                "page_similarity_count": len(page_similarity),
+                "page_score_keys": report_page_score_keys,
+            },
+        )
         for score in page_similarity:
             page_scores = score["page_similarity"]
             bge_scores = page_scores["bge"]
@@ -2365,6 +2538,18 @@ def render_markdown_report(payload: dict[str, object]) -> str:
                 "  - Gemini Semantic Similarity: "
                 f"{semantic_scores['raw_score']} (normalized {semantic_scores['normalized_score']})"
             )
+            textrazor_confidence = page_scores.get("textrazor_entity_confidence_score")
+            if isinstance(textrazor_confidence, Mapping):
+                lines.append(
+                    "  - TextRazor Entity Confidence: "
+                    f"{textrazor_confidence['raw_score']} (normalized {textrazor_confidence['normalized_score']})"
+                )
+            textrazor_relevance = page_scores.get("textrazor_entity_relevance_score")
+            if isinstance(textrazor_relevance, Mapping):
+                lines.append(
+                    "  - TextRazor Entity Relevance: "
+                    f"{textrazor_relevance['raw_score']} (normalized {textrazor_relevance['normalized_score']})"
+                )
         lines.append("")
     return "\n".join(lines)
 

@@ -8,23 +8,54 @@ from seo_rank.textrazor import fixture_page_metrics_response
 
 
 SCRIPT = Path("/var/home/user/PycharmProjects/SEO-Research/analysis/gemini_nwh_similarity.py")
+KEYWORD = "northwest houston realtors"
+EXTENDED_TEXTRAZOR_STUB = {
+    "unique_entity_count": 3,
+    "entity_mention_count": 5,
+    "entity_confidence_mean": 7.5,
+    "entity_confidence_max": 8.0,
+    "entity_relevance_mean": 0.9,
+    "entity_relevance_max": 0.95,
+    "word_count": 120,
+    "sentence_count": 8,
+    "noun_phrase_count": 4,
+    "relation_count": 2,
+    "property_count": 1,
+    "entailment_count": 1,
+    "words_with_spelling_suggestions": 0,
+    "language": "en",
+    "topics": [{"label": "Real estate", "score": 0.88}],
+    "categories": [{"label": "Business", "score": 0.75}],
+}
 
 
-def load_module():
+def load_module(*, stub_extended_textrazor: bool = True):
     spec = importlib.util.spec_from_file_location("gemini_nwh_similarity", SCRIPT)
     if spec is None or spec.loader is None:
         raise RuntimeError("could not load script module")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    if stub_extended_textrazor:
+        module._textrazor_extended_metrics = (
+            lambda label, text, *, textrazor_api_key: dict(EXTENDED_TEXTRAZOR_STUB)
+        )
     return module
+
+
+def _score_row(label: str, page_similarity: dict[str, object]) -> dict[str, object]:
+    return {
+        "label": label,
+        "page_similarity": page_similarity,
+        "textrazor_extended": dict(EXTENDED_TEXTRAZOR_STUB),
+    }
 
 
 def test_compute_semantic_similarity_scores_orders_blocks_by_score() -> None:
     module = load_module()
 
     vectors = {
-        "task: search result | query: best northwest houston realtors": (1.0, 0.0),
-        "task: sentence similarity | query: best northwest houston realtors": (1.0, 0.0),
+        "task: search result | query: northwest houston realtors": (1.0, 0.0),
+        "task: sentence similarity | query: northwest houston realtors": (1.0, 0.0),
         "title: Alpha | text: Alpha block": (1.0, 0.0),
         "task: sentence similarity | query: Alpha block": (1.0, 0.0),
         "title: Beta | text: Beta block": (0.0, 1.0),
@@ -53,13 +84,13 @@ def test_compute_semantic_similarity_scores_orders_blocks_by_score() -> None:
     class FakeReranker:
         def compute_score(self, pairs):
             assert pairs == [
-                ["best northwest houston realtors", "Alpha block"],
-                ["best northwest houston realtors", "Beta block"],
+                [KEYWORD, "Alpha block"],
+                [KEYWORD, "Beta block"],
             ]
             return [0.91, 0.12]
 
     scores = module.compute_semantic_similarity_scores(
-        "best northwest houston realtors",
+        KEYWORD,
         [
             {"label": "Alpha", "text": "Alpha block"},
             {"label": "Beta", "text": "Beta block"},
@@ -72,9 +103,9 @@ def test_compute_semantic_similarity_scores_orders_blocks_by_score() -> None:
     )
 
     assert scores == [
-        {
-            "label": "Alpha",
-            "page_similarity": {
+        _score_row(
+            "Alpha",
+            {
                 "bge": {"raw_score": 0.91, "normalized_score": 0.713},
                 "gemini_doc_retrieval": {
                     "raw_score": 1.0,
@@ -93,10 +124,10 @@ def test_compute_semantic_similarity_scores_orders_blocks_by_score() -> None:
                     "normalized_score": 0.92,
                 },
             },
-        },
-        {
-            "label": "Beta",
-            "page_similarity": {
+        ),
+        _score_row(
+            "Beta",
+            {
                 "bge": {"raw_score": 0.12, "normalized_score": 0.529964},
                 "gemini_doc_retrieval": {
                     "raw_score": 0.0,
@@ -115,7 +146,7 @@ def test_compute_semantic_similarity_scores_orders_blocks_by_score() -> None:
                     "normalized_score": 0.92,
                 },
             },
-        },
+        ),
     ]
 
 
@@ -131,8 +162,8 @@ def test_main_reports_bge_and_gemini_document_relevance(monkeypatch, capsys) -> 
         assert model == module.GEMINI_EMBEDDING_MODEL
         assert output_dimensionality == module.GEMINI_EMBEDDING_DIMENSIONALITY
         vectors = {
-            "task: search result | query: best northwest houston realtors": (1.0, 0.0),
-            "task: sentence similarity | query: best northwest houston realtors": (1.0, 0.0),
+            "task: search result | query: northwest houston realtors": (1.0, 0.0),
+            "task: sentence similarity | query: northwest houston realtors": (1.0, 0.0),
             "title: Michele Harmon Team | text: Alpha block": (1.0, 0.0),
             "task: sentence similarity | query: Alpha block": (1.0, 0.0),
         }
@@ -148,7 +179,7 @@ def test_main_reports_bge_and_gemini_document_relevance(monkeypatch, capsys) -> 
         reranker=None,
         textrazor_transport=None,
     ):
-        assert keyword == "best northwest houston realtors"
+        assert keyword == KEYWORD
         assert api_key == "gemini-secret"
         assert textrazor_api_key == "textrazor-secret"
         assert blocks == [{"label": "Michele Harmon Team", "text": "Alpha block"}]
@@ -175,6 +206,7 @@ def test_main_reports_bge_and_gemini_document_relevance(monkeypatch, capsys) -> 
                         "normalized_score": 0.92,
                     },
                 },
+                "textrazor_extended": dict(EXTENDED_TEXTRAZOR_STUB),
             }
         ]
 
@@ -209,8 +241,8 @@ def test_compute_semantic_similarity_scores_logs_summary(caplog) -> None:
     caplog.set_level(logging.INFO, logger="gemini_nwh_similarity")
 
     vectors = {
-        "task: search result | query: best northwest houston realtors": (1.0, 0.0),
-        "task: sentence similarity | query: best northwest houston realtors": (1.0, 0.0),
+        "task: search result | query: northwest houston realtors": (1.0, 0.0),
+        "task: sentence similarity | query: northwest houston realtors": (1.0, 0.0),
         "title: Alpha | text: Alpha block": (1.0, 0.0),
         "task: sentence similarity | query: Alpha block": (1.0, 0.0),
     }
@@ -236,7 +268,7 @@ def test_compute_semantic_similarity_scores_logs_summary(caplog) -> None:
             return [0.91]
 
     module.compute_semantic_similarity_scores(
-        "best northwest houston realtors",
+        KEYWORD,
         [{"label": "Alpha", "text": "Alpha block"}],
         api_key="gemini-secret",
         textrazor_api_key="textrazor-secret",
@@ -246,7 +278,7 @@ def test_compute_semantic_similarity_scores_logs_summary(caplog) -> None:
     )
 
     messages = [record.getMessage() for record in caplog.records]
-    assert any("computing semantic similarity keyword=best northwest houston realtors" in message for message in messages)
+    assert any(f"computing semantic similarity keyword={KEYWORD}" in message for message in messages)
     assert any("requesting textrazor metrics label=Alpha" in message for message in messages)
     assert any("scored block label=Alpha" in message for message in messages)
 
@@ -255,8 +287,8 @@ def test_compute_semantic_similarity_scores_uses_live_textrazor_request() -> Non
     module = load_module()
 
     vectors = {
-        "task: search result | query: best northwest houston realtors": (1.0, 0.0),
-        "task: sentence similarity | query: best northwest houston realtors": (1.0, 0.0),
+        "task: search result | query: northwest houston realtors": (1.0, 0.0),
+        "task: sentence similarity | query: northwest houston realtors": (1.0, 0.0),
         "title: Alpha | text: Alpha block": (1.0, 0.0),
         "task: sentence similarity | query: Alpha block": (1.0, 0.0),
     }
@@ -296,7 +328,7 @@ def test_compute_semantic_similarity_scores_uses_live_textrazor_request() -> Non
             return [0.91]
 
     scores = module.compute_semantic_similarity_scores(
-        "best northwest houston realtors",
+        KEYWORD,
         [{"label": "Alpha", "text": "Alpha block"}],
         api_key="gemini-secret",
         textrazor_api_key="textrazor-secret",
@@ -326,8 +358,8 @@ def test_compute_semantic_similarity_scores_falls_back_to_fixture_bge_when_live_
     module = load_module()
 
     vectors = {
-        "task: search result | query: best northwest houston realtors": (1.0, 0.0),
-        "task: sentence similarity | query: best northwest houston realtors": (1.0, 0.0),
+        "task: search result | query: northwest houston realtors": (1.0, 0.0),
+        "task: sentence similarity | query: northwest houston realtors": (1.0, 0.0),
         "title: Alpha | text: Best Northwest Houston Realtors for every home": (1.0, 0.0),
         "task: sentence similarity | query: Best Northwest Houston Realtors for every home": (
             1.0,
@@ -359,7 +391,7 @@ def test_compute_semantic_similarity_scores_falls_back_to_fixture_bge_when_live_
 
     monkeypatch.setattr(module, "load_bge_reranker", raise_bge_error)
     scores = module.compute_semantic_similarity_scores(
-        "best northwest houston realtors",
+        KEYWORD,
         [{"label": "Alpha", "text": "Best Northwest Houston Realtors for every home"}],
         api_key="gemini-secret",
         textrazor_api_key="textrazor-secret",
@@ -368,9 +400,9 @@ def test_compute_semantic_similarity_scores_falls_back_to_fixture_bge_when_live_
     )
 
     assert scores == [
-        {
-            "label": "Alpha",
-            "page_similarity": {
+        _score_row(
+            "Alpha",
+            {
                 "bge": {"raw_score": 0.98, "normalized_score": 0.727108},
                 "gemini_doc_retrieval": {
                     "raw_score": 1.0,
@@ -389,7 +421,7 @@ def test_compute_semantic_similarity_scores_falls_back_to_fixture_bge_when_live_
                     "normalized_score": 0.92,
                 },
             },
-        }
+        )
     ]
 
 
@@ -399,8 +431,8 @@ def test_compute_semantic_similarity_scores_falls_back_to_fixture_bge_when_live_
     module = load_module()
 
     vectors = {
-        "task: search result | query: best northwest houston realtors": (1.0, 0.0),
-        "task: sentence similarity | query: best northwest houston realtors": (1.0, 0.0),
+        "task: search result | query: northwest houston realtors": (1.0, 0.0),
+        "task: sentence similarity | query: northwest houston realtors": (1.0, 0.0),
         "title: Alpha | text: Best Northwest Houston Realtors for every home": (1.0, 0.0),
         "task: sentence similarity | query: Best Northwest Houston Realtors for every home": (
             1.0,
@@ -432,7 +464,7 @@ def test_compute_semantic_similarity_scores_falls_back_to_fixture_bge_when_live_
 
     monkeypatch.setattr(module, "load_bge_reranker", raise_unexpected_error)
     scores = module.compute_semantic_similarity_scores(
-        "best northwest houston realtors",
+        KEYWORD,
         [{"label": "Alpha", "text": "Best Northwest Houston Realtors for every home"}],
         api_key="gemini-secret",
         textrazor_api_key="textrazor-secret",
@@ -441,9 +473,9 @@ def test_compute_semantic_similarity_scores_falls_back_to_fixture_bge_when_live_
     )
 
     assert scores == [
-        {
-            "label": "Alpha",
-            "page_similarity": {
+        _score_row(
+            "Alpha",
+            {
                 "bge": {"raw_score": 0.98, "normalized_score": 0.727108},
                 "gemini_doc_retrieval": {
                     "raw_score": 1.0,
@@ -462,7 +494,7 @@ def test_compute_semantic_similarity_scores_falls_back_to_fixture_bge_when_live_
                     "normalized_score": 0.92,
                 },
             },
-        }
+        )
     ]
 
 

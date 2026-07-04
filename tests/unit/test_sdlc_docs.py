@@ -73,7 +73,7 @@ def test_stored_run_docs_describe_partial_resume_and_current_suite_status() -> N
     assert "reuses existing raw responses" in readme
     assert "`--stored-run` resumes partial runs in place" in architecture
     assert "refreshes only missing work" in architecture
-    assert "271 unit tests pass" in testing or "271 unit tests" in testing
+    assert "287 unit tests pass" in testing or "287 unit tests" in testing
     assert "resumes from the saved raw lake" in roadmap
 
 
@@ -145,8 +145,8 @@ def test_phase_45_slice_9_regression_sweep_marks_mart_sink_docs_as_shipped() -> 
     assert "Phase 4.5 Slice 9 shipped" in roadmap
     assert "Phase 4.5 Slice 10 shipped" in roadmap
     assert "Phase 4.5 signed off" in roadmap
-    assert "271 unit tests" in architecture or "271 tests" in architecture or "271 unit tests pass" in architecture
-    assert "271 unit tests pass" in testing or "271 unit tests" in testing
+    assert "287 unit tests" in architecture or "287 tests" in architecture or "287 unit tests pass" in architecture
+    assert "287 unit tests pass" in testing or "287 unit tests" in testing
     assert "sink feature marts lazily with Parquet statistics" in testing
 
 
@@ -208,10 +208,10 @@ def test_phase_5_slice_5_ships_pooled_regression_secondary_path() -> None:
     assert "| 5 | Pooled regression (secondary) | Stats | Shipped |" in goals
     assert "Phase 5 Slice 5 shipped" in roadmap
     assert "**[x] Slice 5 — Pooled regression (secondary)**" in roadmap
-    assert "Phase 5 slices 1–6" in architecture
+    assert "Phase 5 slices 1–7" in architecture
     assert "keyword-clustered SEs" in architecture
     assert "test_stats_regression.py" in testing
-    assert "Phase 5 slices 1–6 and 16–20" in testing
+    assert "Phase 5 slices 1–7 and 16–20" in testing
 
 
 def test_phase_5_slice_6_ships_pooled_ols_diagnostics() -> None:
@@ -230,6 +230,27 @@ def test_phase_5_slice_6_ships_pooled_ols_diagnostics() -> None:
     assert "page_similarity" in architecture
     assert "test_stats_diagnostics.py" in testing
     assert "stats_diagnostics.json" in readme
+
+
+def test_phase_5_slice_7_ships_multivariate_sensitivity() -> None:
+    spec = (ROOT / "analysis_spec.v1.yaml").read_text(encoding="utf-8")
+    goals = (ROOT / "GOALS.md").read_text(encoding="utf-8")
+    roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
+    architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
+    testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "multivariate_vif_threshold:" in spec
+    assert "backend_drop_order:" in spec
+    assert "**[x] Slice 7 — Multivariate sensitivity**" in goals
+    assert "| 7 | Multivariate sensitivity | Stats | Shipped |" in goals
+    assert "Phase 5 Slice 7 shipped" in roadmap
+    assert "**[x] Slice 7 — Multivariate sensitivity**" in roadmap
+    assert "multivariate_sensitivity" in architecture
+    assert "### Robustness" in architecture
+    assert "test_stats_diagnostics.py" in testing
+    assert "multivariate sensitivity" in testing.lower()
+    assert "### Robustness" in readme
 
 
 def test_phase_5_page_level_plackett_luce_secondary_path_is_documented() -> None:
@@ -326,8 +347,8 @@ def test_phase_5_progress_counts_are_aligned() -> None:
     goals = (ROOT / "GOALS.md").read_text(encoding="utf-8")
     roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
 
-    assert "23 of 33 shipped, 2 partial, 8 open" in goals
-    assert "23 of 33 shipped, 2 partial, 8 open" in roadmap
+    assert "24 of 33 shipped, 2 partial, 7 open" in goals
+    assert "24 of 33 shipped, 2 partial, 7 open" in roadmap
 
 
 def test_phase_6_plans_workflow_integrity_guardrails() -> None:

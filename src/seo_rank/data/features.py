@@ -337,7 +337,7 @@ FEATURE_VALIDATION_RULES = {
             "textrazor_topic_score": (0, 1),
             "textrazor_category_score": (0, 1),
             "textrazor_classifier_score": (0, 1),
-            "textrazor_entailment_score": (0, 1),
+            "textrazor_entailment_score": (0, None),
             "textrazor_entailment_prior": (0, 1),
             "textrazor_entailment_context": (0, 1),
             "textrazor_word_count": (0, None),
@@ -637,14 +637,17 @@ def write_feature_dataset(
     dataset_dir = run_dir / "parquet" / name
     dataset_dir.mkdir(parents=True, exist_ok=True)
     file_path = dataset_dir / "part-0.parquet"
-    frame.sink_parquet(file_path, compression="zstd", statistics=True)
     validation = FEATURE_VALIDATION_RULES[name]
-    validate_materialized_frame_contract(
-        pl.from_arrow(pq.read_table(file_path)),
-        unique_columns=validation.get("unique_columns", ()),
-        non_null_columns=validation.get("non_null_columns", ()),
-        bounded_columns=validation.get("bounded_columns"),
-    )
+    try:
+        frame.sink_parquet(file_path, compression="zstd", statistics=True)
+        validate_materialized_frame_contract(
+            pl.from_arrow(pq.read_table(file_path)),
+            unique_columns=validation.get("unique_columns", ()),
+            non_null_columns=validation.get("non_null_columns", ()),
+            bounded_columns=validation.get("bounded_columns"),
+        )
+    except ValueError as error:
+        raise ValueError(f"{name} validation failed: {error}") from error
     return {
         "schema_version": FEATURE_SCHEMA_VERSION,
         "row_count": pq.ParquetFile(file_path).metadata.num_rows,

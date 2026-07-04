@@ -63,6 +63,14 @@ class AnalysisSpec:
         return MappingProxyType(dict(self.data["estimand"]))
 
     @property
+    def multivariate_vif_threshold(self) -> float:
+        return float(self.data["sensitivity"]["multivariate_vif_threshold"])
+
+    @property
+    def backend_drop_order(self) -> tuple[str, ...]:
+        return tuple(str(backend) for backend in self.data["sensitivity"]["backend_drop_order"])
+
+    @property
     def primary_rank_depth(self) -> str:
         return str(self.data["rank_depths"]["primary"])
 
@@ -96,6 +104,12 @@ def load_analysis_spec(path: Path | str | None = None) -> AnalysisSpec:
     primary_backend = str(loaded["decision"]["primary_backend"])
     if primary_backend != signal_families.similarity_keys[0]:
         raise ValueError("decision.primary_backend must match the first similarity signal family")
+    backend_drop_order = tuple(str(backend) for backend in loaded["sensitivity"]["backend_drop_order"])
+    if backend_drop_order[-1] != primary_backend:
+        raise ValueError("sensitivity.backend_drop_order must keep the primary backend last")
+    expected_drop_order = tuple(reversed(signal_families.similarity_keys))
+    if backend_drop_order != expected_drop_order:
+        raise ValueError("sensitivity.backend_drop_order must match the reverse similarity backend order")
     analysis_spec = AnalysisSpec(
         path=requested_path,
         source_path=source_path,

@@ -14,7 +14,7 @@ Pytest configuration and verification contract for SEO-Research.
   interpreter
 - Lint / type-check / build / coverage: not configured
 - Expected test duration: fast (< 1s)
-- **Current verification status:** 271 unit tests pass (`python -m pytest tests/unit`); full suite collects 272 tests including 1 opt-in integration test
+- **Current verification status:** 287 unit tests pass (`python -m pytest tests/unit`); full suite collects 288 tests including 1 opt-in integration test
 
 ## Active Verification Command
 
@@ -50,17 +50,17 @@ placeholders only.
 
 | Test file | What it verifies |
 |-----------|------------------|
-| `test_cli_run.py` | CLI writes grouped per-keyword artifacts, including BGE, Gemini Doc Retrieval, and Gemini Semantic Similarity rows; run-scoped `raw_responses` Parquet + `run.json` catalog metadata; offline TextRazor include/skip; TextRazor-only flags (`--live-textrazor-only`, `--refresh-textrazor`), env gates, and mutual-exclusion errors; explicit live-provider gates; stored-run partial resume/backfill, stale SERP refresh, and no-op replay coverage; opt-in live Gemini, BGE, and TextRazor orchestration |
+| `test_cli_run.py` | CLI writes grouped per-keyword artifacts, including BGE, Gemini Doc Retrieval, and Gemini Semantic Similarity rows; run-scoped `raw_responses` Parquet + `run.json` catalog metadata; offline TextRazor include/skip; TextRazor entity confidence/relevance in `report.md`; TextRazor-only flags (`--live-textrazor-only`, `--refresh-textrazor`), env gates, and mutual-exclusion errors; explicit live-provider gates; stored-run partial resume/backfill, stale SERP refresh, and no-op replay coverage; opt-in live Gemini, BGE, and TextRazor orchestration |
 | `test_run_progress.py` | `seo-rank run` stderr progress: run phases, per-keyword substeps, progress bar, artifact-write logs |
 | `test_cli_surfaces.py` | Phase 4.5 storage CLI: subcommand parser wiring, `normalize` / `build-features` / `analyze` / `replay` dispatch, missing feature-mart backfill on `analyze`, `run --stored-run` routing, exit code `2` on storage errors and unknown keyword/response |
-| `test_run_normalize.py` | Stored `raw_responses` normalize into curated Parquet tables (including `similarity_scores` copied from `run.json` `page_similarity`, `page_content_fields`, and `textrazor_page_metrics_curated` from TextRazor page-metrics responses) via lazy scan + batch UDFs; refresh the run catalog |
+| `test_run_normalize.py` | Stored `raw_responses` normalize into curated Parquet tables (including `similarity_scores` copied from `run.json` `page_similarity`, `page_content_fields`, and `textrazor_page_metrics_curated` from TextRazor page-metrics responses) via lazy scan + batch UDFs; TextRazor entailment scores above 1.0 validate; dataset-name validation errors; refresh the run catalog |
 | `test_data_scans_validate.py` | Raw-response scans use `pl.scan_parquet()`, lazy curated frames are built, schema-only validation rejects missing columns, and materialized row-rule checks stay off the lazy edge |
 | `test_data_marts.py` | Analysis mart lazy join lives in `seo_rank.data.marts` and preserves the feature-mart contract |
-| `test_feature_marts.py` | Feature marts materialize lazy joins, validate before sink, sink feature marts lazily with Parquet statistics, audit the written parquet row rules, and refresh the run catalog |
+| `test_feature_marts.py` | Feature marts materialize lazy joins, validate before sink, sink feature marts lazily with Parquet statistics, audit the written parquet row rules, allow unbounded TextRazor entailment scores, surface dataset names on validation failure, and refresh the run catalog |
 | `test_analysis_mart.py` | Feature marts materialize the lazy analysis mart, preserve unmatched SERP rows with nullable feature columns, validate before sink, audit the written parquet row rules, and refresh the run catalog |
 | `test_stats_panel.py` | Guardrail evaluation (SERP-rank variance hard-fail, similarity-variance warn), panel grain filtering, full vs minimal stats artifact writing on pass/fail |
 | `test_stats_spearman.py` | Benjamini-Hochberg adjustment, backend Spearman summaries, and Spearman artifact emission on passing panels |
-| `test_stats_diagnostics.py` | Pooled OLS diagnostics, small-sample Shapiro handling, diagnostic artifact emission on passing panels, and skipped-backend diagnostics behavior |
+| `test_stats_diagnostics.py` | Pooled OLS diagnostics, multivariate VIF sensitivity with spec drop order, small-sample Shapiro handling, diagnostic artifact emission on passing panels, and skipped-backend diagnostics behavior |
 | `test_stats_regression.py` | Pooled baseline and per-backend feature regressions with keyword-clustered SEs, effect-size translation, two-way-cluster sensitivity, and regression artifact emission on passing panels |
 | `test_stats_plackett_luce.py` | Page-level Plackett-Luce rank-ordered logit summaries, partial-ranking handling, optimizer / leave-one-out IIA diagnostics, and PL artifact emission on passing panels |
 | `test_stats_families.py` | Declarative signal-family registry loading, ordered enumeration, panel-grain preservation, and malformed-entry rejection |
@@ -79,7 +79,8 @@ placeholders only.
 | `test_gemini_embeddings.py` | Live Gemini prompt formatting, model args, and score shaping with injected embeddings |
 | `test_passage_normalization.py` | Passage split, short-text filter |
 | `test_similarity_features.py` | Fixture passage aggregation plus BGE, Gemini Doc Retrieval, and Gemini Semantic Similarity page scoring |
-| `test_analysis_gemini_nwh_similarity.py` | Analysis script block scoring with BGE, Gemini document relevance, and Gemini semantic similarity plus provider error handling |
+| `test_analysis_gemini_nwh_similarity.py` | Analysis script block scoring with BGE, Gemini document relevance, Gemini semantic similarity, extended TextRazor summaries, and provider error handling |
+| `test_textrazor_ranking_explainability.py` | TextRazor ranking explainability summaries: univariate and multivariate adjusted R², metric coverage |
 | `test_textrazor_normalization.py` | Entity schema normalization and TextRazor page-metrics aggregation into `textrazor_page_metrics_curated` |
 | `test_textrazor_requests.py` | TextRazor parsed-text request construction, credential validation, HTTP execution |
 | `test_sdlc_docs.py` | GOALS/ROADMAP/README/TESTING/ARCHITECTURE guards, manifest pytest commands, and the Slice 7 round-trip regression sweep |
@@ -106,7 +107,7 @@ Mock nondeterministic or destructive external effects (network, paid APIs,
 credentials). Prefer integration tests at real boundaries once live clients
 exist.
 
-## Shipped tests — Phase 5 slices 1–6 and 16–20
+## Shipped tests — Phase 5 slices 1–7 and 16–20
 
 - **`analysis_spec.v1.yaml` contract** — `tests/unit/test_sdlc_docs.py::
   test_phase_5_slice_1_defines_analysis_spec_v1` asserts estimand fields
@@ -147,6 +148,17 @@ exist.
   RESET, Breusch–Pagan with HC3 recommendation, Cook's D and influence flags,
   small-sample Shapiro as informational, skipped-backend diagnostics, and
   `stats_diagnostics.json` / `stats_report.md` emission on passing panels.
+- **Multivariate sensitivity (slice 7 shipped)** — `tests/unit/test_stats_spec.py`
+  and `tests/unit/test_stats_diagnostics.py` cover the spec-driven VIF threshold
+  and backend drop order, plus the primary-depth `multivariate_sensitivity`
+  block in `stats_diagnostics.json` and the `### Robustness` section in
+  `stats_report.md`.
+
+## Shipped tests — TextRazor ranking explainability
+
+- **TextRazor adjusted R² summaries** — `tests/unit/test_textrazor_ranking_explainability.py`
+  covers univariate and multivariate pooled OLS adjusted R² for TextRazor page
+  metrics via `seo_rank.stats.textrazor_explainability`.
 
 ## Shipped tests — TextRazor-only ingestion (slices 21–25)
 
@@ -196,14 +208,14 @@ exist.
 
 ## Planned tests (not yet in suite) — Phase 5 active scope
 
-See `GOALS.md` and `ROADMAP.md` § Phase 5 slices 7–10; standardization and
+See `GOALS.md` and `ROADMAP.md` § Phase 5 slices 8–10; standardization and
 relative ranks are Phase 6.1.
 
 - Feature marts and `analysis_mart` join keys (`run_id`, `target_keyword_id`,
   `canonical_url_hash`, `response_id`, `passage_id`)
 - Passage / domain similarity scopes (feature marts; Phase 5.5 scoring)
 
-### Phase 5 — statistical analysis (see `ROADMAP.md` slices 7–15)
+### Phase 5 — statistical analysis (see `ROADMAP.md` slices 8–15)
 
 - **Golden `analysis_mart` fixture** — synthetic panel with known Spearman ρ and
   pooled slope per backend; tolerance bands for regression coefficients,
@@ -215,14 +227,14 @@ relative ranks are Phase 6.1.
   `actionable_association_by_rank_depth`); top-level compat shim mirrors
   `rank_depths.top_20`; assert naive IID SEs absent.
 - **`stats_diagnostics.json` schema** — nested `rank_depths` with RESET/BP
-  flags, influence counts and %, leverage/DFFITS/DFBETAs, multivariate VIF +
-  drop log, `influence_sensitivity` block, optional two-way-cluster CIs;
-  leave-one-out IIA under `rank_depths.top_20.plackett_luce` only.
+  flags, influence counts and %, leverage/DFFITS/DFBETAs, primary-depth
+  multivariate VIF + drop log, `influence_sensitivity` block, optional
+  two-way-cluster CIs; leave-one-out IIA under
+  `rank_depths.top_20.plackett_luce` only.
 - **Guardrail gates** — hard-fail skips BH and actionable flag; warn still emits
   full stats; CLI exit 1 on hard-fail unless `--no-fail-on-guardrails`.
 - **BH policy** — within-backend family only; skipped when K < 10; diagnostics
   excluded from BH.
-- **Multivariate sensitivity** — VIF > 5 triggers backend drop order from spec.
 - **Influence robustness** — refit without Cook's D > 4/n rows; coefficient
   delta vs confirmatory model.
 - **Dry-run / fixture skip** — `seo-rank analyze` on documented fixture modes

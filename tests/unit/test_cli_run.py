@@ -13,8 +13,10 @@ from seo_rank.dataforseo import fixture_page_text_response
 from seo_rank.dataforseo import fixture_serp_response
 from seo_rank.cli import RAW_RESPONSE_SCHEMA
 from seo_rank.cli import build_raw_response_record
+from seo_rank.cli import enrich_run_payload_page_similarity
 from seo_rank.cli import main
 from seo_rank.cli import prepare_textrazor_only_context
+from seo_rank.cli import render_markdown_report
 from seo_rank.cli import stored_serp_response_is_usable
 from seo_rank.textrazor import fixture_entity_response
 from seo_rank.textrazor import TextRazorCredentials
@@ -221,6 +223,102 @@ def test_run_writes_offline_json_and_markdown_artifacts(
     assert "BGE: 0.98 (normalized 0.98)" in report
     assert "Gemini Doc Retrieval:" in report
     assert "Gemini Semantic Similarity:" in report
+
+
+def test_render_markdown_report_includes_textrazor_entity_metrics() -> None:
+    payload = {
+        "config": {
+            "seed": "seo company columbus",
+            "location": "United States",
+            "language": "en",
+            "device": "desktop",
+            "depth": 20,
+            "model_name": "fixture-similarity-v1",
+        },
+        "network_calls": [],
+        "keyword_results": [
+            {
+                "target_keyword": "seo company columbus",
+                "serp_results": [
+                    {
+                        "rank": 1,
+                        "title": "Example",
+                        "url": "https://example.com/",
+                    }
+                ],
+                "page_similarity": [
+                    {
+                        "target_keyword": "seo company columbus",
+                        "url": "https://example.com/",
+                        "page_similarity": {
+                            "bge": {"raw_score": 0.5, "normalized_score": 0.5},
+                            "gemini_doc_retrieval": {
+                                "raw_score": 0.8,
+                                "normalized_score": 0.8,
+                            },
+                            "gemini_semantic_similarity": {
+                                "raw_score": 0.7,
+                                "normalized_score": 0.7,
+                            },
+                            "textrazor_entity_confidence_score": {
+                                "raw_score": 12.34,
+                                "normalized_score": 12.34,
+                            },
+                            "textrazor_entity_relevance_score": {
+                                "raw_score": 0.91,
+                                "normalized_score": 0.91,
+                            },
+                        },
+                    }
+                ],
+            }
+        ],
+    }
+
+    report = render_markdown_report(payload)
+
+    assert "TextRazor Entity Confidence: 12.34 (normalized 12.34)" in report
+    assert "TextRazor Entity Relevance: 0.91 (normalized 0.91)" in report
+
+
+def test_enrich_run_payload_page_similarity_merges_textrazor_scores() -> None:
+    payload = {
+        "keyword_results": [
+            {
+                "target_keyword": "seo company columbus",
+                "page_similarity": [
+                    {
+                        "target_keyword": "seo company columbus",
+                        "url": "https://example.com/",
+                        "page_similarity": {
+                            "bge": {"raw_score": 0.5, "normalized_score": 0.5},
+                        },
+                    }
+                ],
+            }
+        ]
+    }
+    lookup = {
+        "seo company columbus": {
+            "https://example.com/": {
+                "textrazor_entity_confidence_score": {
+                    "raw_score": 9.0,
+                    "normalized_score": 9.0,
+                },
+                "textrazor_entity_relevance_score": {
+                    "raw_score": 0.88,
+                    "normalized_score": 0.88,
+                },
+            }
+        }
+    }
+
+    enriched = enrich_run_payload_page_similarity(payload, lookup)
+
+    assert enriched == 1
+    page_scores = payload["keyword_results"][0]["page_similarity"][0]["page_similarity"]
+    assert page_scores["textrazor_entity_confidence_score"]["raw_score"] == 9.0
+    assert payload["page_similarity"][0]["page_similarity"]["textrazor_entity_relevance_score"]["raw_score"] == 0.88
 
 
 def test_run_persists_textrazor_only_and_refresh_flags_in_run_json(

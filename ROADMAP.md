@@ -97,7 +97,7 @@ confirmatory keyword holdout (Phase 5.4), passage-level Plackett-Luce analysis.
 
 #### Dev slices
 
-**Progress:** 23 of 33 shipped, 2 partial, 8 open.
+**Progress:** 24 of 33 shipped, 2 partial, 7 open.
 
 1. **[x] Slice 1 — Estimand & analysis spec**
    - Add `analysis_spec.v1.yaml`: outcome (`-log(serp_rank)`), predictors,
@@ -159,7 +159,7 @@ confirmatory keyword holdout (Phase 5.4), passage-level Plackett-Luce analysis.
      rejects `tasks[].result: null` from DataForSEO; blocks
      `--live-providers` E2E sign-off.
 
-7. **[ ] Slice 7 — Multivariate sensitivity**
+7. **[x] Slice 7 — Multivariate sensitivity**
    - Joint model: all three `*_normalized_score` + length + keyword FE.
    - Compute VIF; if any VIF > 5, drop backends in spec order (semantic
      similarity → doc retrieval → keep BGE last).
@@ -407,7 +407,7 @@ seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-textrazor-on
 | Pooled regression with keyword-clustered SEs only in primary output | 5, 17 | Shipped |
 | Effect-size translation + actionable_association rule | 5, 9, 17 | Shipped (per depth) |
 | Pooled diagnostics + influence % in diagnostics JSON | 6, 8, 17 | Shipped (per depth; influence guardrail Slice 8 open) |
-| Multivariate sensitivity with VIF drop order | 7 | Open |
+| Multivariate sensitivity with VIF drop order | 7 | Shipped |
 | Limitations in JSON and Markdown | 9, 19 | Shipped (per depth) |
 | `seo-rank analyze` exit code + dry-run skip | 9 | Partial (`--no-fail-on-guardrails` open) |
 | Golden fixture ρ/slope within tolerance | 10 | Open |
@@ -1053,6 +1053,13 @@ Slice 4. Slice 7 last.
   on passing guardrails, covered by `tests/unit/test_stats_diagnostics.py`.
   `normalize` now materializes `similarity_scores` from `run.json`
   `page_similarity` instead of recomputing scores during curation.
+- **Phase 5 Slice 7 shipped:** `diagnostics.py` fits the joint three-backend
+  multivariate sensitivity model with spec-driven VIF threshold and backend drop
+  order; `run_phase5_stats()` writes `rank_depths.top_20.multivariate_sensitivity`
+  to `stats_diagnostics.json` and a `### Robustness` section in
+  `stats_report.md`; `spec.py` exposes `multivariate_vif_threshold` and
+  `backend_drop_order`; covered by `tests/unit/test_stats_diagnostics.py` and
+  `tests/unit/test_stats_spec.py`.
 - **Phase 5 Slices 16–20 shipped (2026-07-02):** parallel confirmatory rank-depth
   bundles at `top_20`, `top_10`, `top_5`, and `top_3` — `rank_depths` and
   `limitations_by_depth` in `analysis_spec.v1.yaml`, `rank_depth.py` panel
