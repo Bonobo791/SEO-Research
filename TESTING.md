@@ -254,7 +254,7 @@ exist.
   legacy `endpoint=backlinks` read-compat, hard-fail on malformed summary
   aggregates,   and distribution maps as JSON-string columns.
 
-## Shipped tests — OnPage instant_pages (Phase 7.1 slices 1–4, Jul 2026)
+## Shipped tests — OnPage instant_pages (Phase 7.1 slices 1–5, Jul 2026)
 
 - **OnPage instant_pages endpoint (offline contract)** —
   `tests/unit/test_dataforseo_requests.py` covers
@@ -280,6 +280,16 @@ exist.
   `dataforseo.onpage_instant_pages` in `network_calls`), stored-run live overlay
   when the partition is absent, and resume backfill that fetches only missing SERP
   URLs (`test_build_resumed_keyword_result_fetches_only_missing_onpage_urls`).
+- **OnPage stored-run backfill (Phase 7.1 slice 5)** —
+  `tests/unit/test_cli_run.py` covers in-place backfill of a single missing
+  onpage partition row (`test_run_stored_run_backfills_only_missing_onpage_in_place`),
+  no-op replay when the partition is complete
+  (`test_run_stored_run_does_not_refetch_onpage_when_partition_complete`), and
+  refetch when a stored row is schema-valid but item-less
+  (`test_run_stored_run_refetches_empty_onpage_partition_row`; contrast with
+  `test_run_stored_run_reuses_successful_empty_backlink_summaries`).
+  `tests/unit/test_dataforseo_requests.py` locks
+  `onpage_instant_pages_response_is_usable()` rejecting empty payloads.
 
 ## Shipped tests — Phase 6.2 backlinks count analysis (Jul 2026)
 

@@ -1535,7 +1535,7 @@ or task id needed, and no `task_post` crawl/poll flow.
 
 ##### Dev slices
 
-**Progress:** 4 of 10 shipped.
+**Progress:** 5 of 10 shipped.
 
 1. **[x] Slice 1 — Request/schema/fixture** — `build_onpage_instant_pages_request()`,
    `DATAFORSEO_RESPONSE_SCHEMAS["onpage_instant_pages"]`,
@@ -1563,8 +1563,12 @@ or task id needed, and no `task_post` crawl/poll flow.
    (missing-URL overlay), `build_keyword_result_from_responses`,
    `build_live_payload`, `expand_stored_run`, and `build_raw_response_records`.
    Tests in `tests/unit/test_cli_run.py`.
-5. **[ ] Slice 5 — Stored-run backfill** — extend `expand_stored_run` reuse-check
-   for the `onpage_instant_pages` partition.
+5. **[x] Slice 5 — Stored-run backfill** — reuse-check parity for the
+   `onpage_instant_pages` partition inside `build_resumed_keyword_result`
+   (`_usable_onpage_by_url_from_records`, `_missing_serp_urls`); backfill only
+   missing SERP URLs when `--stored-run --live-providers`. Empty schema-valid
+   rows (`result: null`, no page items) are **not** reusable (unlike backlinks
+   empty summaries). CLI regressions in `tests/unit/test_cli_run.py`.
 6. **[ ] Slice 6 — Curated builder** — `build_onpage_signals_frame`: `onpage_score`;
    a fixed ~12-check subset (title/meta length, h1 present, canonical present,
    is_https, render-blocking resources); `content` word count, plain-text

@@ -1093,6 +1093,34 @@ def _register_usable_onpage_response(
     return True
 
 
+def _usable_onpage_by_url_from_records(
+    raw_keyword_records: Mapping[str, Sequence[Mapping[str, object]]],
+) -> dict[str, dict[str, object]]:
+    existing_onpage_by_url: dict[str, dict[str, object]] = {}
+    for record in raw_keyword_records.get(ONPAGE_INSTANT_PAGES_ENDPOINT, []):
+        response_body_bytes = record.get("response_body_bytes")
+        if not isinstance(response_body_bytes, (bytes, bytearray)):
+            continue
+        response = json.loads(bytes(response_body_bytes).decode("utf-8"))
+        url = extract_response_url(response)
+        if not isinstance(url, str):
+            continue
+        _register_usable_onpage_response(
+            existing_onpage_by_url,
+            response=response,
+            url=url,
+        )
+    return existing_onpage_by_url
+
+
+def _missing_serp_urls(
+    serp_results: Sequence[Mapping[str, object]],
+    existing_by_url: Mapping[str, object],
+) -> list[str]:
+    serp_urls = list(dict.fromkeys(str(result["url"]) for result in serp_results))
+    return [url for url in serp_urls if url not in existing_by_url]
+
+
 def build_resumed_keyword_result(
     config: RunConfig,
     *,
@@ -1219,24 +1247,8 @@ def build_resumed_keyword_result(
         for variant in BACKLINKS_VARIANT_ENDPOINTS
         if (str(result["url"]), variant) in existing_backlinks_by_url_variant
     ]
-    existing_onpage_by_url: dict[str, dict[str, object]] = {}
-    for record in raw_keyword_records.get(ONPAGE_INSTANT_PAGES_ENDPOINT, []):
-        response_body_bytes = record.get("response_body_bytes")
-        if not isinstance(response_body_bytes, (bytes, bytearray)):
-            continue
-        response = json.loads(bytes(response_body_bytes).decode("utf-8"))
-        url = extract_response_url(response)
-        if not isinstance(url, str):
-            continue
-        _register_usable_onpage_response(
-            existing_onpage_by_url,
-            response=response,
-            url=url,
-        )
-    serp_urls_unique = list(dict.fromkeys(str(result["url"]) for result in serp_results))
-    missing_onpage_urls = [
-        url for url in serp_urls_unique if url not in existing_onpage_by_url
-    ]
+    existing_onpage_by_url = _usable_onpage_by_url_from_records(raw_keyword_records)
+    missing_onpage_urls = _missing_serp_urls(serp_results, existing_onpage_by_url)
     if config.live_providers and live_context is not None and missing_onpage_urls:
         if progress is not None:
             progress.keyword_log(
