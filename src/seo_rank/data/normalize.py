@@ -21,8 +21,10 @@ from seo_rank.dataforseo import (
     backlinks_response_is_successful_empty,
     decode_content_parsing_items,
     extract_response_url,
+    extract_onpage_instant_pages_item,
     normalize_keyword_expansion,
     normalize_serp_results,
+    onpage_instant_pages_response_is_usable,
     parsed_page_text,
     parsed_page_text_details,
     validate_dataforseo_response,
@@ -46,6 +48,21 @@ BACKLINKS_DISTRIBUTION_JSON_COLUMNS = {
     "referring_links_attributes": "referring_links_attributes_json",
     "referring_links_countries": "referring_links_countries_json",
 }
+ONPAGE_INSTANT_PAGES_ENDPOINT = "onpage_instant_pages"
+ONPAGE_CURATED_CHECK_FIELDS = (
+    "title_too_long",
+    "title_too_short",
+    "no_title",
+    "no_description",
+    "no_h1_tag",
+    "canonical",
+    "is_https",
+    "has_render_blocking_resources",
+    "duplicate_meta_tags",
+    "has_meta_title",
+    "irrelevant_description",
+    "low_readability_rate",
+)
 from seo_rank.text import normalize_page_text
 from seo_rank.textrazor import TEXTRAZOR_ENDPOINTS, normalize_entities, normalize_page_metrics
 
@@ -252,6 +269,45 @@ CURATED_SCHEMAS = {
             ("referring_links_attributes_json", pa.string()),
             ("referring_links_countries_json", pa.string()),
             ("backlinks_metrics_complete", pa.bool_()),
+            ("schema_version", pa.string()),
+        ]
+    ),
+    "onpage_signals": pa.schema(
+        [
+            ("run_id", pa.string()),
+            ("target_keyword_id", pa.string()),
+            ("target_keyword", pa.string()),
+            ("response_id", pa.string()),
+            ("onpage_signal_id", pa.string()),
+            ("canonical_url_hash", pa.string()),
+            ("url", pa.string()),
+            ("onpage_score", pa.float64()),
+            ("title_too_long", pa.bool_()),
+            ("title_too_short", pa.bool_()),
+            ("no_title", pa.bool_()),
+            ("no_description", pa.bool_()),
+            ("no_h1_tag", pa.bool_()),
+            ("canonical", pa.bool_()),
+            ("is_https", pa.bool_()),
+            ("has_render_blocking_resources", pa.bool_()),
+            ("duplicate_meta_tags", pa.bool_()),
+            ("has_meta_title", pa.bool_()),
+            ("irrelevant_description", pa.bool_()),
+            ("low_readability_rate", pa.bool_()),
+            ("plain_text_word_count", pa.float64()),
+            ("plain_text_rate", pa.float64()),
+            ("flesch_kincaid_readability_index", pa.float64()),
+            ("coleman_liau_readability_index", pa.float64()),
+            ("smog_readability_index", pa.float64()),
+            ("dale_chall_readability_index", pa.float64()),
+            ("time_to_first_byte_ms", pa.int64()),
+            ("largest_contentful_paint_ms", pa.float64()),
+            ("cumulative_layout_shift", pa.float64()),
+            ("total_transfer_size", pa.int64()),
+            ("micromarkup_items_count", pa.int64()),
+            ("micromarkup_errors_count", pa.int64()),
+            ("micromarkup_warnings_count", pa.int64()),
+            ("has_valid_structured_data", pa.bool_()),
             ("schema_version", pa.string()),
         ]
     ),
@@ -636,6 +692,57 @@ CURATED_VALIDATION_RULES = {
             "schema_version",
         ),
     },
+    "onpage_signals": {
+        "expected_schema": {
+            "run_id": pl.Utf8,
+            "target_keyword_id": pl.Utf8,
+            "target_keyword": pl.Utf8,
+            "response_id": pl.Utf8,
+            "onpage_signal_id": pl.Utf8,
+            "canonical_url_hash": pl.Utf8,
+            "url": pl.Utf8,
+            "onpage_score": pl.Float64,
+            "title_too_long": pl.Boolean,
+            "title_too_short": pl.Boolean,
+            "no_title": pl.Boolean,
+            "no_description": pl.Boolean,
+            "no_h1_tag": pl.Boolean,
+            "canonical": pl.Boolean,
+            "is_https": pl.Boolean,
+            "has_render_blocking_resources": pl.Boolean,
+            "duplicate_meta_tags": pl.Boolean,
+            "has_meta_title": pl.Boolean,
+            "irrelevant_description": pl.Boolean,
+            "low_readability_rate": pl.Boolean,
+            "plain_text_word_count": pl.Float64,
+            "plain_text_rate": pl.Float64,
+            "flesch_kincaid_readability_index": pl.Float64,
+            "coleman_liau_readability_index": pl.Float64,
+            "smog_readability_index": pl.Float64,
+            "dale_chall_readability_index": pl.Float64,
+            "time_to_first_byte_ms": pl.Int64,
+            "largest_contentful_paint_ms": pl.Float64,
+            "cumulative_layout_shift": pl.Float64,
+            "total_transfer_size": pl.Int64,
+            "micromarkup_items_count": pl.Int64,
+            "micromarkup_errors_count": pl.Int64,
+            "micromarkup_warnings_count": pl.Int64,
+            "has_valid_structured_data": pl.Boolean,
+            "schema_version": pl.Utf8,
+        },
+        "unique_columns": ("onpage_signal_id",),
+        "non_null_columns": (
+            "run_id",
+            "target_keyword_id",
+            "target_keyword",
+            "response_id",
+            "onpage_signal_id",
+            "canonical_url_hash",
+            "url",
+            "onpage_score",
+            "schema_version",
+        ),
+    },
 }
 
 CURATED_PAGE_AND_PASSAGE_SCHEMA = {
@@ -780,6 +887,18 @@ def build_curated_lazyframes_from_raw_responses(
     entity_responses = raw_responses.filter(
         pl.col("endpoint") == TEXTRAZOR_ENDPOINTS["entities"].raw_response_endpoint
     ).select(["run_id", "response_id", "target_keyword", "response_body_bytes"])
+    onpage_responses = raw_responses.filter(
+        pl.col("endpoint") == ONPAGE_INSTANT_PAGES_ENDPOINT
+    ).select(
+        [
+            "run_id",
+            "response_id",
+            "target_keyword",
+            "timestamp",
+            "request_metadata_json",
+            "response_body_bytes",
+        ]
+    )
 
     keywords = keyword_responses.map_batches(
         lambda frame: build_keywords_frame(
@@ -797,6 +916,10 @@ def build_curated_lazyframes_from_raw_responses(
     backlinks = backlink_responses.map_batches(
         lambda frame: build_backlinks_frame(frame, run_id=run_id),
         schema=CURATED_VALIDATION_RULES["backlinks"]["expected_schema"],
+    )
+    onpage_signals = onpage_responses.map_batches(
+        lambda frame: build_onpage_signals_frame(frame, run_id=run_id),
+        schema=CURATED_VALIDATION_RULES["onpage_signals"]["expected_schema"],
     )
     pages_and_passages = page_responses.map_batches(
         lambda frame: build_pages_and_passages_frame(frame, run_id=run_id),
@@ -865,6 +988,7 @@ def build_curated_lazyframes_from_raw_responses(
         "keywords": keywords,
         "serp_items": serp_items,
         "backlinks": backlinks,
+        "onpage_signals": onpage_signals,
         "pages": pages,
         "page_html": page_html,
         "page_content_fields": page_content_field_rows,
@@ -1031,6 +1155,51 @@ def build_backlinks_frame(
     if not rows:
         return pl.DataFrame(schema=CURATED_VALIDATION_RULES["backlinks"]["expected_schema"])
     return pl.DataFrame(rows, schema=CURATED_VALIDATION_RULES["backlinks"]["expected_schema"])
+
+
+def build_onpage_signals_frame(
+    frame: pl.DataFrame,
+    *,
+    run_id: str,
+) -> pl.DataFrame:
+    records = sorted(
+        frame.to_dicts(),
+        key=_onpage_raw_record_recency_key,
+        reverse=True,
+    )
+    seen_keys: set[tuple[str, str]] = set()
+    rows: list[dict[str, object]] = []
+    for record in records:
+        body = json.loads(bytes(record["response_body_bytes"]).decode("utf-8"))
+        if not onpage_instant_pages_response_is_usable(body):
+            continue
+        metadata = json.loads(str(record.get("request_metadata_json", "{}")))
+        url = _onpage_url_from_record(metadata, body)
+        if url is None:
+            continue
+        target_keyword = str(record["target_keyword"])
+        group_key = (target_keyword, url)
+        if group_key in seen_keys:
+            continue
+        item = extract_onpage_instant_pages_item(body)
+        if item is None:
+            continue
+        seen_keys.add(group_key)
+        rows.append(
+            _onpage_signals_row(
+                run_id=run_id,
+                target_keyword=target_keyword,
+                response_id=str(record["response_id"]),
+                url=url,
+                item=item,
+            )
+        )
+
+    if not rows:
+        return pl.DataFrame(
+            schema=CURATED_VALIDATION_RULES["onpage_signals"]["expected_schema"]
+        )
+    return pl.DataFrame(rows, schema=CURATED_VALIDATION_RULES["onpage_signals"]["expected_schema"])
 
 
 def build_pages_and_passages_frame(
@@ -1441,6 +1610,130 @@ def _backlinks_url_from_record(
     if isinstance(response_url, str) and response_url.strip():
         return response_url.strip()
     return None
+
+
+def _onpage_url_from_record(
+    metadata: Mapping[str, object],
+    body: Mapping[str, object],
+) -> str | None:
+    return _backlinks_url_from_record(metadata, body)
+
+
+def _onpage_raw_record_recency_key(record: Mapping[str, object]) -> tuple[str, str]:
+    timestamp = record.get("timestamp")
+    normalized_timestamp = str(timestamp) if timestamp is not None else ""
+    return (normalized_timestamp, str(record.get("response_id", "")))
+
+
+def _optional_mapping_bool(mapping: object, key: str) -> bool | None:
+    if not isinstance(mapping, Mapping):
+        return None
+    value = mapping.get(key)
+    return value if isinstance(value, bool) else None
+
+
+def _optional_mapping_number(mapping: object, key: str) -> float | None:
+    if not isinstance(mapping, Mapping):
+        return None
+    value = mapping.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _optional_mapping_int(mapping: object, key: str) -> int | None:
+    number = _optional_mapping_number(mapping, key)
+    if number is None:
+        return None
+    return int(number)
+
+
+def _derive_has_valid_structured_data(item: Mapping[str, object]) -> bool | None:
+    has_micromarkup = item.get("has_micromarkup")
+    has_errors = item.get("has_micromarkup_errors")
+    if has_micromarkup is None and has_errors is None:
+        return None
+    if has_micromarkup is True:
+        return has_errors is False
+    if has_micromarkup is False:
+        return False
+    return None
+
+
+def _micromarkup_summary_counts(
+    item: Mapping[str, object],
+) -> tuple[int | None, int | None, int | None]:
+    micromarkup = item.get("micromarkup")
+    if not isinstance(micromarkup, Mapping):
+        return None, None, None
+    return (
+        _optional_mapping_int(micromarkup, "items_count"),
+        _optional_mapping_int(micromarkup, "errors_count"),
+        _optional_mapping_int(micromarkup, "warnings_count"),
+    )
+
+
+def _onpage_signals_row(
+    *,
+    run_id: str,
+    target_keyword: str,
+    response_id: str,
+    url: str,
+    item: Mapping[str, object],
+) -> dict[str, object]:
+    target_keyword_id = stable_id(target_keyword)
+    checks = item.get("checks")
+    content = item.get("content")
+    page_timing = item.get("page_timing")
+    score = item.get("onpage_score")
+    assert isinstance(score, (int, float))
+    cumulative_layout_shift = _optional_mapping_number(
+        page_timing,
+        "cumulative_layout_shift",
+    )
+    if cumulative_layout_shift is None:
+        cumulative_layout_shift = _optional_mapping_number(item, "cumulative_layout_shift")
+    items_count, errors_count, warnings_count = _micromarkup_summary_counts(item)
+    row: dict[str, object] = {
+        "run_id": run_id,
+        "target_keyword_id": target_keyword_id,
+        "target_keyword": target_keyword,
+        "response_id": response_id,
+        "onpage_signal_id": stable_id(run_id, target_keyword, url),
+        "canonical_url_hash": stable_id(url),
+        "url": url,
+        "onpage_score": float(score),
+        "plain_text_word_count": _optional_mapping_number(content, "plain_text_word_count"),
+        "plain_text_rate": _optional_mapping_number(content, "plain_text_rate"),
+        "flesch_kincaid_readability_index": _optional_mapping_number(
+            content,
+            "flesch_kincaid_readability_index",
+        ),
+        "coleman_liau_readability_index": _optional_mapping_number(
+            content,
+            "coleman_liau_readability_index",
+        ),
+        "smog_readability_index": _optional_mapping_number(content, "smog_readability_index"),
+        "dale_chall_readability_index": _optional_mapping_number(
+            content,
+            "dale_chall_readability_index",
+        ),
+        "time_to_first_byte_ms": _optional_mapping_int(page_timing, "waiting_time"),
+        "largest_contentful_paint_ms": _optional_mapping_number(
+            page_timing,
+            "largest_contentful_paint",
+        ),
+        "cumulative_layout_shift": cumulative_layout_shift,
+        "total_transfer_size": _optional_mapping_int(item, "total_transfer_size"),
+        "micromarkup_items_count": items_count,
+        "micromarkup_errors_count": errors_count,
+        "micromarkup_warnings_count": warnings_count,
+        "has_valid_structured_data": _derive_has_valid_structured_data(item),
+        "schema_version": CURATED_SCHEMA_VERSION,
+    }
+    for field in ONPAGE_CURATED_CHECK_FIELDS:
+        row[field] = _optional_mapping_bool(checks, field)
+    return row
 
 
 def _single_backlinks_result(body: Mapping[str, object]) -> Mapping[str, object]:

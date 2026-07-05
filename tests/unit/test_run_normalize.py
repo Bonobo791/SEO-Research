@@ -18,12 +18,14 @@ from seo_rank.dataforseo import (
     DataForSeoParseError,
     fixture_backlinks_response,
     fixture_keyword_expansion_response,
+    fixture_onpage_instant_pages_response,
     fixture_serp_response,
 )
 from seo_rank.data.normalize import (
     CURATED_SCHEMAS,
     CURATED_VALIDATION_RULES,
     build_entities_frame,
+    build_onpage_signals_frame,
     build_page_html_frame,
     build_page_content_fields_frame,
     build_similarity_scores_frame,
@@ -675,6 +677,254 @@ def test_normalize_run_materializes_backlinks_table_with_zero_backlinks(
     assert backlinks[0]["backlinks_count"] == 0
     assert backlinks[0]["referring_domains_count"] == 0
     assert backlinks[0]["dofollow_backlinks_count"] is None
+
+
+def test_normalize_run_materializes_onpage_signals_from_fixture(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--depth",
+            "1",
+            "--output-dir",
+            str(output_dir),
+            "--dry-run",
+        ]
+    )
+
+    assert exit_code == 0
+
+    onpage_dir = (
+        output_dir
+        / "parquet"
+        / "raw_responses"
+        / "endpoint=onpage_instant_pages"
+    )
+    onpage_dir.mkdir(parents=True, exist_ok=True)
+    target_url = "https://example.com/technical-seo/1"
+    onpage_record = build_raw_response_record(
+        output_dir.name,
+        endpoint="onpage_instant_pages",
+        provider="dataforseo",
+        response=fixture_onpage_instant_pages_response(target_url),
+        target_keyword="technical seo",
+        request_metadata={
+            "target_keyword": "technical seo",
+            "url": target_url,
+        },
+        recorded_at="2026-07-05T12:00:00+00:00",
+    )
+    pq.write_table(
+        pa.Table.from_pylist([onpage_record], schema=RAW_RESPONSE_SCHEMA),
+        onpage_dir / "part-0.parquet",
+    )
+
+    catalog = normalize_run(output_dir)
+
+    assert catalog["datasets"]["onpage_signals"]["row_count"] == 1
+    onpage_signals = ds.dataset(
+        output_dir / "parquet" / "onpage_signals", format="parquet"
+    ).to_table().to_pylist()
+    row = onpage_signals[0]
+    assert row["onpage_score"] == 85.5
+    assert row["is_https"] is True
+    assert row["canonical"] is True
+    assert row["no_h1_tag"] is False
+    assert row["has_render_blocking_resources"] is False
+    assert row["flesch_kincaid_readability_index"] == 58.0
+    assert row["time_to_first_byte_ms"] == 120
+    assert row["largest_contentful_paint_ms"] == 2500.0
+    assert row["cumulative_layout_shift"] == 0.05
+    assert row["total_transfer_size"] == 120_000
+    assert row["has_valid_structured_data"] is True
+    assert row["micromarkup_items_count"] == 3
+    assert row["micromarkup_errors_count"] == 0
+    assert row["micromarkup_warnings_count"] == 1
+
+
+def test_normalize_run_onpage_signals_sparse_item_nulls_optional_sections(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--depth",
+            "1",
+            "--output-dir",
+            str(output_dir),
+            "--dry-run",
+        ]
+    )
+
+    assert exit_code == 0
+
+    onpage_dir = (
+        output_dir
+        / "parquet"
+        / "raw_responses"
+        / "endpoint=onpage_instant_pages"
+    )
+    onpage_dir.mkdir(parents=True, exist_ok=True)
+    target_url = "https://example.com/sparse"
+    sparse_response = {
+        "status_code": 20000,
+        "url": target_url,
+        "tasks": [
+            {
+                "status_code": 20000,
+                "result": [
+                    {
+                        "items_count": 1,
+                        "items": [
+                            {
+                                "url": target_url,
+                                "onpage_score": 42.0,
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    onpage_record = build_raw_response_record(
+        output_dir.name,
+        endpoint="onpage_instant_pages",
+        provider="dataforseo",
+        response=sparse_response,
+        target_keyword="technical seo",
+        request_metadata={
+            "target_keyword": "technical seo",
+            "url": target_url,
+        },
+        recorded_at="2026-07-05T12:00:00+00:00",
+    )
+    pq.write_table(
+        pa.Table.from_pylist([onpage_record], schema=RAW_RESPONSE_SCHEMA),
+        onpage_dir / "part-0.parquet",
+    )
+
+    catalog = normalize_run(output_dir)
+
+    assert catalog["datasets"]["onpage_signals"]["row_count"] == 1
+    row = ds.dataset(
+        output_dir / "parquet" / "onpage_signals", format="parquet"
+    ).to_table().to_pylist()[0]
+    assert row["url"] == target_url
+    assert row["onpage_score"] == 42.0
+    assert row["is_https"] is None
+    assert row["plain_text_word_count"] is None
+    assert row["time_to_first_byte_ms"] is None
+    assert row["total_transfer_size"] is None
+    assert row["has_valid_structured_data"] is None
+
+
+def test_normalize_run_skips_unusable_onpage_raw_rows(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--depth",
+            "1",
+            "--output-dir",
+            str(output_dir),
+            "--dry-run",
+        ]
+    )
+
+    assert exit_code == 0
+
+    onpage_dir = (
+        output_dir
+        / "parquet"
+        / "raw_responses"
+        / "endpoint=onpage_instant_pages"
+    )
+    onpage_dir.mkdir(parents=True, exist_ok=True)
+    target_url = "https://example.com/empty-onpage"
+    empty_record = build_raw_response_record(
+        output_dir.name,
+        endpoint="onpage_instant_pages",
+        provider="dataforseo",
+        response={
+            "status_code": 20000,
+            "url": target_url,
+            "tasks": [{"status_code": 20000, "result": None}],
+        },
+        target_keyword="technical seo",
+        request_metadata={
+            "target_keyword": "technical seo",
+            "url": target_url,
+        },
+        recorded_at="2026-07-05T12:00:00+00:00",
+    )
+    pq.write_table(
+        pa.Table.from_pylist([empty_record], schema=RAW_RESPONSE_SCHEMA),
+        onpage_dir / "part-0.parquet",
+    )
+
+    catalog = normalize_run(output_dir)
+
+    assert catalog["datasets"]["onpage_signals"]["row_count"] == 0
+
+
+def test_build_onpage_signals_frame_dedupes_by_target_keyword_and_url() -> None:
+    target_keyword = "technical seo"
+    target_url = "https://example.com/technical-seo/1"
+    run_id = "run-dedupe-onpage"
+    older_record = build_raw_response_record(
+        run_id,
+        endpoint="onpage_instant_pages",
+        provider="dataforseo",
+        response={
+            **fixture_onpage_instant_pages_response(target_url),
+            "url": target_url,
+        },
+        target_keyword=target_keyword,
+        request_metadata={"target_keyword": target_keyword, "url": target_url},
+        recorded_at="2026-07-05T12:00:00+00:00",
+    )
+    older_record["response_id"] = "onpage-zzz"
+    older_record["timestamp"] = "2026-07-05T12:00:00+00:00"
+    newer_response = fixture_onpage_instant_pages_response(target_url)
+    newer_response["tasks"][0]["result"][0]["items"][0]["onpage_score"] = 99.0
+    newer_record = build_raw_response_record(
+        run_id,
+        endpoint="onpage_instant_pages",
+        provider="dataforseo",
+        response={**newer_response, "url": target_url},
+        target_keyword=target_keyword,
+        request_metadata={"target_keyword": target_keyword, "url": target_url},
+        recorded_at="2026-07-05T12:01:00+00:00",
+    )
+    newer_record["response_id"] = "onpage-aaa"
+    newer_record["timestamp"] = "2026-07-05T12:01:00+00:00"
+    frame = pl.DataFrame([older_record, newer_record])
+    result = build_onpage_signals_frame(frame, run_id=run_id)
+
+    assert result.height == 1
+    row = result.to_dicts()[0]
+    assert row["response_id"] == "onpage-aaa"
+    assert row["onpage_score"] == 99.0
 
 
 def test_dry_run_materializes_textrazor_topic_and_page_metrics(

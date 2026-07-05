@@ -254,7 +254,7 @@ exist.
   legacy `endpoint=backlinks` read-compat, hard-fail on malformed summary
   aggregates,   and distribution maps as JSON-string columns.
 
-## Shipped tests — OnPage instant_pages (Phase 7.1 slices 1–5, Jul 2026)
+## Shipped tests — OnPage instant_pages (Phase 7.1 slices 1–6, Jul 2026)
 
 - **OnPage instant_pages endpoint (offline contract)** —
   `tests/unit/test_dataforseo_requests.py` covers
@@ -290,6 +290,17 @@ exist.
   `test_run_stored_run_reuses_successful_empty_backlink_summaries`).
   `tests/unit/test_dataforseo_requests.py` locks
   `onpage_instant_pages_response_is_usable()` rejecting empty payloads.
+- **OnPage curated builder (Phase 7.1 slice 6)** —
+  `tests/unit/test_run_normalize.py` covers `normalize_run` materializing
+  `parquet/onpage_signals` from fixture raw rows
+  (`test_normalize_run_materializes_onpage_signals_from_fixture`), sparse items
+  with null optional sections
+  (`test_normalize_run_onpage_signals_sparse_item_nulls_optional_sections`),
+  skipping unusable empty raw rows
+  (`test_normalize_run_skips_unusable_onpage_raw_rows`), and
+  `build_onpage_signals_frame` dedupe by `(target_keyword, url)` on latest
+  `timestamp` with `response_id` tie-break
+  (`test_build_onpage_signals_frame_dedupes_by_target_keyword_and_url`).
 
 ## Shipped tests — Phase 6.2 backlinks count analysis (Jul 2026)
 

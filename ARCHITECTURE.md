@@ -273,7 +273,7 @@ runs/{run_id}/
 
 | Layer | Tables | Producer | Purpose |
 |-------|--------|----------|---------|
-| **Curated** | `keywords`, `serp_items`, `pages`, `page_content_fields`, `passages`, `entities`, `backlinks`, `textrazor_page_metrics_curated`, `similarity_scores` | `normalize.py` | Parse `raw_responses` once into typed tables |
+| **Curated** | `keywords`, `serp_items`, `pages`, `page_content_fields`, `passages`, `entities`, `backlinks`, `onpage_signals`, `textrazor_page_metrics_curated`, `similarity_scores` | `normalize.py` | Parse `raw_responses` once into typed tables |
 | **Feature marts** | `keyword_serp`, `page_features`, `passage_features`, `domain_features`, `backlinks_analysis`, `textrazor_page_metrics` | `features.py` | Reusable similarity, ranking, backlinks, and TextRazor page features |
 | **Analysis mart** | `analysis_mart` | `marts.py` | One row per `target_keyword × SERP URL` for Phase 5 |
 
@@ -325,6 +325,7 @@ sink. Every row includes join keys: `run_id`,
 | `passages` | Passage splits with offsets; no duplicate full page bodies |
 | `entities` | TextRazor entity mention rows when present |
 | `backlinks` | One row per `target_keyword × SERP URL` merging unfiltered and dofollow-filtered DataForSEO `backlinks/summary/live` responses (`backlinks_count`, `referring_domains_count`, `dofollow_backlinks_count` null when the dofollow variant is missing; expanded distribution JSON columns; `backlinks_metrics_complete`) |
+| `onpage_signals` | One row per `target_keyword × SERP URL` from `onpage_instant_pages` raw responses: `onpage_score`, 12 technical-check booleans, content/readability metrics, CWV timing (`time_to_first_byte_ms`, LCP, CLS), `total_transfer_size`, and microdata summary columns |
 | `textrazor_page_metrics_curated` | One row per `target_keyword × SERP URL` with aggregated TextRazor scalar and structural page metrics; `textrazor_page_metrics_complete` flags whether all extractor sections were present |
 | `similarity_scores` | Page-level `bge`, `gemini_doc_retrieval`, `gemini_semantic_similarity` (sourced from `run.json` `page_similarity`) |
 

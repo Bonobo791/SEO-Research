@@ -516,13 +516,15 @@ def onpage_instant_pages_response_is_usable(response: Mapping[str, object]) -> b
         validate_dataforseo_response("onpage_instant_pages", dict(response))
     except DataForSeoParseError:
         return False
-    return _onpage_instant_pages_has_page_item(response)
+    return extract_onpage_instant_pages_item(response) is not None
 
 
-def _onpage_instant_pages_has_page_item(response: Mapping[str, object]) -> bool:
+def extract_onpage_instant_pages_item(
+    response: Mapping[str, object],
+) -> dict[str, object] | None:
     tasks = response.get("tasks")
     if not isinstance(tasks, list):
-        return False
+        return None
     for task in tasks:
         if not isinstance(task, Mapping):
             continue
@@ -545,8 +547,8 @@ def _onpage_instant_pages_has_page_item(response: Mapping[str, object]) -> bool:
                     and url
                     and _backlink_metric_is_numeric(score)
                 ):
-                    return True
-    return False
+                    return dict(item)
+    return None
 
 
 def _validate_dataforseo_field(
@@ -1177,6 +1179,11 @@ def fixture_onpage_instant_pages_response(
                                 "total_transfer_size": 120_000,
                                 "has_micromarkup": True,
                                 "has_micromarkup_errors": False,
+                                "micromarkup": {
+                                    "items_count": 3,
+                                    "errors_count": 0,
+                                    "warnings_count": 1,
+                                },
                                 "page_timing": {
                                     "waiting_time": 120,
                                     "largest_contentful_paint": 2500.0,
@@ -1190,6 +1197,11 @@ def fixture_onpage_instant_pages_response(
                                     "title_too_long": False,
                                     "title_too_short": False,
                                     "no_title": False,
+                                    "no_description": False,
+                                    "duplicate_meta_tags": False,
+                                    "has_meta_title": True,
+                                    "irrelevant_description": False,
+                                    "low_readability_rate": False,
                                 },
                                 "content": {
                                     "plain_text_word_count": 432.0,

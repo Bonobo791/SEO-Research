@@ -1535,7 +1535,7 @@ or task id needed, and no `task_post` crawl/poll flow.
 
 ##### Dev slices
 
-**Progress:** 5 of 10 shipped.
+**Progress:** 6 of 10 shipped.
 
 1. **[x] Slice 1 — Request/schema/fixture** — `build_onpage_instant_pages_request()`,
    `DATAFORSEO_RESPONSE_SCHEMAS["onpage_instant_pages"]`,
@@ -1569,12 +1569,14 @@ or task id needed, and no `task_post` crawl/poll flow.
    missing SERP URLs when `--stored-run --live-providers`. Empty schema-valid
    rows (`result: null`, no page items) are **not** reusable (unlike backlinks
    empty summaries). CLI regressions in `tests/unit/test_cli_run.py`.
-6. **[ ] Slice 6 — Curated builder** — `build_onpage_signals_frame`: `onpage_score`;
-   a fixed ~12-check subset (title/meta length, h1 present, canonical present,
-   is_https, render-blocking resources); `content` word count, plain-text
-   rate, readability scores (Flesch-Kincaid, Coleman-Liau, SMOG, Dale-Chall);
-   `page_timing` TTFB, LCP, CLS; `total_transfer_size`; microdata summary
-   (`items_count`, `errors_count`, `warnings_count`, `has_valid_structured_data`).
+6. **[x] Slice 6 — Curated builder** — `build_onpage_signals_frame` in
+   `normalize.py`: URL-grain `parquet/onpage_signals` with `onpage_score`, 12
+   check booleans, content/readability metrics, CWV timing, `total_transfer_size`,
+   and microdata summary (`micromarkup_*` counts when nested object present,
+   `has_valid_structured_data` derived from `has_micromarkup*` flags). Skips
+   unusable empty raw rows; dedupes by `(target_keyword, url)` on latest
+   `timestamp` with `response_id` tie-break. Tests in
+   `tests/unit/test_run_normalize.py`.
 7. **[ ] Slice 7 — Feature mart** — `onpage_features`, URL-grain join,
    bounded validation (score 0-100, non-negative counts/timing).
 8. **[ ] Slice 8 — Family registry** — new kind `onpage_metric`; add
