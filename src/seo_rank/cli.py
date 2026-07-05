@@ -44,6 +44,7 @@ from seo_rank.dataforseo import (
     extract_response_url,
     normalize_keyword_expansion,
     normalize_serp_results,
+    onpage_instant_pages_response_is_usable,
     parsed_page_text,
     validate_dataforseo_response,
     validate_dataforseo_credentials,
@@ -755,6 +756,9 @@ def expand_stored_run(
     merged_dataforseo["backlinks_dofollow_summary"] = collect_backlinks_variant_responses(
         merged_keyword_results, variant_key="backlinks_dofollow_summary"
     )
+    merged_dataforseo[ONPAGE_INSTANT_PAGES_ENDPOINT] = collect_onpage_instant_pages_responses(
+        merged_keyword_results
+    )
     merged_raw_provider_data["dataforseo"] = merged_dataforseo
     merged_payload["raw_provider_data"] = merged_raw_provider_data
     raw_response_records = build_raw_response_records(run_id, merged_payload)
@@ -1077,6 +1081,18 @@ def _register_usable_backlink_response(
     return True
 
 
+def _register_usable_onpage_response(
+    existing_onpage_by_url: dict[str, dict[str, object]],
+    *,
+    response: Mapping[str, object],
+    url: str,
+) -> bool:
+    if not onpage_instant_pages_response_is_usable(response):
+        return False
+    existing_onpage_by_url[url] = {**dict(response), "url": url}
+    return True
+
+
 def build_resumed_keyword_result(
     config: RunConfig,
     *,
@@ -1203,6 +1219,53 @@ def build_resumed_keyword_result(
         for variant in BACKLINKS_VARIANT_ENDPOINTS
         if (str(result["url"]), variant) in existing_backlinks_by_url_variant
     ]
+    existing_onpage_by_url: dict[str, dict[str, object]] = {}
+    for record in raw_keyword_records.get(ONPAGE_INSTANT_PAGES_ENDPOINT, []):
+        response_body_bytes = record.get("response_body_bytes")
+        if not isinstance(response_body_bytes, (bytes, bytearray)):
+            continue
+        response = json.loads(bytes(response_body_bytes).decode("utf-8"))
+        url = extract_response_url(response)
+        if not isinstance(url, str):
+            continue
+        _register_usable_onpage_response(
+            existing_onpage_by_url,
+            response=response,
+            url=url,
+        )
+    serp_urls_unique = list(dict.fromkeys(str(result["url"]) for result in serp_results))
+    missing_onpage_urls = [
+        url for url in serp_urls_unique if url not in existing_onpage_by_url
+    ]
+    if config.live_providers and live_context is not None and missing_onpage_urls:
+        if progress is not None:
+            progress.keyword_log(
+                target_keyword,
+                f"dataforseo {ONPAGE_INSTANT_PAGES_ENDPOINT} ({len(missing_onpage_urls)} urls)",
+            )
+        fetched_onpage = fetch_onpage_signals_for_urls(
+            target_keyword,
+            missing_onpage_urls,
+            credentials=live_context["credentials"].dataforseo,
+            transport=DEFAULT_DATAFORSEO_TRANSPORT,
+            progress=None,
+            run_dir=config.output_dir,
+        )
+        if fetched_onpage:
+            network_calls.append(f"dataforseo.{ONPAGE_INSTANT_PAGES_ENDPOINT}")
+            for response in fetched_onpage:
+                url = extract_response_url(response)
+                if isinstance(url, str):
+                    _register_usable_onpage_response(
+                        existing_onpage_by_url,
+                        response=response,
+                        url=url,
+                    )
+    onpage_responses = [
+        existing_onpage_by_url[str(result["url"])]
+        for result in serp_results
+        if str(result["url"]) in existing_onpage_by_url
+    ]
     existing_page_text_by_url: dict[str, dict[str, object]] = {}
     for record in raw_keyword_records.get("page_text", []):
         response_body_bytes = record.get("response_body_bytes")
@@ -1289,6 +1352,7 @@ def build_resumed_keyword_result(
             serp_response=serp_response,
             page_text_responses=page_text_responses,
             backlinks_responses=backlinks_responses,
+            onpage_instant_pages_responses=onpage_responses,
             similarity_scores=stored_page_similarity,
             passages=passages,
             serp_results=serp_results,
@@ -1320,6 +1384,7 @@ def build_resumed_keyword_result(
         serp_response=serp_response,
         page_text_responses=page_text_responses,
         backlinks_responses=backlinks_responses,
+        onpage_instant_pages_responses=onpage_responses,
         similarity_scores=complete_scores,
         passages=passages,
         serp_results=serp_results,
@@ -2007,6 +2072,9 @@ def build_live_payload(
             "backlinks_dofollow_summary": collect_backlinks_variant_responses(
                 keyword_results, variant_key="backlinks_dofollow_summary"
             ),
+            ONPAGE_INSTANT_PAGES_ENDPOINT: collect_onpage_instant_pages_responses(
+                keyword_results
+            ),
         },
     }
     textrazor_responses = [
@@ -2092,6 +2160,23 @@ def build_live_keyword_result(
                 network_calls.append(
                     f"dataforseo.{BACKLINKS_VARIANT_ENDPOINTS[variant]}"
                 )
+
+    serp_urls = list(dict.fromkeys(str(result["url"]) for result in serp_results))
+    if progress is not None:
+        progress.keyword_log(
+            target_keyword,
+            f"dataforseo {ONPAGE_INSTANT_PAGES_ENDPOINT} ({len(serp_urls)} urls)",
+        )
+    onpage_responses = fetch_onpage_signals_for_urls(
+        target_keyword,
+        serp_urls,
+        credentials=credentials.dataforseo,
+        transport=dataforseo_transport,
+        progress=None,
+        run_dir=config.output_dir,
+    )
+    if onpage_responses:
+        network_calls.append(f"dataforseo.{ONPAGE_INSTANT_PAGES_ENDPOINT}")
 
     if progress is not None:
         progress.keyword_log(
@@ -2197,6 +2282,7 @@ def build_live_keyword_result(
         serp_response=serp_response,
         page_text_responses=page_text_responses,
         backlinks_responses=backlinks_responses,
+        onpage_instant_pages_responses=onpage_responses,
         similarity_scores=similarity_scores,
         passages=passages,
         serp_results=serp_results,
@@ -2335,6 +2421,19 @@ def collect_backlinks_variant_responses(
     ]
 
 
+def collect_onpage_instant_pages_responses(
+    keyword_results: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    return [
+        dict(response)
+        for keyword_result in keyword_results
+        for response in keyword_result.get("raw_provider_data", {})
+        .get("dataforseo", {})
+        .get(ONPAGE_INSTANT_PAGES_ENDPOINT, [])
+        if isinstance(response, Mapping)
+    ]
+
+
 def fetch_dataforseo_backlinks_for_urls(
     target_keyword: str,
     urls: Sequence[str],
@@ -2411,6 +2510,13 @@ def fetch_onpage_signals_for_urls(
     progress: RunProgress | None = None,
     run_dir: Path | None = None,
 ) -> list[dict[str, object]]:
+    """Fetch OnPage instant_pages signals for each URL in ``urls``.
+
+    Persistence dedupes on ``(target_keyword, url)``, but this helper issues one
+    live API call per entry in ``urls`` without deduplicating the sequence.
+    Callers (live-run wiring in Phase 7.1 slice 4) must pass each URL at most
+    once per ``target_keyword`` to avoid duplicate live calls.
+    """
     responses: list[dict[str, object]] = []
     new_records: list[dict[str, object]] = []
     try:
@@ -2574,6 +2680,7 @@ def build_keyword_result_from_responses(
     serp_response: Mapping[str, object],
     page_text_responses: Sequence[Mapping[str, object]],
     backlinks_responses: Sequence[Mapping[str, object]] | None = None,
+    onpage_instant_pages_responses: Sequence[Mapping[str, object]] | None = None,
     similarity_scores: Sequence[Mapping[str, object]],
     passages: Sequence[Mapping[str, object]] | None = None,
     serp_results: Sequence[Mapping[str, object]] | None = None,
@@ -2617,6 +2724,10 @@ def build_keyword_result_from_responses(
         for variant, key in BACKLINKS_VARIANT_PROVIDER_DATA_KEYS.items():
             if partitioned_backlinks[variant]:
                 raw_provider_data["dataforseo"][key] = partitioned_backlinks[variant]
+    if onpage_instant_pages_responses:
+        raw_provider_data["dataforseo"][ONPAGE_INSTANT_PAGES_ENDPOINT] = list(
+            onpage_instant_pages_responses
+        )
     if textrazor_responses:
         raw_provider_data["textrazor"] = {
             "entities": list(textrazor_responses),
@@ -2962,6 +3073,43 @@ def build_raw_response_records(
                                 "url": extract_response_url(response),
                                 "variant": variant,
                             },
+                            recorded_at=recorded_at,
+                        )
+                    )
+            onpage_responses = dataforseo_data.get(ONPAGE_INSTANT_PAGES_ENDPOINT, [])
+            if isinstance(onpage_responses, list):
+                for response in onpage_responses:
+                    if not isinstance(response, Mapping):
+                        continue
+                    url = extract_response_url(response)
+                    request_metadata: dict[str, object] = {
+                        "target_keyword": target_keyword,
+                        "url": url,
+                    }
+                    if isinstance(url, str):
+                        request_body = build_onpage_instant_pages_request(url).body[0]
+                        request_metadata.update(
+                            {
+                                "enable_javascript": request_body["enable_javascript"],
+                                "enable_browser_rendering": request_body[
+                                    "enable_browser_rendering"
+                                ],
+                                "load_resources": request_body["load_resources"],
+                                "validate_micromarkup": request_body[
+                                    "validate_micromarkup"
+                                ],
+                                "accept_language": request_body["accept_language"],
+                                "browser_preset": request_body["browser_preset"],
+                            }
+                        )
+                    records.append(
+                        build_raw_response_record(
+                            run_id,
+                            endpoint=ONPAGE_INSTANT_PAGES_ENDPOINT,
+                            provider="dataforseo",
+                            response=response,
+                            target_keyword=target_keyword,
+                            request_metadata=request_metadata,
                             recorded_at=recorded_at,
                         )
                     )

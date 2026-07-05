@@ -572,6 +572,8 @@ def test_run_live_providers_writes_backlink_raw_responses(
             return fixture_serp_response("technical seo")
         if url.endswith("/on_page/content_parsing/live"):
             return fixture_page_text_response(request_body[0]["url"], "technical seo")
+        if url.endswith("/on_page/instant_pages/live"):
+            return fixture_onpage_instant_pages_response(request_body[0]["url"])
         if url.endswith("/backlinks/summary/live"):
             target = request_body[0]["target"]
             backlinks_targets.append(target)
@@ -603,11 +605,12 @@ def test_run_live_providers_writes_backlink_raw_responses(
     ]
 
     payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
-    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 5
+    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 6
     assert payload["catalog"]["datasets"]["raw_responses"]["files"] == [
         "parquet/raw_responses/endpoint=backlinks_dofollow_summary/part-0.parquet",
         "parquet/raw_responses/endpoint=backlinks_summary/part-0.parquet",
         "parquet/raw_responses/endpoint=keyword_expansion/part-0.parquet",
+        "parquet/raw_responses/endpoint=onpage_instant_pages/part-0.parquet",
         "parquet/raw_responses/endpoint=page_text/part-0.parquet",
         "parquet/raw_responses/endpoint=serp/part-0.parquet",
     ]
@@ -662,6 +665,8 @@ def test_run_live_providers_persists_backlinks_before_later_provider_failure(
             return fixture_serp_response("technical seo")
         if url.endswith("/backlinks/summary/live"):
             return fixture_backlinks_response_for_request_body(request_body)
+        if url.endswith("/on_page/instant_pages/live"):
+            return fixture_onpage_instant_pages_response(request_body[0]["url"])
         if url.endswith("/on_page/content_parsing/live"):
             raise DataForSeoClientError("page_text request failed after backlinks")
         raise AssertionError(f"unexpected DataForSEO URL: {url}")
@@ -967,6 +972,8 @@ def test_build_live_payload_includes_backlinks_in_raw_provider_data(
             return fixture_serp_response("technical seo")
         if url.endswith("/on_page/content_parsing/live"):
             return fixture_page_text_response(request_body[0]["url"], "technical seo")
+        if url.endswith("/on_page/instant_pages/live"):
+            return fixture_onpage_instant_pages_response(request_body[0]["url"])
         if url.endswith("/backlinks/summary/live"):
             return fixture_backlinks_response_for_request_body(request_body)
         raise AssertionError(f"unexpected DataForSEO URL: {url}")
@@ -1005,6 +1012,340 @@ def test_build_live_payload_includes_backlinks_in_raw_provider_data(
     assert len(backlinks_dofollow) == 1
     assert backlinks_summary[0]["url"] == "https://example.com/technical-seo/1"
     assert backlinks_dofollow[0]["url"] == "https://example.com/technical-seo/1"
+    onpage_responses = payload["raw_provider_data"]["dataforseo"]["onpage_instant_pages"]
+    assert isinstance(onpage_responses, list)
+    assert len(onpage_responses) == 1
+    assert onpage_responses[0]["url"] == "https://example.com/technical-seo/1"
+    assert "dataforseo.onpage_instant_pages" in payload["network_calls"]
+
+
+def test_run_stored_run_cli_live_providers_fetches_onpage_when_missing(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.setenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", "1")
+    monkeypatch.setenv("DATAFORSEO_LOGIN", "analyst@example.com")
+    monkeypatch.setenv("DATAFORSEO_PASSWORD", "dataforseo-secret")
+
+    live_onpage_targets: list[str] = []
+
+    def dataforseo_transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        del method, headers, timeout
+        request_body = json.loads(body.decode("utf-8"))
+        if url.endswith("/backlinks/summary/live"):
+            return fixture_backlinks_response_for_request_body(request_body)
+        if url.endswith("/on_page/instant_pages/live"):
+            target_url = request_body[0]["url"]
+            live_onpage_targets.append(target_url)
+            return fixture_onpage_instant_pages_response(target_url)
+        raise AssertionError(f"unexpected DataForSEO URL: {url}")
+
+    monkeypatch.setattr("seo_rank.cli.DEFAULT_DATAFORSEO_TRANSPORT", dataforseo_transport)
+
+    assert (
+        main(
+            [
+                "run",
+                "--seed",
+                "technical seo",
+                "--output-dir",
+                str(output_dir),
+                "--dry-run",
+                "--keyword-limit",
+                "1",
+                "--depth",
+                "2",
+                "--skip-textrazor",
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
+    assert payload["config"]["live_providers"] is False
+    assert not (
+        output_dir / "parquet" / "raw_responses" / "endpoint=onpage_instant_pages"
+    ).exists()
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--stored-run",
+            str(output_dir),
+            "--live-providers",
+            "--keyword-limit",
+            "1",
+        ]
+    )
+
+    assert exit_code == 0
+    assert len(live_onpage_targets) == 2
+    payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
+    assert payload["config"]["live_providers"] is True
+    assert "dataforseo.onpage_instant_pages" in payload["network_calls"]
+    onpage_path = (
+        output_dir
+        / "parquet"
+        / "raw_responses"
+        / "endpoint=onpage_instant_pages"
+        / "part-0.parquet"
+    )
+    assert onpage_path.exists()
+    assert len(pq.ParquetFile(onpage_path).read().to_pylist()) == 2
+
+
+def test_build_resumed_keyword_result_fetches_only_missing_onpage_urls(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seo_rank.cli import build_resumed_keyword_result
+
+    target_keyword = "technical seo"
+    url_a = "https://example.com/technical-seo/1"
+    url_b = "https://example.com/technical-seo/2"
+    serp_response = fixture_serp_response(target_keyword)
+    config = RunConfig(
+        seed=target_keyword,
+        location="United States",
+        language="en",
+        device="desktop",
+        depth=2,
+        keyword_limit=1,
+        output_dir=tmp_path / "artifacts",
+        model_name="fixture-similarity-v1",
+        dry_run=False,
+        skip_textrazor=True,
+        live_providers=True,
+    )
+    fetched_urls: list[str] = []
+
+    def capture_fetch_onpage(
+        target_keyword_arg: str,
+        urls,
+        *,
+        credentials,
+        transport,
+        progress=None,
+        run_dir=None,
+    ):
+        del target_keyword_arg, credentials, transport, progress, run_dir
+        fetched_urls.extend(urls)
+        return [
+            {**fixture_onpage_instant_pages_response(url), "url": url}
+            for url in urls
+        ]
+
+    monkeypatch.setattr(
+        "seo_rank.cli.fetch_onpage_signals_for_urls",
+        capture_fetch_onpage,
+    )
+    monkeypatch.setattr(
+        "seo_rank.cli.fetch_dataforseo_backlinks_for_urls",
+        lambda *args, **kwargs: [],
+    )
+
+    def _raw_record(
+        *,
+        endpoint: str,
+        response: dict[str, object],
+        url: str,
+    ) -> dict[str, object]:
+        return build_raw_response_record(
+            config.output_dir.name,
+            endpoint=endpoint,
+            provider="dataforseo",
+            response={**response, "url": url},
+            target_keyword=target_keyword,
+            request_metadata={"target_keyword": target_keyword, "url": url},
+            recorded_at="2026-07-05T12:00:00+00:00",
+        )
+
+    raw_keyword_records = {
+        "serp": [
+            _raw_record(endpoint="serp", response=serp_response, url=url_a),
+        ],
+        "page_text": [
+            _raw_record(
+                endpoint="page_text",
+                response=fixture_page_text_response(url_a, target_keyword),
+                url=url_a,
+            ),
+            _raw_record(
+                endpoint="page_text",
+                response=fixture_page_text_response(url_b, target_keyword),
+                url=url_b,
+            ),
+        ],
+        "onpage_instant_pages": [
+            _raw_record(
+                endpoint="onpage_instant_pages",
+                response=fixture_onpage_instant_pages_response(url_a),
+                url=url_a,
+            ),
+        ],
+    }
+    live_context = {
+        "credentials": type(
+            "LiveCredentials",
+            (),
+            {"dataforseo": DataForSeoCredentials("login", "password")},
+        )(),
+        "live_bge_enabled": False,
+        "bge_reranker": None,
+        "gemini_api_key": None,
+        "textrazor_credentials": None,
+        "location_code": 2840,
+    }
+
+    result = build_resumed_keyword_result(
+        config,
+        target_keyword=target_keyword,
+        stored_keyword_result=None,
+        raw_keyword_records=raw_keyword_records,
+        live_context=live_context,
+        network_calls=[],
+    )
+
+    assert fetched_urls == [url_b]
+    onpage_responses = result["raw_provider_data"]["dataforseo"]["onpage_instant_pages"]
+    assert len(onpage_responses) == 2
+    assert onpage_responses[0]["url"] == url_a
+    assert onpage_responses[1]["url"] == url_b
+
+
+def test_build_resumed_keyword_result_refetches_empty_stored_onpage_response(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seo_rank.cli import build_resumed_keyword_result
+
+    target_keyword = "technical seo"
+    url_a = "https://example.com/technical-seo/1"
+    url_b = "https://example.com/technical-seo/2"
+    serp_response = fixture_serp_response(target_keyword)
+    config = RunConfig(
+        seed=target_keyword,
+        location="United States",
+        language="en",
+        device="desktop",
+        depth=2,
+        keyword_limit=1,
+        output_dir=tmp_path / "artifacts",
+        model_name="fixture-similarity-v1",
+        dry_run=False,
+        skip_textrazor=True,
+        live_providers=True,
+    )
+    fetched_urls: list[str] = []
+
+    def capture_fetch_onpage(
+        target_keyword_arg: str,
+        urls,
+        *,
+        credentials,
+        transport,
+        progress=None,
+        run_dir=None,
+    ):
+        del target_keyword_arg, credentials, transport, progress, run_dir
+        fetched_urls.extend(urls)
+        return [
+            {**fixture_onpage_instant_pages_response(url), "url": url}
+            for url in urls
+        ]
+
+    monkeypatch.setattr(
+        "seo_rank.cli.fetch_onpage_signals_for_urls",
+        capture_fetch_onpage,
+    )
+    monkeypatch.setattr(
+        "seo_rank.cli.fetch_dataforseo_backlinks_for_urls",
+        lambda *args, **kwargs: [],
+    )
+
+    empty_onpage_response = {
+        "status_code": 20000,
+        "url": url_a,
+        "tasks": [{"status_code": 20000, "result": None}],
+    }
+
+    def _raw_record(
+        *,
+        endpoint: str,
+        response: dict[str, object],
+        url: str,
+    ) -> dict[str, object]:
+        return build_raw_response_record(
+            config.output_dir.name,
+            endpoint=endpoint,
+            provider="dataforseo",
+            response={**response, "url": url},
+            target_keyword=target_keyword,
+            request_metadata={"target_keyword": target_keyword, "url": url},
+            recorded_at="2026-07-05T12:00:00+00:00",
+        )
+
+    raw_keyword_records = {
+        "serp": [
+            _raw_record(endpoint="serp", response=serp_response, url=url_a),
+        ],
+        "page_text": [
+            _raw_record(
+                endpoint="page_text",
+                response=fixture_page_text_response(url_a, target_keyword),
+                url=url_a,
+            ),
+            _raw_record(
+                endpoint="page_text",
+                response=fixture_page_text_response(url_b, target_keyword),
+                url=url_b,
+            ),
+        ],
+        "onpage_instant_pages": [
+            _raw_record(
+                endpoint="onpage_instant_pages",
+                response=empty_onpage_response,
+                url=url_a,
+            ),
+        ],
+    }
+    live_context = {
+        "credentials": type(
+            "LiveCredentials",
+            (),
+            {"dataforseo": DataForSeoCredentials("login", "password")},
+        )(),
+        "live_bge_enabled": False,
+        "bge_reranker": None,
+        "gemini_api_key": None,
+        "textrazor_credentials": None,
+        "location_code": 2840,
+    }
+
+    result = build_resumed_keyword_result(
+        config,
+        target_keyword=target_keyword,
+        stored_keyword_result=None,
+        raw_keyword_records=raw_keyword_records,
+        live_context=live_context,
+        network_calls=[],
+    )
+
+    assert fetched_urls == [url_a, url_b]
+    onpage_responses = result["raw_provider_data"]["dataforseo"]["onpage_instant_pages"]
+    assert len(onpage_responses) == 2
+    assert onpage_responses[0]["url"] == url_a
+    assert onpage_responses[1]["url"] == url_b
 
 
 def test_run_materializes_feature_marts_analysis_and_stats_for_fresh_runs(
@@ -1279,6 +1620,8 @@ def test_run_stored_run_backfills_only_missing_backlinks_in_place(
             return fixture_serp_response("technical seo")
         if url.endswith("/on_page/content_parsing/live"):
             return fixture_page_text_response(request_body[0]["url"], "technical seo")
+        if url.endswith("/on_page/instant_pages/live"):
+            return fixture_onpage_instant_pages_response(request_body[0]["url"])
         if url.endswith("/backlinks/summary/live"):
             target = request_body[0]["target"]
             live_backlink_targets.append(target)
@@ -1351,11 +1694,12 @@ def test_run_stored_run_backfills_only_missing_backlinks_in_place(
     assert live_backlink_targets == [missing_url, missing_url]
 
     payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
-    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 8
+    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 10
     assert payload["catalog"]["datasets"]["raw_responses"]["files"] == [
         "parquet/raw_responses/endpoint=backlinks_dofollow_summary/part-0.parquet",
         "parquet/raw_responses/endpoint=backlinks_summary/part-0.parquet",
         "parquet/raw_responses/endpoint=keyword_expansion/part-0.parquet",
+        "parquet/raw_responses/endpoint=onpage_instant_pages/part-0.parquet",
         "parquet/raw_responses/endpoint=page_text/part-0.parquet",
         "parquet/raw_responses/endpoint=serp/part-0.parquet",
     ]
@@ -1398,6 +1742,8 @@ def test_run_stored_run_cli_live_providers_backfills_backlinks_when_stored_confi
     ) -> dict[str, object]:
         del method, headers, timeout
         request_body = json.loads(body.decode("utf-8"))
+        if url.endswith("/on_page/instant_pages/live"):
+            return fixture_onpage_instant_pages_response(request_body[0]["url"])
         if url.endswith("/backlinks/summary/live"):
             target = request_body[0]["target"]
             live_backlink_targets.append(target)
@@ -1496,6 +1842,8 @@ def test_run_stored_run_live_providers_refetches_legacy_shaped_backlinks(
             return fixture_serp_response("technical seo")
         if url.endswith("/on_page/content_parsing/live"):
             return fixture_page_text_response(request_body[0]["url"], "technical seo")
+        if url.endswith("/on_page/instant_pages/live"):
+            return fixture_onpage_instant_pages_response(request_body[0]["url"])
         if url.endswith("/backlinks/summary/live"):
             target = request_body[0]["target"]
             live_backlink_targets.append(target)
@@ -1639,6 +1987,8 @@ def test_run_stored_run_reuses_successful_empty_backlink_summaries(
             return fixture_serp_response("technical seo")
         if url.endswith("/on_page/content_parsing/live"):
             return fixture_page_text_response(request_body[0]["url"], "technical seo")
+        if url.endswith("/on_page/instant_pages/live"):
+            return fixture_onpage_instant_pages_response(request_body[0]["url"])
         if url.endswith("/backlinks/summary/live"):
             target = request_body[0]["target"]
             live_backlink_targets.append(target)
@@ -1753,6 +2103,8 @@ def test_run_stored_run_skip_textrazor_disables_stored_live_textrazor(
             return fixture_serp_response("technical seo")
         if url.endswith("/on_page/content_parsing/live"):
             return fixture_page_text_response(request_body[0]["url"], "technical seo")
+        if url.endswith("/on_page/instant_pages/live"):
+            return fixture_onpage_instant_pages_response(request_body[0]["url"])
         if url.endswith("/backlinks/summary/live"):
             return fixture_backlinks_response_for_request_body(request_body)
         raise AssertionError(f"unexpected DataForSEO URL: {url}")
@@ -2194,6 +2546,9 @@ def test_run_stored_run_refreshes_only_stale_serps_in_place(
                     }
                 ],
             }
+        if url.endswith("/on_page/instant_pages/live"):
+            request_body = json.loads(body.decode("utf-8"))
+            return fixture_onpage_instant_pages_response(request_body[0]["url"])
         if url.endswith("/backlinks/summary/live"):
             request_body = json.loads(body.decode("utf-8"))
             return fixture_backlinks_response_for_request_body(request_body)
@@ -2270,7 +2625,7 @@ def test_run_stored_run_refreshes_only_stale_serps_in_place(
 
     payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
     assert payload["keywords"] == ["technical seo", "technical seo audit"]
-    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 9
+    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 11
     assert payload["catalog"]["datasets"]["keyword_serp"]["row_count"] == 2
     assert payload["catalog"]["datasets"]["analysis_mart"]["row_count"] == 2
     assert (output_dir / "stats" / "stats_summary.json").exists()
@@ -2497,6 +2852,9 @@ def test_run_live_providers_without_optional_flags_does_not_require_optional_cre
                     }
                 ],
             }
+        if url.endswith("/on_page/instant_pages/live"):
+            request_body = json.loads(body.decode("utf-8"))
+            return fixture_onpage_instant_pages_response(request_body[0]["url"])
         if url.endswith("/backlinks/summary/live"):
             request_body = json.loads(body.decode("utf-8"))
             return fixture_backlinks_response_for_request_body(request_body)
@@ -2845,6 +3203,9 @@ def test_run_live_gemini_uses_live_gemini_page_scores(
                     }
                 ],
             }
+        if url.endswith("/on_page/instant_pages/live"):
+            request_body = json.loads(body.decode("utf-8"))
+            return fixture_onpage_instant_pages_response(request_body[0]["url"])
         if url.endswith("/backlinks/summary/live"):
             request_body = json.loads(body.decode("utf-8"))
             return fixture_backlinks_response_for_request_body(request_body)
@@ -2940,6 +3301,7 @@ def test_run_live_gemini_uses_live_gemini_page_scores(
         "dataforseo.serp",
         "dataforseo.backlinks_summary",
         "dataforseo.backlinks_dofollow_summary",
+        "dataforseo.onpage_instant_pages",
         "dataforseo.page_text",
         "genai.embed_content",
     ]
@@ -3009,6 +3371,9 @@ def test_run_live_bge_replaces_only_bge_page_scores(
                     }
                 ],
             }
+        if url.endswith("/on_page/instant_pages/live"):
+            request_body = json.loads(body.decode("utf-8"))
+            return fixture_onpage_instant_pages_response(request_body[0]["url"])
         if url.endswith("/backlinks/summary/live"):
             request_body = json.loads(body.decode("utf-8"))
             return fixture_backlinks_response_for_request_body(request_body)
@@ -3095,6 +3460,7 @@ def test_run_live_bge_replaces_only_bge_page_scores(
         "dataforseo.serp",
         "dataforseo.backlinks_summary",
         "dataforseo.backlinks_dofollow_summary",
+        "dataforseo.onpage_instant_pages",
         "dataforseo.page_text",
     ]
 
@@ -3192,6 +3558,9 @@ def test_run_live_providers_skips_textrazor_when_not_requested(
                     }
                 ],
             }
+        if url.endswith("/on_page/instant_pages/live"):
+            request_body = json.loads(body.decode("utf-8"))
+            return fixture_onpage_instant_pages_response(request_body[0]["url"])
         if url.endswith("/backlinks/summary/live"):
             request_body = json.loads(body.decode("utf-8"))
             return fixture_backlinks_response_for_request_body(request_body)
@@ -3216,15 +3585,16 @@ def test_run_live_providers_skips_textrazor_when_not_requested(
     )
 
     assert exit_code == 0
-    assert len(dataforseo_calls) == 5
+    assert len(dataforseo_calls) == 6
     payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
     assert payload["textrazor_entities"] == []
     assert "raw_provider_data" not in payload
-    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 5
+    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 6
     assert payload["catalog"]["datasets"]["raw_responses"]["files"] == [
         "parquet/raw_responses/endpoint=backlinks_dofollow_summary/part-0.parquet",
         "parquet/raw_responses/endpoint=backlinks_summary/part-0.parquet",
         "parquet/raw_responses/endpoint=keyword_expansion/part-0.parquet",
+        "parquet/raw_responses/endpoint=onpage_instant_pages/part-0.parquet",
         "parquet/raw_responses/endpoint=page_text/part-0.parquet",
         "parquet/raw_responses/endpoint=serp/part-0.parquet",
     ]
@@ -3300,6 +3670,9 @@ def test_run_live_providers_writes_artifacts_with_injected_transports(
                     }
                 ],
             }
+        if url.endswith("/on_page/instant_pages/live"):
+            request_body = json.loads(body.decode("utf-8"))
+            return fixture_onpage_instant_pages_response(request_body[0]["url"])
         if url.endswith("/backlinks/summary/live"):
             request_body = json.loads(body.decode("utf-8"))
             return fixture_backlinks_response_for_request_body(request_body)
@@ -3345,7 +3718,7 @@ def test_run_live_providers_writes_artifacts_with_injected_transports(
     )
 
     assert exit_code == 0
-    assert len(dataforseo_calls) == 5
+    assert len(dataforseo_calls) == 6
     assert len(textrazor_calls) == 1
 
     payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
@@ -3368,16 +3741,18 @@ def test_run_live_providers_writes_artifacts_with_injected_transports(
         "dataforseo.serp",
         "dataforseo.backlinks_summary",
         "dataforseo.backlinks_dofollow_summary",
+        "dataforseo.onpage_instant_pages",
         "dataforseo.page_text",
         "textrazor.entities",
     ]
     assert "raw_provider_data" not in payload
-    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 6
+    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 7
     assert payload["catalog"]["datasets"]["raw_responses"]["files"] == [
         "parquet/raw_responses/endpoint=backlinks_dofollow_summary/part-0.parquet",
         "parquet/raw_responses/endpoint=backlinks_summary/part-0.parquet",
         "parquet/raw_responses/endpoint=entities/part-0.parquet",
         "parquet/raw_responses/endpoint=keyword_expansion/part-0.parquet",
+        "parquet/raw_responses/endpoint=onpage_instant_pages/part-0.parquet",
         "parquet/raw_responses/endpoint=page_text/part-0.parquet",
         "parquet/raw_responses/endpoint=serp/part-0.parquet",
     ]

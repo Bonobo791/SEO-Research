@@ -511,6 +511,44 @@ def backlinks_response_has_variant_aggregates(
     return False
 
 
+def onpage_instant_pages_response_is_usable(response: Mapping[str, object]) -> bool:
+    try:
+        validate_dataforseo_response("onpage_instant_pages", dict(response))
+    except DataForSeoParseError:
+        return False
+    return _onpage_instant_pages_has_page_item(response)
+
+
+def _onpage_instant_pages_has_page_item(response: Mapping[str, object]) -> bool:
+    tasks = response.get("tasks")
+    if not isinstance(tasks, list):
+        return False
+    for task in tasks:
+        if not isinstance(task, Mapping):
+            continue
+        results = task.get("result")
+        if results is None or not isinstance(results, list):
+            continue
+        for result_block in results:
+            if not isinstance(result_block, Mapping):
+                continue
+            items = result_block.get("items")
+            if not isinstance(items, list) or not items:
+                continue
+            for item in items:
+                if not isinstance(item, Mapping):
+                    continue
+                url = item.get("url")
+                score = item.get("onpage_score")
+                if (
+                    isinstance(url, str)
+                    and url
+                    and _backlink_metric_is_numeric(score)
+                ):
+                    return True
+    return False
+
+
 def _validate_dataforseo_field(
     value: object,
     *,

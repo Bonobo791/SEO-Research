@@ -254,7 +254,7 @@ exist.
   legacy `endpoint=backlinks` read-compat, hard-fail on malformed summary
   aggregates,   and distribution maps as JSON-string columns.
 
-## Shipped tests — OnPage instant_pages (Phase 7.1 slices 1–2, Jul 2026)
+## Shipped tests — OnPage instant_pages (Phase 7.1 slices 1–4, Jul 2026)
 
 - **OnPage instant_pages endpoint (offline contract)** —
   `tests/unit/test_dataforseo_requests.py` covers
@@ -274,6 +274,12 @@ exist.
   `tests/unit/test_raw_response_merge.py` covers
   `persist_onpage_raw_responses()` merge/dedupe on `(target_keyword, url)` without
   touching unrelated partitions.
+- **OnPage live-run wiring (Phase 7.1 slice 4)** —
+  `tests/unit/test_cli_run.py` covers fresh live runs (`build_live_payload`
+  includes `raw_provider_data.dataforseo.onpage_instant_pages` and
+  `dataforseo.onpage_instant_pages` in `network_calls`), stored-run live overlay
+  when the partition is absent, and resume backfill that fetches only missing SERP
+  URLs (`test_build_resumed_keyword_result_fetches_only_missing_onpage_urls`).
 
 ## Shipped tests — Phase 6.2 backlinks count analysis (Jul 2026)
 

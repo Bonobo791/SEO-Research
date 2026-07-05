@@ -1535,7 +1535,7 @@ or task id needed, and no `task_post` crawl/poll flow.
 
 ##### Dev slices
 
-**Progress:** 3 of 10 shipped.
+**Progress:** 4 of 10 shipped.
 
 1. **[x] Slice 1 — Request/schema/fixture** — `build_onpage_instant_pages_request()`,
    `DATAFORSEO_RESPONSE_SCHEMAS["onpage_instant_pages"]`,
@@ -1553,8 +1553,16 @@ or task id needed, and no `task_post` crawl/poll flow.
    batch persistence in a `finally:` block, request metadata
    (`target_keyword`, `url`, rendering/micromarkup flags). Tests in
    `tests/unit/test_cli_run.py` and `tests/unit/test_raw_response_merge.py`.
-4. **[ ] Slice 4 — Live-run wiring** — call alongside the existing backlinks
-   fetch in the live keyword-result build path.
+4. **[x] Slice 4 — Live-run wiring** — call alongside the existing backlinks
+   fetch in the live keyword-result build path. Filter to missing
+   ``(target_keyword, url)`` pairs before calling
+   ``fetch_onpage_signals_for_urls``; the fetch helper does not dedupe its
+   ``urls`` input, so the call site must guarantee uniqueness to avoid duplicate
+   live API calls (mirrors backlinks missing-url filtering ~1166–1174).
+   Wired into `build_live_keyword_result`, `build_resumed_keyword_result`
+   (missing-URL overlay), `build_keyword_result_from_responses`,
+   `build_live_payload`, `expand_stored_run`, and `build_raw_response_records`.
+   Tests in `tests/unit/test_cli_run.py`.
 5. **[ ] Slice 5 — Stored-run backfill** — extend `expand_stored_run` reuse-check
    for the `onpage_instant_pages` partition.
 6. **[ ] Slice 6 — Curated builder** — `build_onpage_signals_frame`: `onpage_score`;

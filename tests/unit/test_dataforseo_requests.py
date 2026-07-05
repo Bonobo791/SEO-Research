@@ -21,6 +21,7 @@ from seo_rank.dataforseo import (
     fixture_onpage_instant_pages_response,
     fixture_page_text_response,
     fixture_serp_response,
+    onpage_instant_pages_response_is_usable,
     format_backlinks_target,
     parsed_page_text,
     validate_dataforseo_response,
@@ -540,6 +541,43 @@ def test_validate_dataforseo_response_accepts_onpage_instant_pages_sparse_item()
     }
 
     assert validate_dataforseo_response("onpage_instant_pages", response) is response
+
+
+@pytest.mark.parametrize(
+    "empty_response",
+    [
+        {
+            "status_code": 20000,
+            "url": "https://example.com/empty-null-result",
+            "tasks": [{"status_code": 20000, "result": None}],
+        },
+        {
+            "status_code": 20000,
+            "url": "https://example.com/empty-result-list",
+            "tasks": [{"status_code": 20000, "result": []}],
+        },
+        {
+            "status_code": 20000,
+            "url": "https://example.com/empty-items",
+            "tasks": [
+                {
+                    "status_code": 20000,
+                    "result": [{"items_count": 0, "items": []}],
+                }
+            ],
+        },
+    ],
+)
+def test_onpage_instant_pages_response_is_usable_rejects_empty_payloads(
+    empty_response: dict[str, object],
+) -> None:
+    assert validate_dataforseo_response("onpage_instant_pages", empty_response) is empty_response
+    assert onpage_instant_pages_response_is_usable(empty_response) is False
+
+
+def test_onpage_instant_pages_response_is_usable_accepts_fixture_item() -> None:
+    response = fixture_onpage_instant_pages_response("https://example.com/technical-seo/1")
+    assert onpage_instant_pages_response_is_usable(response) is True
 
 
 def test_validate_dataforseo_response_rejects_schema_drift_with_typed_error() -> None:
