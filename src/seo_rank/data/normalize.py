@@ -18,6 +18,7 @@ from seo_rank.dataforseo import (
     BACKLINKS_QUERY_SUMMARY,
     DATAFORSEO_RESPONSE_SCHEMAS,
     DEFAULT_KEYWORD_LIMIT,
+    backlinks_response_is_successful_empty,
     decode_content_parsing_items,
     extract_response_url,
     normalize_keyword_expansion,
@@ -988,7 +989,10 @@ def build_backlinks_frame(
         target_keyword_id = stable_id(target_keyword)
         summary_body = summary["body"]
         assert isinstance(summary_body, Mapping)
-        summary_result = _single_backlinks_result(summary_body)
+        summary_result = _backlinks_result_or_successful_empty(
+            summary_body,
+            variant=BACKLINKS_QUERY_SUMMARY,
+        )
         summary_response_id = str(summary["response_id"])
         dofollow_response_id: str | None = None
         dofollow_backlinks_count: int | None = None
@@ -996,7 +1000,10 @@ def build_backlinks_frame(
         if isinstance(dofollow, Mapping):
             dofollow_body = dofollow["body"]
             assert isinstance(dofollow_body, Mapping)
-            dofollow_result = _single_backlinks_result(dofollow_body)
+            dofollow_result = _backlinks_result_or_successful_empty(
+                dofollow_body,
+                variant=BACKLINKS_QUERY_DOFOLLOW,
+            )
             dofollow_response_id = str(dofollow["response_id"])
             dofollow_backlinks_count = _required_backlink_metric(
                 dofollow_result,
@@ -1450,6 +1457,25 @@ def _single_backlinks_result(body: Mapping[str, object]) -> Mapping[str, object]
     if not isinstance(result, Mapping):
         raise ValueError("backlinks response result must be an object")
     return result
+
+
+def _empty_backlinks_result_for_variant(variant: str) -> dict[str, int]:
+    if variant == BACKLINKS_QUERY_DOFOLLOW:
+        return {"backlinks": 0}
+    return {
+        "backlinks": 0,
+        "referring_domains": 0,
+    }
+
+
+def _backlinks_result_or_successful_empty(
+    body: Mapping[str, object],
+    *,
+    variant: str,
+) -> Mapping[str, object]:
+    if backlinks_response_is_successful_empty(body):
+        return _empty_backlinks_result_for_variant(variant)
+    return _single_backlinks_result(body)
 
 
 def _summary_backlinks_row(

@@ -178,6 +178,24 @@ def test_backlinks_response_has_variant_aggregates_rejects_legacy_live_shape() -
     )
 
 
+def test_backlinks_response_has_variant_aggregates_accepts_successful_empty_summary() -> None:
+    response = {
+        "status_code": 20000,
+        "tasks": [
+            {
+                "status_code": 20000,
+                "result": None,
+                "result_count": 0,
+            }
+        ],
+    }
+
+    assert backlinks_response_has_variant_aggregates(
+        response,
+        variant=BACKLINKS_QUERY_SUMMARY,
+    )
+
+
 def test_validate_dataforseo_response_accepts_backlinks_dofollow_summary_shape() -> None:
     response = {
         "status_code": 20000,

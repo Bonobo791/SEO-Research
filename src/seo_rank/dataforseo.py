@@ -390,6 +390,26 @@ def single_backlinks_task_result(body: Mapping[str, object]) -> Mapping[str, obj
     return result
 
 
+def backlinks_response_is_successful_empty(body: Mapping[str, object]) -> bool:
+    tasks = body.get("tasks", [])
+    if not isinstance(tasks, list) or not tasks:
+        return False
+    top_level_status = body.get("status_code")
+    if isinstance(top_level_status, int) and top_level_status not in {200, 20000}:
+        return False
+    task = tasks[0]
+    if not isinstance(task, Mapping):
+        return False
+    task_status = task.get("status_code")
+    if isinstance(task_status, int) and task_status not in {200, 20000}:
+        return False
+    result = task.get("result")
+    result_count = task.get("result_count")
+    if result is None:
+        return result_count == 0 or result_count is None
+    return isinstance(result, list) and not result
+
+
 def is_legacy_backlinks_live_result(result: Mapping[str, object]) -> bool:
     return "backlinks" not in result and (
         "total_count" in result or "items_count" in result
@@ -407,6 +427,8 @@ def backlinks_response_has_variant_aggregates(
 ) -> bool:
     """Return True when a stored/live response has summary API aggregates for a variant."""
 
+    if backlinks_response_is_successful_empty(response):
+        return True
     try:
         result = single_backlinks_task_result(response)
     except ValueError:
