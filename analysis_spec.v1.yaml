@@ -99,6 +99,42 @@ signal_families:
         - backlinks_count
         - referring_domains_count
         - dofollow_backlinks_count
+    - key: onpage_content_quality
+      kind: onpage_metric
+      signal_columns:
+        - onpage_score
+        - plain_text_word_count
+        - plain_text_rate
+        - flesch_kincaid_readability_index
+        - coleman_liau_readability_index
+        - smog_readability_index
+        - dale_chall_readability_index
+    - key: onpage_core_web_vitals
+      kind: onpage_metric
+      signal_columns:
+        - time_to_first_byte_ms
+        - largest_contentful_paint_ms
+        - cumulative_layout_shift
+        - total_transfer_size
+    - key: onpage_technical_checks
+      kind: onpage_metric
+      signal_columns:
+        - title_too_long
+        - title_too_short
+        - no_title
+        - no_description
+        - no_h1_tag
+        - canonical
+        - is_https
+        - has_render_blocking_resources
+        - duplicate_meta_tags
+        - has_meta_title
+        - irrelevant_description
+        - low_readability_rate
+        - has_valid_structured_data
+        - micromarkup_items_count
+        - micromarkup_errors_count
+        - micromarkup_warnings_count
 
 estimand:
   outcome: -log(serp_rank)

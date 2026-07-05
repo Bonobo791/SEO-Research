@@ -5,6 +5,7 @@ from pathlib import Path
 
 import polars as pl
 
+from seo_rank.stats.artifacts import build_family_source_frames
 from seo_rank.stats.artifacts import run_phase5_stats
 from seo_rank.stats.spec import load_analysis_spec
 
@@ -130,6 +131,49 @@ def _combined_backlinks_analysis_frame() -> pl.DataFrame:
     return pl.DataFrame(rows)
 
 
+def _combined_onpage_features_frame() -> pl.DataFrame:
+    rows: list[dict[str, object]] = []
+    for row in _combined_analysis_mart_frame().to_dicts():
+        keyword_index = int(str(row["target_keyword_id"]).split("-")[-1])
+        serp_rank = int(row["serp_rank"])
+        signal = float(4 - serp_rank) + keyword_index * 0.01
+        rows.append(
+            {
+                **row,
+                "onpage_signal_id": f"onpage-{keyword_index}-{serp_rank}",
+                "onpage_score": 60.0 + signal * 10.0,
+                "title_too_long": serp_rank == 1,
+                "title_too_short": serp_rank == 2,
+                "no_title": keyword_index % 3 == 0,
+                "no_description": keyword_index % 4 == 0,
+                "no_h1_tag": serp_rank == 3,
+                "canonical": serp_rank != 1,
+                "is_https": serp_rank != 2,
+                "has_render_blocking_resources": serp_rank == 1,
+                "duplicate_meta_tags": keyword_index % 5 == 0,
+                "has_meta_title": serp_rank != 2,
+                "irrelevant_description": keyword_index % 6 == 0,
+                "low_readability_rate": serp_rank == 2,
+                "plain_text_word_count": 500.0 + serp_rank * 10.0 + keyword_index,
+                "plain_text_rate": 0.02 + serp_rank * 0.001,
+                "flesch_kincaid_readability_index": 50.0 + signal,
+                "coleman_liau_readability_index": 10.0 + signal,
+                "smog_readability_index": 8.0 + signal,
+                "dale_chall_readability_index": 7.0 + signal,
+                "time_to_first_byte_ms": 100 + serp_rank * 10 + keyword_index,
+                "largest_contentful_paint_ms": 2000.0 - serp_rank * 100.0,
+                "cumulative_layout_shift": 0.05 + serp_rank * 0.01,
+                "total_transfer_size": 100_000 + serp_rank * 1000 + keyword_index,
+                "micromarkup_items_count": 2 + serp_rank,
+                "micromarkup_errors_count": serp_rank - 1,
+                "micromarkup_warnings_count": keyword_index % 3,
+                "has_valid_structured_data": serp_rank != 3,
+                "schema_version": "feature_marts.v1",
+            }
+        )
+    return pl.DataFrame(rows)
+
+
 def _single_keyword_analysis_mart_frame() -> pl.DataFrame:
     return _combined_analysis_mart_frame().filter(pl.col("target_keyword_id") == "kw-1")
 
@@ -140,6 +184,7 @@ def test_run_phase5_stats_emits_combined_family_tree_and_keeps_similarity_compat
     run_dir = tmp_path / "runs" / "run-1"
     (run_dir / "parquet" / "analysis_mart").mkdir(parents=True)
     (run_dir / "parquet" / "backlinks_analysis").mkdir(parents=True)
+    (run_dir / "parquet" / "onpage_features").mkdir(parents=True)
     (run_dir / "parquet" / "textrazor_page_metrics").mkdir(parents=True)
 
     _combined_analysis_mart_frame().write_parquet(
@@ -147,6 +192,9 @@ def test_run_phase5_stats_emits_combined_family_tree_and_keeps_similarity_compat
     )
     _combined_backlinks_analysis_frame().write_parquet(
         run_dir / "parquet" / "backlinks_analysis" / "part-0.parquet"
+    )
+    _combined_onpage_features_frame().write_parquet(
+        run_dir / "parquet" / "onpage_features" / "part-0.parquet"
     )
     _combined_textrazor_frame().write_parquet(
         run_dir / "parquet" / "textrazor_page_metrics" / "part-0.parquet"
@@ -174,6 +222,8 @@ def test_run_phase5_stats_emits_combined_family_tree_and_keeps_similarity_compat
         "textrazor_relation_property_noun_phrase"
     ]
     backlinks_family = summary["rank_depths"]["top_20"]["families"]["backlinks_counts"]
+    onpage_quality_family = summary["rank_depths"]["top_20"]["families"]["onpage_content_quality"]
+    onpage_cwv_family = summary["rank_depths"]["top_20"]["families"]["onpage_core_web_vitals"]
 
     assert topic_family["spearman"]["signals"]["textrazor_topic_score"]["status"] == "computed"
     assert topic_family["regression"]["signals"]["textrazor_topic_score"]["status"] == "computed"
@@ -193,6 +243,15 @@ def test_run_phase5_stats_emits_combined_family_tree_and_keeps_similarity_compat
         "computed",
         "unstable",
     }
+    assert onpage_quality_family["spearman"]["signals"]["onpage_score"]["status"] == "computed"
+    assert onpage_quality_family["regression"]["signals"]["onpage_score"]["status"] == "computed"
+    assert onpage_cwv_family["spearman"]["signals"]["time_to_first_byte_ms"]["status"] == "computed"
+    onpage_technical_family = summary["rank_depths"]["top_20"]["families"]["onpage_technical_checks"]
+    assert onpage_technical_family["regression"]["signals"]["title_too_long"]["status"] == "computed"
+    assert onpage_quality_family["plackett_luce"]["status"] == "skipped"
+    assert onpage_quality_family["plackett_luce"]["skipped_reason"] == "family_pl_deferred"
+    assert onpage_cwv_family["plackett_luce"]["status"] == "skipped"
+    assert onpage_technical_family["plackett_luce"]["status"] == "skipped"
 
     assert diagnostics["metadata"]["signal_family_order"] == list(spec.signal_family_keys)
     assert diagnostics["rank_depths"]["top_20"]["families"]["textrazor_topic_score"]["diagnostics"][
@@ -205,6 +264,32 @@ def test_run_phase5_stats_emits_combined_family_tree_and_keeps_similarity_compat
     assert "#### Family: textrazor_topic_score" in report
     assert "#### Family: textrazor_relation_property_noun_phrase" in report
     assert "#### Family: backlinks_counts" in report
+    assert "#### Family: onpage_content_quality" in report
+    assert "#### Family: onpage_core_web_vitals" in report
+    assert "#### Family: onpage_technical_checks" in report
+
+
+def test_build_family_source_frames_loads_onpage_features_when_present(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "runs" / "run-1"
+    (run_dir / "parquet" / "analysis_mart").mkdir(parents=True)
+    (run_dir / "parquet" / "onpage_features").mkdir(parents=True)
+    analysis_mart = _combined_analysis_mart_frame()
+    onpage_features = _combined_onpage_features_frame()
+    analysis_mart.write_parquet(run_dir / "parquet" / "analysis_mart" / "part-0.parquet")
+    onpage_features.write_parquet(run_dir / "parquet" / "onpage_features" / "part-0.parquet")
+
+    spec = load_analysis_spec()
+    source_frames = build_family_source_frames(
+        run_dir,
+        analysis_mart=analysis_mart,
+        spec=spec,
+    )
+
+    assert not source_frames["onpage_features"].is_empty()
+    assert source_frames["onpage_features"].height == onpage_features.height
+    assert "onpage_score" in source_frames["onpage_features"].columns
 
 
 def test_run_phase5_stats_marks_textrazor_family_blocks_skipped_on_hard_fail(

@@ -84,6 +84,7 @@ def build_family_source_frames(
     source_frames: dict[str, pl.DataFrame] = {
         "analysis_mart": analysis_mart,
         "backlinks_analysis": _load_backlinks_family_frame(run_dir),
+        "onpage_features": _load_onpage_family_frame(run_dir),
         "textrazor_page_metrics": _load_textrazor_family_frame(
             run_dir,
             analysis_mart=analysis_mart,
@@ -122,6 +123,17 @@ def _load_backlinks_family_frame(run_dir: Path) -> pl.DataFrame:
 
     try:
         return scan_curated_table(run_dir, "backlinks_analysis").collect()
+    except OSError:
+        return pl.DataFrame()
+
+
+def _load_onpage_family_frame(run_dir: Path) -> pl.DataFrame:
+    onpage_path = Path(run_dir) / "parquet" / "onpage_features"
+    if not onpage_path.exists():
+        return pl.DataFrame()
+
+    try:
+        return scan_curated_table(run_dir, "onpage_features").collect()
     except OSError:
         return pl.DataFrame()
 

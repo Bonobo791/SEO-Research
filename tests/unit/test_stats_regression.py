@@ -10,6 +10,7 @@ import seo_rank.stats.regression as regression_module
 from seo_rank.stats.regression import (
     summarize_backend_regression,
     summarize_regression_backends,
+    summarize_regression_for_score_column,
 )
 
 
@@ -119,6 +120,33 @@ def _constant_similarity_keyword_regression_frame() -> pl.DataFrame:
                 }
             )
     return pl.DataFrame(rows)
+
+
+def test_summarize_regression_for_boolean_onpage_predictor_uses_numeric_encoding() -> None:
+    rows: list[dict[str, object]] = []
+    for keyword_index in range(1, 6):
+        for serp_rank in range(1, 4):
+            rows.append(
+                {
+                    "target_keyword_id": f"kw-{keyword_index}",
+                    "canonical_url_hash": f"url-{keyword_index}-{serp_rank}",
+                    "serp_rank": serp_rank,
+                    "page_text_length": 200 + serp_rank,
+                    "title_too_long": serp_rank == 1,
+                }
+            )
+    frame = pl.DataFrame(rows)
+
+    summary = summarize_regression_for_score_column(
+        frame,
+        label="onpage_technical_checks",
+        score_column="title_too_long",
+    )
+
+    assert summary["status"] == "computed"
+    assert summary["score_column"] == "title_too_long"
+    assert "title_too_long" in summary["feature_model"]["formula"]
+    assert "[T.True]" not in summary["feature_model"]["formula"]
 
 
 def test_summarize_backend_regression_supports_single_keyword_with_hc3_inference() -> None:

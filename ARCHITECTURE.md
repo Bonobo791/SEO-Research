@@ -348,7 +348,7 @@ Derived from curated tables via `features.py`. Filter and select **before** join
 | `passage_features` | Passage-level features (Phase 5.5 expands scoring scope) |
 | `domain_features` | Domain-level aggregates (Phase 5.5 expands URL inventory) |
 | `backlinks_analysis` | `analysis_mart` panel grain left-joined with curated `backlinks` count columns (`backlinks_count`, `referring_domains_count`, `dofollow_backlinks_count` nullable); feeds the `backlinks_counts` signal family (Phase 6.2) |
-| `onpage_features` | `analysis_mart` panel grain left-joined with curated `onpage_signals` (`onpage_score`, technical checks, readability, CWV timing, transfer size, microdata summary); feeds Phase 7.1 OnPage signal families (Slice 8) |
+| `onpage_features` | `analysis_mart` panel grain left-joined with curated `onpage_signals` (`onpage_score`, technical checks, readability, CWV timing, transfer size, microdata summary); feeds three `onpage_metric` signal families loaded by `build_family_source_frames()` (Phase 7.1 Slice 8) |
 | `textrazor_page_metrics` | TextRazor page-signal columns keyed like `analysis_mart` (not joined into similarity mart); includes `textrazor_page_metrics_complete` |
 
 ### Layer 4 — analysis mart

@@ -1535,7 +1535,7 @@ or task id needed, and no `task_post` crawl/poll flow.
 
 ##### Dev slices
 
-**Progress:** 7 of 10 shipped.
+**Progress:** 8 of 10 shipped.
 
 1. **[x] Slice 1 — Request/schema/fixture** — `build_onpage_instant_pages_request()`,
    `DATAFORSEO_RESPONSE_SCHEMAS["onpage_instant_pages"]`,
@@ -1583,12 +1583,19 @@ or task id needed, and no `task_post` crawl/poll flow.
    `run_id`, `target_keyword_id`, `canonical_url_hash`, `url`); bounded
    validation (`onpage_score` 0–100, non-negative counts/timing). Tests in
    `tests/unit/test_feature_marts.py`.
-8. **[ ] Slice 8 — Family registry** — new kind `onpage_metric`; add
-   `onpage_content_quality`, `onpage_core_web_vitals`, and
-   `onpage_technical_checks` families to `analysis_spec.v1.yaml` (grouped by
-   concept, not one giant family).
-9. **[ ] Slice 9 — Artifacts wiring** — spearman/regression/diagnostics/PL
-   per new family, report sections.
+8. **[x] Slice 8 — Family registry + stats source wiring** — new kind `onpage_metric` mapped to
+   `onpage_features` in `stats/families.py`; three families appended to
+   `analysis_spec.v1.yaml`: `onpage_content_quality` (score + readability),
+   `onpage_core_web_vitals` (TTFB, LCP, CLS, transfer size),
+   `onpage_technical_checks` (12 SEO/tech booleans + structured-data summary).
+   `build_family_source_frames()` loads `onpage_features` when the mart partition
+   exists; boolean predictors are coerced to 0/1 before pooled OLS. Registry/spec
+   tests in `test_stats_families.py` and `test_stats_spec.py`; integration in
+   `test_stats_family_artifacts.py`.
+9. **[ ] Slice 9 — Artifacts follow-ups** — enable family Plackett-Luce for
+   `onpage_metric` (deferred in Slice 8 with `family_pl_deferred` while Spearman,
+   regression, and diagnostics run), `ensure_feature_marts_for_analysis` includes
+   `onpage_features`, golden fixtures, hard-fail path assertions.
 10. **[ ] Slice 10 — Fixtures and regressions** — golden fixtures, stored-run
     regression, full-layer unit tests.
 

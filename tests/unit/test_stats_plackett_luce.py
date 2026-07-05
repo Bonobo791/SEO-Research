@@ -14,7 +14,9 @@ from seo_rank.stats.plackett_luce import (
     fit_backend_plackett_luce,
     summarize_backend_plackett_luce,
     summarize_plackett_luce_backends,
+    summarize_plackett_luce_family,
 )
+from seo_rank.stats.spec import load_analysis_spec
 from seo_rank.stats.rank_depth import filter_panel_by_max_rank
 from seo_rank.stats.spec import load_analysis_spec
 
@@ -112,6 +114,20 @@ def test_stats_package_exports_plackett_luce_module_surface() -> None:
     import seo_rank.stats as stats
 
     assert stats.plackett_luce.__name__ == "seo_rank.stats.plackett_luce"
+
+
+def test_summarize_plackett_luce_family_defers_onpage_metric_families() -> None:
+    analysis_spec = load_analysis_spec()
+    family = analysis_spec.signal_families.family("onpage_content_quality")
+
+    summary = summarize_plackett_luce_family(
+        {"onpage_features": _sample_plackett_luce_panel()},
+        family=family,
+    )
+
+    assert summary["status"] == "skipped"
+    assert summary["skipped_reason"] == "family_pl_deferred"
+    assert summary["signals"] == {}
 
 
 def test_summarize_backend_plackett_luce_fits_rank_ordered_logit_with_clustered_se() -> None:

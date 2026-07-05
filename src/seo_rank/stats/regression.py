@@ -277,6 +277,19 @@ def _summarize_backend_regression_result(
     keyword_count = int(fit.model_data["target_keyword_id"].nunique())
     inference = _inference_metadata(keyword_count)
     similarity_sd = float(fit.similarity_within_keyword_sd)
+    if _resolve_parameter_name(fit.clustered_result, fit.score_column) is None:
+        logger.info(
+            "regression backend=%s status=skipped skipped_reason=parameter_not_estimable score_column=%s",
+            fit.backend,
+            fit.score_column,
+        )
+        return _skipped_backend_summary(
+            backend=fit.backend,
+            score_column=fit.score_column,
+            skipped_reason="parameter_not_estimable",
+            row_count=int(len(fit.model_data)),
+            keyword_count=keyword_count,
+        )
     coefficient = _parameter_value(
         fit.clustered_result,
         fit.score_column,
@@ -396,6 +409,7 @@ def _fit_backend_regression_from_model_data(
     score_column: str,
 ) -> BackendRegressionFit | None:
     model_data = model_data.copy()
+    _coerce_regression_predictor(model_data, score_column)
     keyword_count = int(model_data["target_keyword_id"].nunique())
     if keyword_count < 1:
         return None
@@ -483,8 +497,31 @@ def _skipped_backend_summary(
     }
 
 
+def _coerce_regression_predictor(model_data: pd.DataFrame, score_column: str) -> None:
+    """Treat boolean predictors as 0/1 floats so patsy keeps the raw column name."""
+
+    if pd.api.types.is_bool_dtype(model_data[score_column]):
+        model_data[score_column] = model_data[score_column].astype(float)
+
+
+def _resolve_parameter_name(
+    result: RegressionResultsWrapper,
+    parameter: str,
+) -> str | None:
+    exog_names = list(result.model.exog_names)
+    if parameter in exog_names:
+        return parameter
+    categorical_name = f"{parameter}[T.True]"
+    if categorical_name in exog_names:
+        return categorical_name
+    return None
+
+
 def _parameter_index(result: RegressionResultsWrapper, parameter: str) -> int:
-    return list(result.model.exog_names).index(parameter)
+    resolved = _resolve_parameter_name(result, parameter)
+    if resolved is None:
+        raise ValueError(f"parameter {parameter!r} not in regression design matrix")
+    return list(result.model.exog_names).index(resolved)
 
 
 def _parameter_value(result: RegressionResultsWrapper, parameter: str) -> float:

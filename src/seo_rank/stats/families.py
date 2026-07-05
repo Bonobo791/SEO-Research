@@ -12,6 +12,7 @@ VALID_SIGNAL_FAMILY_KINDS = frozenset(
     {
         "similarity",
         "backlinks_metric",
+        "onpage_metric",
         "textrazor_scalar",
         "textrazor_structural",
     }
@@ -20,9 +21,22 @@ VALID_SIGNAL_FAMILY_KINDS = frozenset(
 SOURCE_MART_BY_KIND = {
     "similarity": "analysis_mart",
     "backlinks_metric": "backlinks_analysis",
+    "onpage_metric": "onpage_features",
     "textrazor_scalar": "textrazor_page_metrics",
     "textrazor_structural": "textrazor_page_metrics",
 }
+
+# Family-level Plackett-Luce is expensive (one optimizer fit per signal × depth).
+# OnPage families are registered in Slice 8 with Spearman/regression/diagnostics;
+# defer family PL until Slice 9 performance work lands.
+FAMILY_PLACKETT_LUCE_KINDS = frozenset(
+    {
+        "similarity",
+        "backlinks_metric",
+        "textrazor_scalar",
+        "textrazor_structural",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -129,6 +143,12 @@ def source_mart_for_family(family: SignalFamily) -> str:
         return SOURCE_MART_BY_KIND[family.kind]
     except KeyError as error:
         raise ValueError(f"unsupported signal family kind: {family.kind}") from error
+
+
+def plackett_luce_enabled_for_family(family: SignalFamily) -> bool:
+    """Return whether the family-level PL path should run for this family."""
+
+    return family.kind in FAMILY_PLACKETT_LUCE_KINDS
 
 
 def _load_signal_family(raw_family: Any, *, index: int) -> SignalFamily:

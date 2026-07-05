@@ -10,7 +10,7 @@ from math import isfinite
 import numpy as np
 import pandas as pd
 import polars as pl
-from seo_rank.stats.families import SignalFamily, SignalFamilyRegistry, source_mart_for_family
+from seo_rank.stats.families import SignalFamily, SignalFamilyRegistry, plackett_luce_enabled_for_family, source_mart_for_family
 from seo_rank.stats.rank_depth import filter_panel_by_max_rank
 from seo_rank.stats.scale import within_keyword_sd_rms
 from seo_rank.stats.spec import AnalysisSpec
@@ -235,6 +235,18 @@ def summarize_plackett_luce_family(
     """Summarize rank-ordered logit for one signal family."""
 
     source_mart = source_mart_for_family(family)
+    if not plackett_luce_enabled_for_family(family):
+        return {
+            "family": family.key,
+            "kind": family.kind,
+            "source_mart": source_mart,
+            "signal_columns": list(family.signal_columns),
+            "signals": {},
+            "backends": {},
+            "status": "skipped",
+            "skipped_reason": "family_pl_deferred",
+        }
+
     source_frame = source_frames.get(source_mart)
     if source_frame is None or source_frame.is_empty():
         return {

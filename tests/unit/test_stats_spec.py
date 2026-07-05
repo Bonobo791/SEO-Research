@@ -48,6 +48,9 @@ def test_load_analysis_spec_reads_repo_root_yaml() -> None:
         "textrazor_word_grammar_sense_spelling",
         "textrazor_relation_property_noun_phrase",
         "backlinks_counts",
+        "onpage_content_quality",
+        "onpage_core_web_vitals",
+        "onpage_technical_checks",
     )
     assert analysis_spec.estimand["outcome"] == "-log(serp_rank)"
 
@@ -81,6 +84,9 @@ def test_load_analysis_spec_exposes_signal_family_metadata() -> None:
         "referring_domains_count",
         "dofollow_backlinks_count",
     )
+    assert analysis_spec.signal_family("onpage_content_quality").kind == "onpage_metric"
+    assert analysis_spec.signal_family("onpage_core_web_vitals").kind == "onpage_metric"
+    assert analysis_spec.signal_family("onpage_technical_checks").kind == "onpage_metric"
     assert analysis_spec.signal_families.similarity_keys == (
         "bge",
         "gemini_doc_retrieval",
@@ -135,6 +141,9 @@ def test_build_stats_output_metadata_exposes_estimand_version() -> None:
         "textrazor_word_grammar_sense_spelling",
         "textrazor_relation_property_noun_phrase",
         "backlinks_counts",
+        "onpage_content_quality",
+        "onpage_core_web_vitals",
+        "onpage_technical_checks",
     ],
         "primary_rank_depth": "top_20",
         "confirmatory_rank_depths": ["top_20", "top_10", "top_5", "top_3"],

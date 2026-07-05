@@ -309,6 +309,20 @@ exist.
   (`test_build_feature_marts_onpage_features_null_when_partition_missing`),
   and bounded validation via `ONPAGE_FEATURES_REQUIRED_COLUMNS`
   (`test_build_feature_marts_validates_each_feature_frame_before_sinking`).
+- **OnPage signal family registry (Phase 7.1 slice 8)** —
+  `tests/unit/test_stats_families.py` covers three `onpage_metric` families
+  (`onpage_content_quality`, `onpage_core_web_vitals`, `onpage_technical_checks`),
+  `source_mart_for_family` → `onpage_features`, and column coverage against
+  `ONPAGE_FEATURES_EXTRA_COLUMNS` (`test_onpage_signal_columns_cover_onpage_features_mart`).
+  `tests/unit/test_stats_spec.py` covers loaded family keys and metadata.
+  `tests/unit/test_stats_family_artifacts.py` covers `build_family_source_frames`
+  loading `onpage_features` and end-to-end stats for OnPage families when the mart
+  partition is present (`test_build_family_source_frames_loads_onpage_features_when_present`,
+  `test_run_phase5_stats_emits_combined_family_tree_and_keeps_similarity_compatibility`).
+  `tests/unit/test_stats_regression.py` covers boolean OnPage predictors as numeric
+  OLS terms (`test_summarize_regression_for_boolean_onpage_predictor_uses_numeric_encoding`).
+  Family-level Plackett-Luce for `onpage_metric` is deferred until Slice 9
+  (`family_pl_deferred`; see `test_onpage_metric_families_defer_family_plackett_luce`).
 
 ## Shipped tests — Phase 6.2 backlinks count analysis (Jul 2026)
 
