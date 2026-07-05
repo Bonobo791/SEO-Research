@@ -374,6 +374,54 @@ def validate_dataforseo_response(
     return response
 
 
+def single_backlinks_task_result(body: Mapping[str, object]) -> Mapping[str, object]:
+    tasks = body.get("tasks", [])
+    if not isinstance(tasks, list) or not tasks:
+        raise ValueError("backlinks response is missing tasks")
+    task = tasks[0]
+    if not isinstance(task, Mapping):
+        raise ValueError("backlinks response task must be an object")
+    results = task.get("result", [])
+    if not isinstance(results, list) or not results:
+        raise ValueError("backlinks response is missing result aggregates")
+    result = results[0]
+    if not isinstance(result, Mapping):
+        raise ValueError("backlinks response result must be an object")
+    return result
+
+
+def is_legacy_backlinks_live_result(result: Mapping[str, object]) -> bool:
+    return "backlinks" not in result and (
+        "total_count" in result or "items_count" in result
+    )
+
+
+def _backlink_metric_is_numeric(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def backlinks_response_has_variant_aggregates(
+    response: Mapping[str, object],
+    *,
+    variant: str,
+) -> bool:
+    """Return True when a stored/live response has summary API aggregates for a variant."""
+
+    try:
+        result = single_backlinks_task_result(response)
+    except ValueError:
+        return False
+    if is_legacy_backlinks_live_result(result):
+        return False
+    if variant == BACKLINKS_QUERY_DOFOLLOW:
+        return _backlink_metric_is_numeric(result.get("backlinks"))
+    if variant == BACKLINKS_QUERY_SUMMARY:
+        return _backlink_metric_is_numeric(result.get("backlinks")) and _backlink_metric_is_numeric(
+            result.get("referring_domains")
+        )
+    return False
+
+
 def _validate_dataforseo_field(
     value: object,
     *,

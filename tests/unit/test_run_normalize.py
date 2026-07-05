@@ -374,6 +374,81 @@ def test_normalize_run_rejects_backlinks_summary_missing_required_aggregates(
         normalize_run(output_dir)
 
 
+def test_normalize_run_materializes_backlinks_table_from_legacy_live_shape_in_summary_partition(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--depth",
+            "1",
+            "--output-dir",
+            str(output_dir),
+            "--dry-run",
+        ]
+    )
+
+    assert exit_code == 0
+
+    summary_dir = (
+        output_dir / "parquet" / "raw_responses" / "endpoint=backlinks_summary"
+    )
+    summary_dir.mkdir(parents=True, exist_ok=True)
+    target_url = "https://example.com/technical-seo/1"
+    legacy_live_response = {
+        "status_code": 20000,
+        "tasks": [
+            {
+                "status_code": 20000,
+                "path": ["v3", "backlinks", "backlinks", "live"],
+                "result": [
+                    {
+                        "target": target_url,
+                        "total_count": 42,
+                        "items_count": 0,
+                        "items": None,
+                    }
+                ],
+            }
+        ],
+    }
+    backlinks_record = build_raw_response_record(
+        output_dir.name,
+        endpoint="backlinks_summary",
+        provider="dataforseo",
+        response=legacy_live_response,
+        target_keyword="technical seo",
+        request_metadata={
+            "target_keyword": "technical seo",
+            "url": target_url,
+            "variant": BACKLINKS_QUERY_SUMMARY,
+        },
+        recorded_at="2026-07-02T12:00:00+00:00",
+    )
+    pq.write_table(
+        pa.Table.from_pylist([backlinks_record], schema=RAW_RESPONSE_SCHEMA),
+        summary_dir / "part-0.parquet",
+    )
+
+    catalog = normalize_run(output_dir)
+
+    assert catalog["datasets"]["backlinks"]["row_count"] == 1
+    backlinks = (
+        ds.dataset(output_dir / "parquet" / "backlinks", format="parquet")
+        .to_table()
+        .to_pylist()
+    )
+    assert backlinks[0]["backlinks_count"] == 42
+    assert backlinks[0]["referring_domains_count"] is None
+    assert backlinks[0]["backlinks_metrics_complete"] is False
+
+
 def test_normalize_run_materializes_backlinks_table_with_zero_backlinks(
     tmp_path: Path,
     monkeypatch,

@@ -6,9 +6,11 @@ from seo_rank.dataforseo import (
     DataForSeoCredentials,
     DataForSeoParseError,
     BACKLINKS_DOFOLLOW_FILTERS,
+    BACKLINKS_QUERY_SUMMARY,
     decode_content_parsing_items,
     build_backlinks_dofollow_summary_request,
     build_backlinks_summary_request,
+    backlinks_response_has_variant_aggregates,
     build_keyword_expansion_request,
     build_page_text_request,
     build_serp_request,
@@ -151,6 +153,29 @@ def test_validate_dataforseo_response_accepts_backlinks_summary_shape() -> None:
     }
 
     assert validate_dataforseo_response("backlinks_summary", response) is response
+
+
+def test_backlinks_response_has_variant_aggregates_rejects_legacy_live_shape() -> None:
+    legacy_response = {
+        "status_code": 20000,
+        "tasks": [
+            {
+                "status_code": 20000,
+                "result": [
+                    {
+                        "target": "https://example.com/technical-seo/1",
+                        "total_count": 42,
+                        "items_count": 0,
+                    }
+                ],
+            }
+        ],
+    }
+
+    assert not backlinks_response_has_variant_aggregates(
+        legacy_response,
+        variant=BACKLINKS_QUERY_SUMMARY,
+    )
 
 
 def test_validate_dataforseo_response_accepts_backlinks_dofollow_summary_shape() -> None:

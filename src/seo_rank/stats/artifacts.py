@@ -11,7 +11,6 @@ from typing import Any
 import numpy as np
 import polars as pl
 
-from seo_rank.debug_trace import debug_trace
 from seo_rank.data.scans import scan_curated_table
 from seo_rank.stats.diagnostics import summarize_diagnostics_backends_from_fits
 from seo_rank.stats.diagnostics import summarize_diagnostics_families
@@ -158,22 +157,6 @@ def merge_analysis_mart_with_textrazor_page_metrics(
         on=["run_id", "target_keyword_id", "canonical_url_hash"],
         how="left",
     )
-    confidence_column = "textrazor_entity_confidence_score"
-    if confidence_column in merged.columns:
-        debug_trace(
-            hypothesis_id="H4-H5",
-            location="artifacts.py:merge_analysis_mart_with_textrazor_page_metrics",
-            message="textrazor join coverage",
-            data={
-                "analysis_mart_rows": analysis_mart.height,
-                "textrazor_rows": textrazor_page_metrics.height,
-                "merged_rows": merged.height,
-                "confidence_non_null": int(
-                    merged[confidence_column].is_not_null().sum()
-                ),
-                "confidence_null": int(merged[confidence_column].is_null().sum()),
-            },
-        )
     sort_columns = ["target_keyword_id", "canonical_url_hash", "serp_rank", "serp_item_id"]
     if all(column in merged.columns for column in sort_columns):
         merged = merged.sort(sort_columns)

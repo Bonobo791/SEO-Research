@@ -13,7 +13,6 @@ from seo_rank.data.validate import (
     validate_frame_contract,
     validate_materialized_frame_contract,
 )
-from seo_rank.debug_trace import debug_trace
 from seo_rank.dataforseo import (
     BACKLINKS_QUERY_DOFOLLOW,
     BACKLINKS_QUERY_SUMMARY,
@@ -658,30 +657,7 @@ def normalize_run(run_dir: Path) -> dict[str, object]:
     seed = str(config["seed"])
     depth = int(config["depth"])
     keyword_limit = int(config.get("keyword_limit", DEFAULT_KEYWORD_LIMIT))
-    stored_keywords = run_payload.get("keywords", [])
-    stored_keyword_count = (
-        len(stored_keywords) if isinstance(stored_keywords, list) else 0
-    )
     page_similarity_scores = _load_run_page_similarity_scores(run_payload)
-    sample_page_score_keys: list[str] = []
-    for keyword_scores in page_similarity_scores.values():
-        if keyword_scores:
-            first_url_scores = next(iter(keyword_scores.values()))
-            if isinstance(first_url_scores, Mapping):
-                sample_page_score_keys = sorted(first_url_scores.keys())
-            break
-    debug_trace(
-        hypothesis_id="H2-H3",
-        location="normalize.py:normalize_run",
-        message="normalize_run keyword and page_similarity snapshot",
-        data={
-            "keyword_limit": keyword_limit,
-            "default_keyword_limit": DEFAULT_KEYWORD_LIMIT,
-            "stored_keyword_count": stored_keyword_count,
-            "page_similarity_keyword_count": len(page_similarity_scores),
-            "sample_page_score_keys": sample_page_score_keys,
-        },
-    )
 
     catalog: dict[str, object] = run_payload.get("catalog", {})
     if not isinstance(catalog, dict):
@@ -738,9 +714,7 @@ def validate_raw_response_bodies(raw_responses: pl.LazyFrame) -> None:
         validate_endpoint = _backlinks_validation_endpoint(endpoint, variant=variant)
         if validate_endpoint not in DATAFORSEO_RESPONSE_SCHEMAS:
             continue
-        if endpoint == BACKLINKS_LEGACY_ENDPOINT and not _backlinks_summary_has_aggregates(
-            record
-        ):
+        if _backlinks_record_skips_summary_schema_validation(record, endpoint=endpoint):
             continue
         _validated_response_body(record, endpoint=validate_endpoint)
 
@@ -1387,6 +1361,35 @@ def _backlinks_record_variant(endpoint: str, metadata: Mapping[str, object]) -> 
     return BACKLINKS_QUERY_SUMMARY
 
 
+def _backlinks_record_is_legacy_live_shape(record: Mapping[str, object]) -> bool:
+    try:
+        raw_body = record["response_body_bytes"]
+        body_bytes = (
+            raw_body if isinstance(raw_body, (bytes, bytearray)) else str(raw_body).encode()
+        )
+        body = json.loads(body_bytes)
+        if not isinstance(body, Mapping):
+            return False
+        result = _single_backlinks_result(body)
+    except (ValueError, json.JSONDecodeError, TypeError, KeyError):
+        return False
+    return _is_legacy_backlinks_live_result(result)
+
+
+def _backlinks_record_skips_summary_schema_validation(
+    record: Mapping[str, object],
+    *,
+    endpoint: str,
+) -> bool:
+    if endpoint == BACKLINKS_LEGACY_ENDPOINT and not _backlinks_summary_has_aggregates(
+        record
+    ):
+        return True
+    return endpoint in BACKLINKS_RAW_ENDPOINTS and _backlinks_record_is_legacy_live_shape(
+        record
+    )
+
+
 def _backlinks_summary_has_aggregates(record: Mapping[str, object]) -> bool:
     try:
         raw_body = record["response_body_bytes"]
@@ -1637,9 +1640,7 @@ def _backlinks_response_body(
     endpoint: str,
     variant: str,
 ) -> dict[str, object]:
-    if endpoint == BACKLINKS_LEGACY_ENDPOINT and not _backlinks_summary_has_aggregates(
-        record
-    ):
+    if _backlinks_record_skips_summary_schema_validation(record, endpoint=endpoint):
         body = json.loads(bytes(record["response_body_bytes"]).decode("utf-8"))
         if not isinstance(body, dict):
             raise ValueError("backlinks response body must be an object")

@@ -1361,6 +1361,149 @@ def test_run_stored_run_cli_live_providers_backfills_backlinks_when_stored_confi
     assert payload["catalog"]["datasets"]["backlinks"]["row_count"] == 2
 
 
+def test_run_stored_run_live_providers_refetches_legacy_shaped_backlinks(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.setenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", "1")
+    monkeypatch.setenv("DATAFORSEO_LOGIN", "analyst@example.com")
+    monkeypatch.setenv("DATAFORSEO_PASSWORD", "dataforseo-secret")
+
+    live_backlink_targets: list[str] = []
+
+    def dataforseo_transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        del method, headers, timeout
+        request_body = json.loads(body.decode("utf-8"))
+        if url.endswith("/keywords_data/google_ads/keywords_for_keywords/live"):
+            return fixture_keyword_expansion_response("technical seo")
+        if url.endswith("/serp/google/organic/live/advanced"):
+            return fixture_serp_response("technical seo")
+        if url.endswith("/on_page/content_parsing/live"):
+            return fixture_page_text_response(request_body[0]["url"], "technical seo")
+        if url.endswith("/backlinks/summary/live"):
+            target = request_body[0]["target"]
+            live_backlink_targets.append(target)
+            return fixture_backlinks_response_for_request_body(request_body)
+        raise AssertionError(f"unexpected DataForSEO URL: {url}")
+
+    monkeypatch.setattr("seo_rank.cli.DEFAULT_DATAFORSEO_TRANSPORT", dataforseo_transport)
+
+    assert (
+        main(
+            [
+                "run",
+                "--seed",
+                "technical seo",
+                "--output-dir",
+                str(output_dir),
+                "--live-providers",
+                "--keyword-limit",
+                "1",
+                "--depth",
+                "2",
+                "--skip-textrazor",
+            ]
+        )
+        == 0
+    )
+
+    legacy_rows = []
+    for endpoint in ("backlinks_summary", "backlinks_dofollow_summary"):
+        partition_path = (
+            output_dir
+            / "parquet"
+            / "raw_responses"
+            / f"endpoint={endpoint}"
+            / "part-0.parquet"
+        )
+        for row in pq.ParquetFile(partition_path).read().to_pylist():
+            metadata = json.loads(row["request_metadata_json"])
+            target_url = metadata["url"]
+            legacy_response = {
+                "status_code": 20000,
+                "url": target_url,
+                "tasks": [
+                    {
+                        "status_code": 20000,
+                        "path": ["v3", "backlinks", "backlinks", "live"],
+                        "result": [
+                            {
+                                "target": target_url,
+                                "total_count": 1,
+                                "items_count": 0,
+                                "items": None,
+                            }
+                        ],
+                    }
+                ],
+            }
+            legacy_rows.append(
+                build_raw_response_record(
+                    output_dir.name,
+                    endpoint=endpoint,
+                    provider="dataforseo",
+                    response=legacy_response,
+                    target_keyword=row["target_keyword"],
+                    request_metadata=metadata,
+                    recorded_at=row["timestamp"],
+                )
+            )
+        shutil.rmtree(partition_path.parent)
+    for endpoint in ("backlinks_summary", "backlinks_dofollow_summary"):
+        partition_dir = (
+            output_dir / "parquet" / "raw_responses" / f"endpoint={endpoint}"
+        )
+        partition_dir.mkdir(parents=True, exist_ok=True)
+        endpoint_rows = [row for row in legacy_rows if row["endpoint"] == endpoint]
+        pq.write_table(
+            pa.Table.from_pylist(endpoint_rows, schema=RAW_RESPONSE_SCHEMA),
+            partition_dir / "part-0.parquet",
+        )
+
+    live_backlink_targets.clear()
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--stored-run",
+            str(output_dir),
+            "--live-providers",
+            "--keyword-limit",
+            "1",
+        ]
+    )
+
+    assert exit_code == 0
+    assert live_backlink_targets == [
+        "https://example.com/technical-seo/1",
+        "https://example.com/technical-seo/2",
+        "https://example.com/technical-seo/1",
+        "https://example.com/technical-seo/2",
+    ]
+    summary_rows = pq.ParquetFile(
+        output_dir
+        / "parquet"
+        / "raw_responses"
+        / "endpoint=backlinks_summary"
+        / "part-0.parquet"
+    ).read().to_pylist()
+    for row in summary_rows:
+        body = json.loads(bytes(row["response_body_bytes"]).decode("utf-8"))
+        result = body["tasks"][0]["result"][0]
+        assert "backlinks" in result
+        assert "referring_domains" in result
+
+
 def test_run_stored_run_skip_textrazor_disables_stored_live_textrazor(
     tmp_path: Path,
     monkeypatch,

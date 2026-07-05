@@ -17,7 +17,6 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import polars as pl
 
-from seo_rank.debug_trace import debug_trace
 from seo_rank.env import ensure_project_env_loaded
 from seo_rank.data import build_analysis_mart, build_feature_marts, normalize_run
 from seo_rank.data.scans import scan_curated_table, scan_raw_responses
@@ -31,6 +30,7 @@ from seo_rank.dataforseo import (
     DEFAULT_KEYWORD_LIMIT,
     BACKLINKS_QUERY_DOFOLLOW,
     BACKLINKS_QUERY_SUMMARY,
+    backlinks_response_has_variant_aggregates,
     build_backlinks_dofollow_summary_request,
     build_backlinks_summary_request,
     build_keyword_expansion_request,
@@ -540,17 +540,6 @@ def replay_stored_run(
             progress=progress,
         )
         return
-
-    debug_trace(
-        hypothesis_id="H3",
-        location="cli.py:replay_stored_run",
-        message="stored-run replay starting",
-        data={
-            "stored_keyword_count": len(deduped_keywords),
-            "requested_keyword_limit": config.keyword_limit,
-            "stored_run": str(stored_run),
-        },
-    )
 
     expand_stored_run(
         stored_run,
@@ -1071,6 +1060,22 @@ def _load_textrazor_entities_by_keyword(
     return grouped
 
 
+def _register_usable_backlink_response(
+    existing_backlinks_by_url_variant: dict[tuple[str, str], dict[str, object]],
+    *,
+    response: Mapping[str, object],
+    url: str,
+    variant: str,
+) -> bool:
+    if not backlinks_response_has_variant_aggregates(response, variant=variant):
+        return False
+    existing_backlinks_by_url_variant[(url, variant)] = {
+        **dict(response),
+        "variant": variant,
+    }
+    return True
+
+
 def build_resumed_keyword_result(
     config: RunConfig,
     *,
@@ -1125,11 +1130,14 @@ def build_resumed_keyword_result(
                 continue
             response = json.loads(bytes(response_body_bytes).decode("utf-8"))
             url = extract_response_url(response)
-            if isinstance(url, str):
-                existing_backlinks_by_url_variant[(url, variant)] = {
-                    **response,
-                    "variant": variant,
-                }
+            if not isinstance(url, str):
+                continue
+            _register_usable_backlink_response(
+                existing_backlinks_by_url_variant,
+                response=response,
+                url=url,
+                variant=variant,
+            )
     for record in raw_keyword_records.get("backlinks", []):
         response_body_bytes = record.get("response_body_bytes")
         if not isinstance(response_body_bytes, (bytes, bytearray)):
@@ -1145,11 +1153,14 @@ def build_resumed_keyword_result(
         else:
             resolved_variant = BACKLINKS_QUERY_SUMMARY
         key = (url, resolved_variant)
-        if key not in existing_backlinks_by_url_variant:
-            existing_backlinks_by_url_variant[key] = {
-                **response,
-                "variant": resolved_variant,
-            }
+        if key in existing_backlinks_by_url_variant:
+            continue
+        _register_usable_backlink_response(
+            existing_backlinks_by_url_variant,
+            response=response,
+            url=url,
+            variant=resolved_variant,
+        )
 
     serp_urls = [str(result["url"]) for result in serp_results]
     missing_backlink_urls_by_variant: dict[str, list[str]] = {
@@ -1382,28 +1393,6 @@ def emit_keyword_analysis(run_dir: Path, keyword: str) -> None:
         analysis_mart = scan_analysis_mart(run_dir).filter(pl.col("target_keyword") == keyword).collect()
         textrazor_page_metrics = _load_textrazor_page_metrics_for_keyword_analysis(run_dir)
         merged_frame = merge_keyword_analysis_frame(analysis_mart, textrazor_page_metrics)
-        confidence_values = (
-            merged_frame["textrazor_entity_confidence_score"].null_count()
-            if "textrazor_entity_confidence_score" in merged_frame.columns
-            else None
-        )
-        debug_trace(
-            hypothesis_id="H1-H4",
-            location="cli.py:emit_keyword_analysis",
-            message="keyword analysis textrazor merge",
-            data={
-                "keyword": keyword,
-                "analysis_rows": analysis_mart.height,
-                "textrazor_rows": 0 if textrazor_page_metrics is None else textrazor_page_metrics.height,
-                "merged_rows": merged_frame.height,
-                "confidence_null_count": confidence_values,
-                "output_columns": [
-                    column
-                    for column in merged_frame.columns
-                    if column.startswith("textrazor_")
-                ][:6],
-            },
-        )
         rows = (
             merged_frame.select(_keyword_analysis_output_columns(merged_frame))
             .sort(_keyword_analysis_sort_columns(merged_frame))
@@ -2721,23 +2710,6 @@ def sync_textrazor_page_similarity_artifacts(
     run_payload = json.loads(run_json_path.read_text(encoding="utf-8"))
     lookup = build_textrazor_page_metrics_lookup(run_dir)
     enriched_count = enrich_run_payload_page_similarity(run_payload, lookup)
-    sample_keys: list[str] = []
-    page_similarity = run_payload.get("page_similarity")
-    if isinstance(page_similarity, list) and page_similarity:
-        first_scores = page_similarity[0].get("page_similarity", {})
-        if isinstance(first_scores, Mapping):
-            sample_keys = sorted(first_scores.keys())
-    debug_trace(
-        hypothesis_id="H1-H2",
-        location="cli.py:sync_textrazor_page_similarity_artifacts",
-        message="synced textrazor into page_similarity",
-        data={
-            "enriched_count": enriched_count,
-            "lookup_keywords": len(lookup),
-            "sample_page_score_keys": sample_keys,
-        },
-        run_id="post-fix",
-    )
     run_json_path.write_text(
         json.dumps(run_payload, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -2797,21 +2769,6 @@ def render_markdown_report(payload: dict[str, object]) -> str:
         lines.append("")
         page_similarity = keyword_result["page_similarity"]
         assert isinstance(page_similarity, list)
-        report_page_score_keys: list[str] = []
-        if page_similarity:
-            first_scores = page_similarity[0].get("page_similarity", {})
-            if isinstance(first_scores, Mapping):
-                report_page_score_keys = sorted(first_scores.keys())
-        debug_trace(
-            hypothesis_id="H1-H2",
-            location="cli.py:render_markdown_report",
-            message="report page_similarity backend keys",
-            data={
-                "target_keyword": keyword_result.get("target_keyword"),
-                "page_similarity_count": len(page_similarity),
-                "page_score_keys": report_page_score_keys,
-            },
-        )
         for score in page_similarity:
             page_scores = score["page_similarity"]
             bge_scores = page_scores["bge"]
