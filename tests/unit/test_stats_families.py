@@ -101,13 +101,13 @@ def test_signal_family_registry_preserves_order_and_panel_grain() -> None:
     assert registry.families_by_kind("similarity")[0].key == "bge"
 
 
-def test_onpage_metric_families_defer_family_plackett_luce() -> None:
+def test_onpage_metric_families_enable_family_plackett_luce() -> None:
     analysis_spec = load_analysis_spec()
 
     for family_key in ONPAGE_FAMILY_KEYS:
         family = analysis_spec.signal_families.family(family_key)
         assert family.kind == "onpage_metric"
-        assert plackett_luce_enabled_for_family(family) is False
+        assert plackett_luce_enabled_for_family(family) is True
 
     assert plackett_luce_enabled_for_family(
         analysis_spec.signal_families.family("backlinks_counts")

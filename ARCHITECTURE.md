@@ -218,10 +218,14 @@ family → pooled OLS with clustered SEs and diagnostics → primary-depth
 multivariate VIF sensitivity (`rank_depths.top_20.multivariate_sensitivity`
 plus a `### Robustness` report section) → influence refit sensitivity
 (`influence_sensitivity` per backend, `### Influence robustness` report section,
-`influential_rows_rate` warn guardrail) → page-level Plackett-Luce per depth →
+`influential_rows_rate` warn guardrail) → page-level Plackett-Luce per depth
+(including all three `onpage_metric` families with shared-prep family fits) →
 `runs/{run_id}/stats/` artifacts with `keyword_count` and `inference_mode`
-labeling. Golden fixture schema contracts ship in
-`tests/unit/test_stats_golden_fixtures.py` (slice 10). TextRazor golden fixtures
+labeling. `ensure_feature_marts_for_analysis()` (including `onpage_features`) runs
+from both `seo-rank analyze` and `run_phase5_stats()` so legacy run trees rebuild
+missing partitions before family source frames load. Golden fixture schema contracts ship in
+`tests/unit/test_stats_golden_fixtures.py` (similarity backends plus OnPage
+combined-mart contract in slice 9). TextRazor golden fixtures
 (slice 31) remain open.
 
 **Planned workflow integrity (Phase 6):** every required accounting unit must

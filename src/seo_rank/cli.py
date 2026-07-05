@@ -18,7 +18,12 @@ import pyarrow.parquet as pq
 import polars as pl
 
 from seo_rank.env import ensure_project_env_loaded
-from seo_rank.data import build_analysis_mart, build_feature_marts, normalize_run
+from seo_rank.data import (
+    build_analysis_mart,
+    build_feature_marts,
+    ensure_feature_marts_for_analysis,
+    normalize_run,
+)
 from seo_rank.data.scans import scan_curated_table, scan_raw_responses
 from seo_rank.progress import RunProgress
 from seo_rank.stats.artifacts import merge_keyword_analysis_frame, run_phase5_stats
@@ -1579,20 +1584,6 @@ def run_manifest_is_dry_run(run_dir: Path) -> bool:
     if isinstance(config, Mapping):
         return bool(config.get("dry_run"))
     return bool(run_payload.get("dry_run"))
-
-
-def ensure_feature_marts_for_analysis(run_dir: Path) -> None:
-    required_feature_marts = (
-        "keyword_serp",
-        "page_features",
-        "passage_features",
-        "domain_features",
-        "backlinks_analysis",
-    )
-    parquet_dir = Path(run_dir) / "parquet"
-    if all((parquet_dir / name).exists() for name in required_feature_marts):
-        return
-    build_feature_marts(Path(run_dir))
 
 
 def materialize_run_tree(

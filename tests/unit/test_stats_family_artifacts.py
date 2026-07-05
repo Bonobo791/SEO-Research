@@ -95,7 +95,7 @@ def _combined_backlinks_analysis_frame() -> pl.DataFrame:
                 "backlink_id": f"backlink-{keyword_index}-{serp_rank}",
                 "summary_response_id": f"backlinks-summary-{keyword_index}-{serp_rank}",
                 "dofollow_summary_response_id": f"backlinks-dofollow-{keyword_index}-{serp_rank}",
-                "backlinks_count": 42 + keyword_index,
+                "backlinks_count": 42 + keyword_index + serp_rank,
                 "referring_domains_count": 12 + keyword_index,
                 "dofollow_backlinks_count": 35 + keyword_index,
                 "dofollow_referring_domains_count": 10 + keyword_index,
@@ -248,10 +248,19 @@ def test_run_phase5_stats_emits_combined_family_tree_and_keeps_similarity_compat
     assert onpage_cwv_family["spearman"]["signals"]["time_to_first_byte_ms"]["status"] == "computed"
     onpage_technical_family = summary["rank_depths"]["top_20"]["families"]["onpage_technical_checks"]
     assert onpage_technical_family["regression"]["signals"]["title_too_long"]["status"] == "computed"
-    assert onpage_quality_family["plackett_luce"]["status"] == "skipped"
-    assert onpage_quality_family["plackett_luce"]["skipped_reason"] == "family_pl_deferred"
-    assert onpage_cwv_family["plackett_luce"]["status"] == "skipped"
-    assert onpage_technical_family["plackett_luce"]["status"] == "skipped"
+    assert onpage_quality_family["plackett_luce"]["signals"]["onpage_score"]["status"] in {
+        "computed",
+        "unstable",
+    }
+    assert onpage_cwv_family["plackett_luce"]["signals"]["time_to_first_byte_ms"]["status"] in {
+        "computed",
+        "unstable",
+    }
+    assert onpage_technical_family["plackett_luce"]["signals"]["title_too_long"]["status"] in {
+        "computed",
+        "unstable",
+        "skipped",
+    }
 
     assert diagnostics["metadata"]["signal_family_order"] == list(spec.signal_family_keys)
     assert diagnostics["rank_depths"]["top_20"]["families"]["textrazor_topic_score"]["diagnostics"][
@@ -267,6 +276,60 @@ def test_run_phase5_stats_emits_combined_family_tree_and_keeps_similarity_compat
     assert "#### Family: onpage_content_quality" in report
     assert "#### Family: onpage_core_web_vitals" in report
     assert "#### Family: onpage_technical_checks" in report
+
+
+def test_run_phase5_stats_rebuilds_onpage_features_for_legacy_run_directories(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    run_dir = tmp_path / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "run.json").write_text('{"catalog": {"datasets": {}}}', encoding="utf-8")
+    parquet_dir = run_dir / "parquet"
+    for name in (
+        "keyword_serp",
+        "page_features",
+        "passage_features",
+        "domain_features",
+        "backlinks_analysis",
+    ):
+        (parquet_dir / name).mkdir(parents=True)
+        pl.DataFrame([{"run_id": "run-1"}]).write_parquet(parquet_dir / name / "part-0.parquet")
+
+    (parquet_dir / "analysis_mart").mkdir(parents=True)
+    (parquet_dir / "backlinks_analysis").mkdir(parents=True, exist_ok=True)
+    (parquet_dir / "textrazor_page_metrics").mkdir(parents=True)
+    _combined_analysis_mart_frame().write_parquet(parquet_dir / "analysis_mart" / "part-0.parquet")
+    _combined_backlinks_analysis_frame().write_parquet(
+        parquet_dir / "backlinks_analysis" / "part-0.parquet"
+    )
+    _combined_textrazor_frame().write_parquet(
+        parquet_dir / "textrazor_page_metrics" / "part-0.parquet"
+    )
+
+    build_calls: list[Path] = []
+
+    def materialize_onpage_features(path: Path) -> dict[str, object]:
+        build_calls.append(path)
+        onpage_dir = path / "parquet" / "onpage_features"
+        onpage_dir.mkdir(parents=True, exist_ok=True)
+        _combined_onpage_features_frame().write_parquet(onpage_dir / "part-0.parquet")
+        return {"datasets": {}}
+
+    monkeypatch.setattr(
+        "seo_rank.data.features.build_feature_marts",
+        materialize_onpage_features,
+    )
+
+    result = run_phase5_stats(run_dir)
+
+    summary = json.loads((run_dir / "stats" / "stats_summary.json").read_text(encoding="utf-8"))
+    onpage_quality = summary["rank_depths"]["top_20"]["families"]["onpage_content_quality"]
+
+    assert build_calls == [run_dir]
+    assert result.hard_fail is False
+    assert onpage_quality["spearman"]["signals"]["onpage_score"]["status"] == "computed"
+    assert onpage_quality["regression"]["signals"]["onpage_score"]["status"] == "computed"
 
 
 def test_build_family_source_frames_loads_onpage_features_when_present(
@@ -298,6 +361,7 @@ def test_run_phase5_stats_marks_textrazor_family_blocks_skipped_on_hard_fail(
     run_dir = tmp_path / "runs" / "run-1"
     (run_dir / "parquet" / "analysis_mart").mkdir(parents=True)
     (run_dir / "parquet" / "backlinks_analysis").mkdir(parents=True)
+    (run_dir / "parquet" / "onpage_features").mkdir(parents=True)
     (run_dir / "parquet" / "textrazor_page_metrics").mkdir(parents=True)
 
     hard_fail_frame = _combined_analysis_mart_frame().with_columns(
@@ -306,6 +370,9 @@ def test_run_phase5_stats_marks_textrazor_family_blocks_skipped_on_hard_fail(
     hard_fail_frame.write_parquet(run_dir / "parquet" / "analysis_mart" / "part-0.parquet")
     _combined_backlinks_analysis_frame().write_parquet(
         run_dir / "parquet" / "backlinks_analysis" / "part-0.parquet"
+    )
+    _combined_onpage_features_frame().write_parquet(
+        run_dir / "parquet" / "onpage_features" / "part-0.parquet"
     )
     _combined_textrazor_frame().write_parquet(
         run_dir / "parquet" / "textrazor_page_metrics" / "part-0.parquet"
@@ -324,12 +391,40 @@ def test_run_phase5_stats_marks_textrazor_family_blocks_skipped_on_hard_fail(
     assert summary["rank_depths"]["top_20"]["families"]["textrazor_topic_score"]["regression"][
         "status"
     ] == "skipped"
+    assert summary["rank_depths"]["top_20"]["families"]["textrazor_topic_score"]["diagnostics"][
+        "status"
+    ] == "skipped"
+    assert summary["rank_depths"]["top_20"]["families"]["textrazor_topic_score"]["plackett_luce"][
+        "status"
+    ] == "skipped"
     assert summary["rank_depths"]["top_20"]["families"]["backlinks_counts"]["spearman"][
         "status"
     ] == "skipped"
+    assert summary["rank_depths"]["top_20"]["families"]["backlinks_counts"]["regression"][
+        "status"
+    ] == "skipped"
+    assert summary["rank_depths"]["top_20"]["families"]["backlinks_counts"]["diagnostics"][
+        "status"
+    ] == "skipped"
+    assert summary["rank_depths"]["top_20"]["families"]["backlinks_counts"]["plackett_luce"][
+        "status"
+    ] == "skipped"
+    for onpage_family_key in (
+        "onpage_content_quality",
+        "onpage_core_web_vitals",
+        "onpage_technical_checks",
+    ):
+        onpage_family = summary["rank_depths"]["top_20"]["families"][onpage_family_key]
+        assert onpage_family["spearman"]["status"] == "skipped"
+        assert onpage_family["regression"]["status"] == "skipped"
+        assert onpage_family["diagnostics"]["status"] == "skipped"
+        assert onpage_family["plackett_luce"]["status"] == "skipped"
     assert "Confirmatory inference skipped because hard-fail guardrails did not pass." in report
     assert "#### Family: textrazor_topic_score" in report
     assert "#### Family: backlinks_counts" in report
+    assert "#### Family: onpage_content_quality" in report
+    assert "#### Family: onpage_core_web_vitals" in report
+    assert "#### Family: onpage_technical_checks" in report
 
 
 def test_run_phase5_stats_marks_single_keyword_runs_as_underpowered(

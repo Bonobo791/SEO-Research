@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import polars as pl
 
 from seo_rank.cli import build_parser, main
+from seo_rank.data.features import ensure_feature_marts_for_analysis
 
 
 def test_build_parser_exposes_phase_45_commands() -> None:
@@ -120,6 +121,93 @@ def test_storage_commands_dispatch_to_data_layer(
     ]
 
 
+def test_ensure_feature_marts_for_analysis_rebuilds_when_onpage_features_missing(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    run_dir = tmp_path / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "run.json").write_text('{"catalog": {"datasets": {}}}', encoding="utf-8")
+    parquet_dir = run_dir / "parquet"
+    for name in (
+        "keyword_serp",
+        "page_features",
+        "passage_features",
+        "domain_features",
+        "backlinks_analysis",
+    ):
+        (parquet_dir / name).mkdir(parents=True)
+        pl.DataFrame([{"run_id": "run-1"}]).write_parquet(parquet_dir / name / "part-0.parquet")
+
+    build_calls: list[Path] = []
+
+    monkeypatch.setattr(
+        "seo_rank.data.features.build_feature_marts",
+        lambda path: build_calls.append(path) or {"datasets": {}},
+    )
+
+    ensure_feature_marts_for_analysis(run_dir)
+
+    assert build_calls == [run_dir]
+
+
+def test_analyze_rebuilds_onpage_features_for_legacy_run_directories(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    run_dir = tmp_path / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "run.json").write_text('{"catalog": {"datasets": {}}}', encoding="utf-8")
+    parquet_dir = run_dir / "parquet"
+    for name in (
+        "keyword_serp",
+        "page_features",
+        "passage_features",
+        "domain_features",
+        "backlinks_analysis",
+    ):
+        (parquet_dir / name).mkdir(parents=True)
+        pl.DataFrame([{"run_id": "run-1"}]).write_parquet(parquet_dir / name / "part-0.parquet")
+
+    build_calls: list[Path] = []
+
+    monkeypatch.setattr(
+        "seo_rank.data.features.build_feature_marts",
+        lambda path: build_calls.append(path) or {"datasets": {}},
+    )
+    monkeypatch.setattr(
+        "seo_rank.cli.build_analysis_mart",
+        lambda path: {"datasets": {}},
+    )
+    monkeypatch.setattr(
+        "seo_rank.cli.run_phase5_stats",
+        lambda path: SimpleNamespace(hard_fail=False),
+    )
+
+    exit_code = main(["analyze", "--run", str(run_dir)])
+
+    assert exit_code == 0
+    assert build_calls == [run_dir]
+
+
+def test_ensure_feature_marts_for_analysis_noops_without_run_json(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    run_dir = tmp_path / "runs" / "run-1"
+    (run_dir / "parquet" / "analysis_mart").mkdir(parents=True)
+
+    build_calls: list[Path] = []
+    monkeypatch.setattr(
+        "seo_rank.data.features.build_feature_marts",
+        lambda path: build_calls.append(path) or {"datasets": {}},
+    )
+
+    ensure_feature_marts_for_analysis(run_dir)
+
+    assert build_calls == []
+
+
 def test_run_stored_run_replays_existing_tree_without_provider_calls(
     tmp_path: Path,
     monkeypatch,
@@ -232,7 +320,7 @@ def test_analyze_builds_feature_marts_when_missing(
     calls: list[tuple[str, Path]] = []
 
     monkeypatch.setattr(
-        "seo_rank.cli.build_feature_marts",
+        "seo_rank.data.features.build_feature_marts",
         lambda path: calls.append(("build-features", path)) or {"datasets": {}},
     )
     monkeypatch.setattr(

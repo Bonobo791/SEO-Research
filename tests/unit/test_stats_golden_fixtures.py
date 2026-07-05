@@ -9,6 +9,12 @@ import pytest
 
 from seo_rank.stats.artifacts import run_phase5_stats
 from seo_rank.stats.spec import load_analysis_spec
+from tests.unit.test_stats_family_artifacts import (
+    _combined_analysis_mart_frame,
+    _combined_backlinks_analysis_frame,
+    _combined_onpage_features_frame,
+    _combined_textrazor_frame,
+)
 
 
 SIMILARITY_SCALES = {
@@ -311,4 +317,43 @@ def test_golden_fixture_boundaries_cover_bh_hard_fail_low_signal_influence_and_v
     assert diagnostics_single_keyword["rank_depths"]["top_20"]["regression"]["backends"]["bge"][
         "influence_sensitivity"
     ]["status"] == "computed"
+
+
+def _run_phase5_stats_with_onpage_marts(tmp_path: Path) -> tuple[object, dict[str, object]]:
+    run_dir = tmp_path / "runs" / "run-1"
+    for sub in ("analysis_mart", "backlinks_analysis", "onpage_features", "textrazor_page_metrics"):
+        (run_dir / "parquet" / sub).mkdir(parents=True)
+    _combined_analysis_mart_frame().write_parquet(run_dir / "parquet" / "analysis_mart" / "part-0.parquet")
+    _combined_backlinks_analysis_frame().write_parquet(
+        run_dir / "parquet" / "backlinks_analysis" / "part-0.parquet"
+    )
+    _combined_onpage_features_frame().write_parquet(
+        run_dir / "parquet" / "onpage_features" / "part-0.parquet"
+    )
+    _combined_textrazor_frame().write_parquet(
+        run_dir / "parquet" / "textrazor_page_metrics" / "part-0.parquet"
+    )
+    result = run_phase5_stats(run_dir)
+    summary = json.loads((run_dir / "stats" / "stats_summary.json").read_text(encoding="utf-8"))
+    return result, summary
+
+
+def test_onpage_stats_golden_contract_with_combined_feature_marts(tmp_path: Path) -> None:
+    spec = load_analysis_spec()
+    result, summary = _run_phase5_stats_with_onpage_marts(tmp_path)
+
+    assert result.hard_fail is False
+    assert summary["metadata"]["signal_family_order"] == list(spec.signal_family_keys)
+
+    onpage_quality = summary["rank_depths"]["top_20"]["families"]["onpage_content_quality"]
+    onpage_score_regression = onpage_quality["regression"]["signals"]["onpage_score"]["feature_model"]
+    onpage_score_coefficient = onpage_score_regression["coefficient"]
+
+    assert onpage_quality["spearman"]["signals"]["onpage_score"]["status"] == "computed"
+    assert onpage_quality["regression"]["signals"]["onpage_score"]["status"] == "computed"
+    assert onpage_score_coefficient == pytest.approx(0.05043754552636334)
+    assert onpage_quality["plackett_luce"]["signals"]["onpage_score"]["status"] in {
+        "computed",
+        "unstable",
+    }
 

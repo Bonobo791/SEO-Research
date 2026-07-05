@@ -11,6 +11,7 @@ from typing import Any
 import numpy as np
 import polars as pl
 
+from seo_rank.data.features import ensure_feature_marts_for_analysis
 from seo_rank.data.scans import scan_curated_table
 from seo_rank.stats.diagnostics import summarize_diagnostics_backends_from_fits
 from seo_rank.stats.diagnostics import summarize_diagnostics_families
@@ -21,6 +22,7 @@ from seo_rank.stats.panel import (
     prepare_rank_depth_panel,
 )
 from seo_rank.stats.plackett_luce import (
+    FAMILY_PLACKETT_LUCE_OPTIMIZER_OPTIONS,
     fit_plackett_luce_backends,
     summarize_plackett_luce_families,
     summarize_plackett_luce_backends_from_fits,
@@ -380,6 +382,7 @@ def build_family_depth_bundles(
         registry=spec.signal_families,
         max_rank=max_rank,
         include_iia_sensitivity=include_iia_sensitivity,
+        optimizer_options=FAMILY_PLACKETT_LUCE_OPTIMIZER_OPTIONS,
     )["families"]
 
     family_bundles: dict[str, dict[str, object]] = {}
@@ -996,6 +999,7 @@ def run_phase5_stats(
     """Load the panel, write guardrail artifacts, and return the prepared panel."""
 
     logger.info("running phase5 stats run_dir=%s", run_dir)
+    ensure_feature_marts_for_analysis(Path(run_dir))
     analysis_spec = spec or load_analysis_spec()
     result = load_analysis_panel(run_dir, spec=analysis_spec)
     rank_depth_bundles, diagnostics_by_depth = build_rank_depth_bundles(

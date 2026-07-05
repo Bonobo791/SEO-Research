@@ -673,6 +673,28 @@ def build_feature_lazyframes(
     }
 
 
+REQUIRED_FEATURE_MARTS_FOR_ANALYSIS = (
+    "keyword_serp",
+    "page_features",
+    "passage_features",
+    "domain_features",
+    "backlinks_analysis",
+    "onpage_features",
+)
+
+
+def ensure_feature_marts_for_analysis(run_dir: Path) -> None:
+    """Rebuild feature marts when a required partition is missing from the run tree."""
+
+    parquet_dir = Path(run_dir) / "parquet"
+    if all((parquet_dir / name).exists() for name in REQUIRED_FEATURE_MARTS_FOR_ANALYSIS):
+        return
+    run_json_path = Path(run_dir) / "run.json"
+    if not run_json_path.exists():
+        return
+    build_feature_marts(Path(run_dir))
+
+
 def build_feature_marts(run_dir: Path) -> dict[str, object]:
     """Materialize feature marts from stored curated tables."""
 

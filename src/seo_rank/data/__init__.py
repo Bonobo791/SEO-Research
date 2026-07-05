@@ -1,6 +1,10 @@
 """Run-scoped data layer helpers."""
 
-from seo_rank.data.features import build_analysis_mart, build_feature_marts
+from seo_rank.data.features import (
+    build_analysis_mart,
+    build_feature_marts,
+    ensure_feature_marts_for_analysis,
+)
 from seo_rank.data.marts import build_analysis_lazyframe
 from seo_rank.data.normalize import normalize_run
 from seo_rank.data.scans import scan_raw_responses
@@ -10,6 +14,7 @@ __all__ = [
     "build_analysis_mart",
     "build_analysis_lazyframe",
     "build_feature_marts",
+    "ensure_feature_marts_for_analysis",
     "normalize_run",
     "scan_raw_responses",
     "validate_frame_contract",

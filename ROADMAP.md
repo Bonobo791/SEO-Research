@@ -1470,8 +1470,9 @@ family.
      validation; `test_stats_family_artifacts.py` covers combined `stats_*`
      output for the backlinks family.
    - Raw partition CLI regressions shipped in Phase 5.91 (`test_cli_run.py`);
-     `ensure_feature_marts_for_analysis` requires `backlinks_analysis` before
-     analyze.
+     `ensure_feature_marts_for_analysis` requires `backlinks_analysis` and
+     `onpage_features` before analyze; `run_phase5_stats` calls the same guard so
+     legacy run trees cannot silently skip OnPage families.
 
 | Acceptance item | Slice(s) | Status |
 | --------------- | -------- | ------ |
@@ -1535,7 +1536,7 @@ or task id needed, and no `task_post` crawl/poll flow.
 
 ##### Dev slices
 
-**Progress:** 8 of 10 shipped.
+**Progress:** 9 of 10 shipped.
 
 1. **[x] Slice 1 — Request/schema/fixture** — `build_onpage_instant_pages_request()`,
    `DATAFORSEO_RESPONSE_SCHEMAS["onpage_instant_pages"]`,
@@ -1592,10 +1593,10 @@ or task id needed, and no `task_post` crawl/poll flow.
    exists; boolean predictors are coerced to 0/1 before pooled OLS. Registry/spec
    tests in `test_stats_families.py` and `test_stats_spec.py`; integration in
    `test_stats_family_artifacts.py`.
-9. **[ ] Slice 9 — Artifacts follow-ups** — enable family Plackett-Luce for
-   `onpage_metric` (deferred in Slice 8 with `family_pl_deferred` while Spearman,
-   regression, and diagnostics run), `ensure_feature_marts_for_analysis` includes
-   `onpage_features`, golden fixtures, hard-fail path assertions.
+9. **[x] Slice 9 — Artifacts follow-ups** — family Plackett-Luce enabled for
+   `onpage_metric` with shared-prep perf refactor (`FAMILY_PLACKETT_LUCE_OPTIMIZER_OPTIONS`,
+   zero-variance fast skip), `ensure_feature_marts_for_analysis` includes
+   `onpage_features`, golden contract + hard-fail OnPage assertions.
 10. **[ ] Slice 10 — Fixtures and regressions** — golden fixtures, stored-run
     regression, full-layer unit tests.
 
@@ -1736,7 +1737,7 @@ endpoint, no fetch/backfill wiring for the core slices.
 
 | Acceptance item | Sub-phase | Status |
 | --------------- | --------- | ------ |
-| OnPage content/CWV/technical-check families land without an `analysis_mart` schema bump | 7.1 | Open |
+| OnPage content/CWV/technical-check families land without an `analysis_mart` schema bump | 7.1 | Shipped |
 | Backlink quality + anchor-relevance families are separate from the existing counts family | 7.2 | Open |
 | Backlink velocity family lands at URL grain | 7.3 | Open |
 | Domain authority family lands at domain grain, deduped once per run | 7.4 | Open |
@@ -2103,7 +2104,9 @@ with 8.3 and is a lower-priority cross-check.
   signal family (`backlinks_metric` kind) in `analysis_spec.v1.yaml`, and
   family-aware stats/report blocks for `backlinks_count`,
   `referring_domains_count`, and `dofollow_backlinks_count`. `analysis_mart.v1`
-  unchanged; `ensure_feature_marts_for_analysis` requires `backlinks_analysis`.
+  unchanged; `ensure_feature_marts_for_analysis` requires `backlinks_analysis`
+  and `onpage_features`; `run_phase5_stats` invokes the same guard before loading
+  family source frames.
 - **Phase 6.1 Slice 3 partial (2026-07-03):** `src/seo_rank/data/ranks.py`
   ships Polars-lazy `add_within_keyword_similarity_ranks()` with unit tests in
   `tests/unit/test_within_keyword_ranks.py`; mart wiring remains Slice 4.

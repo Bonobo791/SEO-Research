@@ -30,6 +30,7 @@ DEFAULT_MAX_SERP_RANK = 20
 HESSIAN_CONDITION_NUMBER_THRESHOLD = 100.0
 OPTIMIZER_GRADIENT_TOLERANCE = 1e-6
 FORMULA = "rank_ordered_logit ~ similarity + log(page_text_length + 1)"
+FAMILY_PLACKETT_LUCE_OPTIMIZER_OPTIONS: dict[str, object] = {"maxiter": 250}
 
 
 @dataclass(frozen=True)
@@ -81,9 +82,15 @@ def summarize_plackett_luce_families(
     registry: SignalFamilyRegistry,
     max_rank: int = DEFAULT_MAX_SERP_RANK,
     include_iia_sensitivity: bool = False,
+    optimizer_options: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Summarize rank-ordered logit models for every family in the registry."""
 
+    family_optimizer_options = (
+        optimizer_options
+        if optimizer_options is not None
+        else FAMILY_PLACKETT_LUCE_OPTIMIZER_OPTIONS
+    )
     return {
         "families": {
             family.key: summarize_plackett_luce_family(
@@ -91,6 +98,7 @@ def summarize_plackett_luce_families(
                 family=family,
                 max_rank=max_rank,
                 include_iia_sensitivity=include_iia_sensitivity,
+                optimizer_options=family_optimizer_options,
             )
             for family in registry.families
         }
@@ -136,15 +144,47 @@ def fit_plackett_luce_for_score_column(
         logger.debug("plackett-luce backend=%s skipped: empty model data", label)
         return None
 
-    grouped, duplicate_serp_rank_keyword_count = _build_keyword_groups(
+    return fit_plackett_luce_for_prepared_model_data(
         raw_model_data,
+        label=label,
+        score_column=score_column,
+        optimizer_options=optimizer_options,
+    )
+
+
+def fit_plackett_luce_for_prepared_model_data(
+    raw_model_data: pd.DataFrame,
+    *,
+    label: str,
+    score_column: str,
+    optimizer_options: dict[str, object] | None = None,
+    sorted_model_data: pd.DataFrame | None = None,
+) -> PlackettLuceFit | None:
+    """Fit a PL model from an already prepared pandas panel."""
+
+    model_data = sorted_model_data if sorted_model_data is not None else raw_model_data
+    if score_column not in model_data.columns:
+        logger.debug("plackett-luce backend=%s skipped: missing score column", label)
+        return None
+
+    if _pl_signal_variance(model_data, score_column) == 0.0:
+        logger.debug(
+            "plackett-luce backend=%s skipped: insufficient signal variance score_column=%s",
+            label,
+            score_column,
+        )
+        return None
+
+    grouped, duplicate_serp_rank_keyword_count = _build_keyword_groups(
+        model_data,
         score_column,
+        sorted_model_data=model_data,
     )
     if not grouped:
         logger.debug("plackett-luce backend=%s skipped: no keyword groups", label)
         return None
 
-    model_data = pd.concat([group["frame"] for group in grouped], ignore_index=True)
+    fitted_model_data = pd.concat([group["frame"] for group in grouped], ignore_index=True)
 
     if max(group["choice_set_size"] for group in grouped) < 2:
         logger.debug("plackett-luce backend=%s skipped: choice set smaller than 2", label)
@@ -185,7 +225,7 @@ def fit_plackett_luce_for_score_column(
     return PlackettLuceFit(
         backend=label,
         score_column=score_column,
-        model_data=model_data,
+        model_data=fitted_model_data,
         choice_set_sizes=choice_set_sizes,
         duplicate_serp_rank_keyword_count=duplicate_serp_rank_keyword_count,
         params=params,
@@ -193,7 +233,7 @@ def fit_plackett_luce_for_score_column(
         information=information,
         log_likelihood=log_likelihood,
         optimizer=optimizer_result,
-        similarity_within_keyword_sd=within_keyword_sd_rms(model_data, score_column),
+        similarity_within_keyword_sd=within_keyword_sd_rms(fitted_model_data, score_column),
     )
 
 
@@ -231,6 +271,7 @@ def summarize_plackett_luce_family(
     family: SignalFamily,
     max_rank: int = DEFAULT_MAX_SERP_RANK,
     include_iia_sensitivity: bool = False,
+    optimizer_options: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Summarize rank-ordered logit for one signal family."""
 
@@ -260,15 +301,40 @@ def summarize_plackett_luce_family(
             "skipped_reason": "no_usable_rows",
         }
 
+    prepared = _prepare_plackett_luce_frame(source_frame, max_rank=max_rank)
+    if prepared.is_empty():
+        return {
+            "family": family.key,
+            "kind": family.kind,
+            "source_mart": source_mart,
+            "signal_columns": list(family.signal_columns),
+            "signals": {},
+            "backends": {},
+            "status": "skipped",
+            "skipped_reason": "no_usable_rows",
+        }
+
+    raw_model_data = prepared.to_pandas().copy()
+    sorted_model_data = raw_model_data.sort_values(
+        by=["keyword_order", "target_keyword_id", "serp_rank", "serp_item_id"],
+        kind="mergesort",
+    )
+
+    family_optimizer_options = (
+        optimizer_options
+        if optimizer_options is not None
+        else FAMILY_PLACKETT_LUCE_OPTIMIZER_OPTIONS
+    )
     signal_summaries: dict[str, dict[str, object]] = {}
     for signal_column in family.signal_columns:
-        signal_summaries[signal_column] = summarize_plackett_luce_for_score_column(
-            source_frame,
+        signal_summaries[signal_column] = _summarize_plackett_luce_for_prepared_model_data(
+            raw_model_data,
+            sorted_model_data=sorted_model_data,
             label=family.key,
             score_column=signal_column,
-            max_rank=max_rank,
             include_diagnostics=True,
             include_iia_sensitivity=include_iia_sensitivity,
+            optimizer_options=family_optimizer_options,
         )
     status = (
         "computed"
@@ -705,16 +771,92 @@ def _prepare_plackett_luce_frame(
     ).drop_nulls(list(PLACKET_LUCE_REQUIRED_COLUMNS))
 
 
+def _summarize_plackett_luce_for_prepared_model_data(
+    raw_model_data: pd.DataFrame,
+    *,
+    sorted_model_data: pd.DataFrame,
+    label: str,
+    score_column: str,
+    include_diagnostics: bool = True,
+    include_iia_sensitivity: bool = False,
+    optimizer_options: dict[str, object] | None = None,
+) -> dict[str, object]:
+    model_data = sorted_model_data
+    if score_column not in model_data.columns:
+        return {
+            "backend": label,
+            "score_column": score_column,
+            "status": "skipped",
+            "skipped_reason": "missing_signal_column",
+            "row_count": int(len(raw_model_data)),
+            "keyword_count": int(raw_model_data["target_keyword_id"].nunique()),
+        }
+
+    usable = model_data[[score_column, "target_keyword_id"]].dropna(subset=[score_column])
+    if usable.empty:
+        return {
+            "backend": label,
+            "score_column": score_column,
+            "status": "skipped",
+            "skipped_reason": "no_usable_rows",
+            "row_count": 0,
+            "keyword_count": 0,
+        }
+    if _pl_signal_variance(model_data, score_column) == 0.0:
+        return {
+            "backend": label,
+            "score_column": score_column,
+            "status": "skipped",
+            "skipped_reason": "insufficient_signal_variance",
+            "row_count": int(len(usable)),
+            "keyword_count": int(usable["target_keyword_id"].nunique()),
+        }
+
+    fit = fit_plackett_luce_for_prepared_model_data(
+        raw_model_data,
+        label=label,
+        score_column=score_column,
+        sorted_model_data=sorted_model_data,
+        optimizer_options=optimizer_options,
+    )
+    return _summarize_backend_plackett_luce_result(
+        pl.DataFrame(raw_model_data),
+        backend=label,
+        fit=fit,
+        include_diagnostics=include_diagnostics,
+        include_iia_sensitivity=include_iia_sensitivity,
+        max_rank=int(raw_model_data["serp_rank"].max()) if not raw_model_data.empty else DEFAULT_MAX_SERP_RANK,
+        score_column=score_column,
+    )
+
+
+def _coerce_pl_predictor(model_data: pd.DataFrame, score_column: str) -> None:
+    if pd.api.types.is_bool_dtype(model_data[score_column]):
+        model_data[score_column] = model_data[score_column].astype(float)
+
+
+def _pl_signal_variance(model_data: pd.DataFrame, score_column: str) -> float:
+    variance_frame = model_data[[score_column, "target_keyword_id"]].copy()
+    _coerce_pl_predictor(variance_frame, score_column)
+    usable = variance_frame.dropna(subset=[score_column])
+    if usable.empty:
+        return 0.0
+    return float(within_keyword_sd_rms(usable, score_column))
+
+
 def _build_keyword_groups(
     model_data: pd.DataFrame,
     score_column: str,
+    *,
+    sorted_model_data: pd.DataFrame | None = None,
 ) -> tuple[list[dict[str, object]], int]:
     groups: list[dict[str, object]] = []
     duplicate_serp_rank_keyword_count = 0
-    sorted_model_data = model_data.sort_values(
-        by=["keyword_order", "target_keyword_id", "serp_rank", "serp_item_id"],
-        kind="mergesort",
-    )
+    if sorted_model_data is None:
+        sorted_model_data = model_data.sort_values(
+            by=["keyword_order", "target_keyword_id", "serp_rank", "serp_item_id"],
+            kind="mergesort",
+        )
     for keyword_id, keyword_frame in sorted_model_data.groupby("target_keyword_id", sort=False):
         sorted_frame = keyword_frame.sort_values(
             by=["serp_rank", "serp_item_id"],
@@ -738,7 +880,11 @@ def _build_keyword_groups(
 
 
 def _feature_matrix(frame: pd.DataFrame, score_column: str) -> np.ndarray:
-    similarity = frame[score_column].to_numpy(dtype=float)
+    similarity_series = frame[score_column]
+    if pd.api.types.is_bool_dtype(similarity_series):
+        similarity = similarity_series.to_numpy(dtype=float)
+    else:
+        similarity = similarity_series.to_numpy(dtype=float)
     length = np.log(frame["page_text_length"].to_numpy(dtype=float) + 1.0)
     return np.column_stack([similarity, length])
 

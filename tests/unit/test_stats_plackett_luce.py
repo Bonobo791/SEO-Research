@@ -116,18 +116,73 @@ def test_stats_package_exports_plackett_luce_module_surface() -> None:
     assert stats.plackett_luce.__name__ == "seo_rank.stats.plackett_luce"
 
 
-def test_summarize_plackett_luce_family_defers_onpage_metric_families() -> None:
+def test_summarize_plackett_luce_family_reuses_single_frame_prep(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     analysis_spec = load_analysis_spec()
-    family = analysis_spec.signal_families.family("onpage_content_quality")
+    family = analysis_spec.signal_families.family("gemini_doc_retrieval")
+    frame = _sample_plackett_luce_panel()
+    prep_calls = 0
+    original = plackett_luce_module._prepare_plackett_luce_frame
+
+    def counting_prep(*args, **kwargs):
+        nonlocal prep_calls
+        prep_calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(plackett_luce_module, "_prepare_plackett_luce_frame", counting_prep)
 
     summary = summarize_plackett_luce_family(
-        {"onpage_features": _sample_plackett_luce_panel()},
+        {"analysis_mart": frame},
         family=family,
     )
 
-    assert summary["status"] == "skipped"
-    assert summary["skipped_reason"] == "family_pl_deferred"
-    assert summary["signals"] == {}
+    assert prep_calls == 1
+    assert summary["status"] == "computed"
+    assert len(summary["signals"]) == len(family.signal_columns)
+
+
+def test_summarize_plackett_luce_family_skips_constant_boolean_signal_without_optimizer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    analysis_spec = load_analysis_spec()
+    family = analysis_spec.signal_families.family("onpage_technical_checks")
+    frame = _sample_plackett_luce_panel().with_columns(
+        pl.lit(True).alias("title_too_long"),
+    )
+    optimize_calls = 0
+    original = plackett_luce_module._maximize_log_likelihood
+
+    def counting_optimize(*args, **kwargs):
+        nonlocal optimize_calls
+        optimize_calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(plackett_luce_module, "_maximize_log_likelihood", counting_optimize)
+
+    summary = summarize_plackett_luce_family(
+        {"onpage_features": frame},
+        family=family,
+    )
+
+    constant_summary = summary["signals"]["title_too_long"]
+    assert constant_summary["status"] == "skipped"
+    assert constant_summary["skipped_reason"] == "insufficient_signal_variance"
+    assert optimize_calls < len(family.signal_columns)
+
+
+def test_onpage_metric_families_enable_family_plackett_luce() -> None:
+    analysis_spec = load_analysis_spec()
+    from seo_rank.stats.families import plackett_luce_enabled_for_family
+
+    for family_key in (
+        "onpage_content_quality",
+        "onpage_core_web_vitals",
+        "onpage_technical_checks",
+    ):
+        family = analysis_spec.signal_families.family(family_key)
+        assert family.kind == "onpage_metric"
+        assert plackett_luce_enabled_for_family(family) is True
 
 
 def test_summarize_backend_plackett_luce_fits_rank_ordered_logit_with_clustered_se() -> None:

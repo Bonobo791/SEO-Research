@@ -26,13 +26,12 @@ SOURCE_MART_BY_KIND = {
     "textrazor_structural": "textrazor_page_metrics",
 }
 
-# Family-level Plackett-Luce is expensive (one optimizer fit per signal × depth).
-# OnPage families are registered in Slice 8 with Spearman/regression/diagnostics;
-# defer family PL until Slice 9 performance work lands.
+# Family-level Plackett-Luce runs one optimizer fit per signal × rank depth.
 FAMILY_PLACKETT_LUCE_KINDS = frozenset(
     {
         "similarity",
         "backlinks_metric",
+        "onpage_metric",
         "textrazor_scalar",
         "textrazor_structural",
     }

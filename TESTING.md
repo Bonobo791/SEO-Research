@@ -321,8 +321,20 @@ exist.
   `test_run_phase5_stats_emits_combined_family_tree_and_keeps_similarity_compatibility`).
   `tests/unit/test_stats_regression.py` covers boolean OnPage predictors as numeric
   OLS terms (`test_summarize_regression_for_boolean_onpage_predictor_uses_numeric_encoding`).
-  Family-level Plackett-Luce for `onpage_metric` is deferred until Slice 9
-  (`family_pl_deferred`; see `test_onpage_metric_families_defer_family_plackett_luce`).
+- **OnPage stats artifacts (Phase 7.1 slice 9)** —
+  `tests/unit/test_stats_plackett_luce.py` covers shared family PL prep reuse,
+  zero-variance boolean skip, and enabled `onpage_metric` PL
+  (`test_summarize_plackett_luce_family_reuses_single_frame_prep`,
+  `test_onpage_metric_families_enable_family_plackett_luce`).
+  `tests/unit/test_cli_surfaces.py` covers `ensure_feature_marts_for_analysis`
+  rebuilding when `onpage_features` is missing
+  (`test_ensure_feature_marts_for_analysis_rebuilds_when_onpage_features_missing`,
+  `test_analyze_rebuilds_onpage_features_for_legacy_run_directories`).
+  `tests/unit/test_stats_family_artifacts.py` covers the same upgrade path through
+  `run_phase5_stats` (`test_run_phase5_stats_rebuilds_onpage_features_for_legacy_run_directories`).
+  `tests/unit/test_stats_golden_fixtures.py` pins OnPage contract fields with
+  combined feature marts (`test_onpage_stats_golden_contract_with_combined_feature_marts`).
+  Combined family-artifacts integration completes in ≤60s with full OnPage PL enabled.
 
 ## Shipped tests — Phase 6.2 backlinks count analysis (Jul 2026)
 
