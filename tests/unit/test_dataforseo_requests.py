@@ -12,11 +12,13 @@ from seo_rank.dataforseo import (
     build_backlinks_summary_request,
     backlinks_response_has_variant_aggregates,
     build_keyword_expansion_request,
+    build_onpage_instant_pages_request,
     build_page_text_request,
     build_serp_request,
     execute_dataforseo_request,
     fixture_backlinks_response,
     fixture_keyword_expansion_response,
+    fixture_onpage_instant_pages_response,
     fixture_page_text_response,
     fixture_serp_response,
     format_backlinks_target,
@@ -82,6 +84,24 @@ def test_build_page_text_request_uses_content_parsing_endpoint() -> None:
             "accept_language": "en-US",
             "browser_preset": "desktop",
             "store_raw_html": True,
+        }
+    ]
+
+
+def test_build_onpage_instant_pages_request_uses_live_endpoint_and_flags() -> None:
+    request = build_onpage_instant_pages_request("https://example.com/technical-seo/1")
+
+    assert request.method == "POST"
+    assert request.path == "/v3/on_page/instant_pages/live"
+    assert request.body == [
+        {
+            "url": "https://example.com/technical-seo/1",
+            "enable_javascript": True,
+            "enable_browser_rendering": True,
+            "load_resources": True,
+            "validate_micromarkup": True,
+            "accept_language": "en-US",
+            "browser_preset": "desktop",
         }
     ]
 
@@ -417,6 +437,10 @@ def test_execute_dataforseo_request_posts_json_with_basic_auth() -> None:
                 "technical seo",
             ),
         ),
+        (
+            "onpage_instant_pages",
+            fixture_onpage_instant_pages_response("https://example.com/technical-seo/1"),
+        ),
     ],
 )
 def test_validate_dataforseo_response_accepts_known_endpoint_schemas(
@@ -424,6 +448,84 @@ def test_validate_dataforseo_response_accepts_known_endpoint_schemas(
     response: dict[str, object],
 ) -> None:
     assert validate_dataforseo_response(endpoint, response) is response
+
+
+def test_validate_dataforseo_response_rejects_onpage_instant_pages_score_drift() -> None:
+    response = fixture_onpage_instant_pages_response("https://example.com/technical-seo/1")
+    response["tasks"][0]["result"][0]["items"][0]["onpage_score"] = "not-a-number"
+
+    with pytest.raises(DataForSeoParseError) as exc_info:
+        validate_dataforseo_response("onpage_instant_pages", response)
+
+    error = exc_info.value
+    assert error.endpoint == "onpage_instant_pages"
+    assert error.path == "tasks[0].result[0].items[0].onpage_score"
+    assert error.expected in {"int", "int or float"}
+    assert "got str" in str(error)
+
+
+@pytest.mark.parametrize(
+    "nullable_field",
+    [
+        "page_timing",
+        "checks",
+        "content",
+        "total_transfer_size",
+        "has_micromarkup",
+        "has_micromarkup_errors",
+    ],
+)
+def test_validate_dataforseo_response_accepts_onpage_instant_pages_null_sections(
+    nullable_field: str,
+) -> None:
+    response = fixture_onpage_instant_pages_response("https://example.com/technical-seo/1")
+    response["tasks"][0]["result"][0]["items"][0][nullable_field] = None
+
+    assert validate_dataforseo_response("onpage_instant_pages", response) is response
+
+
+@pytest.mark.parametrize(
+    "missing_field",
+    [
+        "page_timing",
+        "checks",
+        "content",
+        "total_transfer_size",
+        "has_micromarkup",
+        "has_micromarkup_errors",
+    ],
+)
+def test_validate_dataforseo_response_accepts_onpage_instant_pages_missing_sections(
+    missing_field: str,
+) -> None:
+    response = fixture_onpage_instant_pages_response("https://example.com/technical-seo/1")
+    del response["tasks"][0]["result"][0]["items"][0][missing_field]
+
+    assert validate_dataforseo_response("onpage_instant_pages", response) is response
+
+
+def test_validate_dataforseo_response_accepts_onpage_instant_pages_sparse_item() -> None:
+    response = {
+        "status_code": 20000,
+        "tasks": [
+            {
+                "status_code": 20000,
+                "result": [
+                    {
+                        "items_count": 1,
+                        "items": [
+                            {
+                                "url": "https://example.com/sparse",
+                                "onpage_score": 42.0,
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+
+    assert validate_dataforseo_response("onpage_instant_pages", response) is response
 
 
 def test_validate_dataforseo_response_rejects_schema_drift_with_typed_error() -> None:

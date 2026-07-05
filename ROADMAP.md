@@ -1537,7 +1537,7 @@ or task id needed, and no `task_post` crawl/poll flow.
 
 **Progress:** 0 of 10 shipped.
 
-1. **[ ] Slice 1 — Request/schema/fixture** — `build_onpage_instant_pages_request()`,
+1. **[x] Slice 1 — Request/schema/fixture** — `build_onpage_instant_pages_request()`,
    `DATAFORSEO_RESPONSE_SCHEMAS["onpage_instant_pages"]`,
    `fixture_onpage_instant_pages_response()` in `dataforseo.py`.
 2. **[ ] Slice 2 — Offline tests** — request shape, schema-accept, schema-drift

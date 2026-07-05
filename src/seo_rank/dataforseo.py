@@ -25,6 +25,7 @@ DATAFORSEO_KEYWORD_EXPANSION_PATH = (
 )
 DATAFORSEO_SERP_PATH = "/v3/serp/google/organic/live/advanced"
 DATAFORSEO_PAGE_TEXT_PATH = "/v3/on_page/content_parsing/live"
+DATAFORSEO_ONPAGE_INSTANT_PAGES_PATH = "/v3/on_page/instant_pages/live"
 DATAFORSEO_BACKLINKS_PATH = "/v3/backlinks/summary/live"
 BACKLINKS_QUERY_SUMMARY = "summary"
 BACKLINKS_QUERY_DOFOLLOW = "dofollow"
@@ -112,6 +113,46 @@ DATAFORSEO_RESPONSE_SCHEMAS: dict[str, tuple[DataForSeoFieldSchema, ...]] = {
     "page_text": (
         DataForSeoFieldSchema(("tasks",), list),
         DataForSeoFieldSchema(("tasks", "[]", "result"), (list, type(None))),
+    ),
+    "onpage_instant_pages": (
+        DataForSeoFieldSchema(("tasks",), list),
+        DataForSeoFieldSchema(("tasks", "[]", "result"), (list, type(None))),
+        DataForSeoFieldSchema(
+            ("tasks", "[]", "result", "[]", "items"),
+            list,
+        ),
+        DataForSeoFieldSchema(
+            ("tasks", "[]", "result", "[]", "items", "[]", "url"),
+            str,
+        ),
+        DataForSeoFieldSchema(
+            ("tasks", "[]", "result", "[]", "items", "[]", "onpage_score"),
+            (int, float),
+        ),
+        DataForSeoFieldSchema(
+            ("tasks", "[]", "result", "[]", "items", "[]", "page_timing"),
+            (Mapping, type(None)),
+        ),
+        DataForSeoFieldSchema(
+            ("tasks", "[]", "result", "[]", "items", "[]", "checks"),
+            (Mapping, type(None)),
+        ),
+        DataForSeoFieldSchema(
+            ("tasks", "[]", "result", "[]", "items", "[]", "content"),
+            (Mapping, type(None)),
+        ),
+        DataForSeoFieldSchema(
+            ("tasks", "[]", "result", "[]", "items", "[]", "total_transfer_size"),
+            (int, type(None)),
+        ),
+        DataForSeoFieldSchema(
+            ("tasks", "[]", "result", "[]", "items", "[]", "has_micromarkup"),
+            (bool, type(None)),
+        ),
+        DataForSeoFieldSchema(
+            ("tasks", "[]", "result", "[]", "items", "[]", "has_micromarkup_errors"),
+            (bool, type(None)),
+        ),
     ),
     "backlinks_summary": (
         DataForSeoFieldSchema(("tasks",), list),
@@ -211,6 +252,32 @@ def build_page_text_request(
                 "accept_language": "en-US",
                 "browser_preset": "desktop",
                 "store_raw_html": True,
+            }
+        ],
+    )
+
+
+def build_onpage_instant_pages_request(url: str) -> ProviderRequest:
+    """Build a DataForSEO OnPage instant_pages request without executing it.
+
+    Uses browser rendering and micromarkup validation so CWV and structured-data
+    signals land in one live response (Phase 7.1). Micromarkup count field paths
+    for curated columns are resolved in slice 6 when normalizing stored payloads.
+    """
+
+    return ProviderRequest(
+        method="POST",
+        path=DATAFORSEO_ONPAGE_INSTANT_PAGES_PATH,
+        headers={"Content-Type": "application/json"},
+        body=[
+            {
+                "url": url,
+                "enable_javascript": True,
+                "enable_browser_rendering": True,
+                "load_resources": True,
+                "validate_micromarkup": True,
+                "accept_language": "en-US",
+                "browser_preset": "desktop",
             }
         ],
     )
@@ -496,6 +563,8 @@ def _validate_dataforseo_field(
                 actual=current,
             )
         if part not in current:
+            if _schema_allows_null(schema.expected_type):
+                return
             raise DataForSeoParseError(
                 endpoint=endpoint,
                 path=_join_schema_path(rendered_path, part),
@@ -512,6 +581,12 @@ def _join_schema_path(prefix: str, part: str) -> str:
     if not prefix:
         return part
     return f"{prefix}.{part}"
+
+
+def _schema_allows_null(expected_type: type | tuple[type, ...]) -> bool:
+    if isinstance(expected_type, tuple):
+        return type(None) in expected_type
+    return expected_type is type(None)
 
 
 def _expected_type_name(expected_type: type | tuple[type, ...]) -> str:
@@ -1030,6 +1105,64 @@ def fixture_page_text_response(url: str, keyword: str) -> dict[str, object]:
 
                             Site architecture, internal links, and index controls make audit findings actionable.
                         """,
+                    }
+                ],
+            }
+        ],
+    }
+
+
+def fixture_onpage_instant_pages_response(
+    url: str,
+    *,
+    target_keyword: str | None = None,
+) -> dict[str, object]:
+    """Return a deterministic DataForSEO-shaped OnPage instant_pages fixture."""
+
+    _ = target_keyword
+    return {
+        "url": url,
+        "status_code": 20000,
+        "tasks": [
+            {
+                "id": "fixture-onpage-instant-pages",
+                "status_code": 20000,
+                "result": [
+                    {
+                        "items_count": 1,
+                        "items": [
+                            {
+                                "resource_type": "html",
+                                "status_code": 200,
+                                "url": url,
+                                "onpage_score": 85.5,
+                                "total_transfer_size": 120_000,
+                                "has_micromarkup": True,
+                                "has_micromarkup_errors": False,
+                                "page_timing": {
+                                    "waiting_time": 120,
+                                    "largest_contentful_paint": 2500.0,
+                                    "cumulative_layout_shift": 0.05,
+                                },
+                                "checks": {
+                                    "is_https": True,
+                                    "canonical": True,
+                                    "no_h1_tag": False,
+                                    "has_render_blocking_resources": False,
+                                    "title_too_long": False,
+                                    "title_too_short": False,
+                                    "no_title": False,
+                                },
+                                "content": {
+                                    "plain_text_word_count": 432.0,
+                                    "plain_text_rate": 0.02,
+                                    "flesch_kincaid_readability_index": 58.0,
+                                    "coleman_liau_readability_index": 8.6,
+                                    "smog_readability_index": 17.0,
+                                    "dale_chall_readability_index": 7.1,
+                                },
+                            }
+                        ],
                     }
                 ],
             }
