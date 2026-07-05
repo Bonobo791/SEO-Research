@@ -572,7 +572,7 @@ def test_run_live_providers_writes_backlink_raw_responses(
             return fixture_serp_response("technical seo")
         if url.endswith("/on_page/content_parsing/live"):
             return fixture_page_text_response(request_body[0]["url"], "technical seo")
-        if url.endswith("/on_page/instant_pages/live"):
+        if url.endswith("/on_page/instant_pages"):
             return fixture_onpage_instant_pages_response(request_body[0]["url"])
         if url.endswith("/backlinks/summary/live"):
             target = request_body[0]["target"]
@@ -665,7 +665,7 @@ def test_run_live_providers_persists_backlinks_before_later_provider_failure(
             return fixture_serp_response("technical seo")
         if url.endswith("/backlinks/summary/live"):
             return fixture_backlinks_response_for_request_body(request_body)
-        if url.endswith("/on_page/instant_pages/live"):
+        if url.endswith("/on_page/instant_pages"):
             return fixture_onpage_instant_pages_response(request_body[0]["url"])
         if url.endswith("/on_page/content_parsing/live"):
             raise DataForSeoClientError("page_text request failed after backlinks")
@@ -859,7 +859,7 @@ def test_fetch_onpage_signals_for_urls_persists_partition_once_per_batch(
         nonlocal api_calls
         del method, headers, timeout
         request_body = json.loads(body.decode("utf-8"))
-        assert url.endswith("/on_page/instant_pages/live")
+        assert url.endswith("/on_page/instant_pages")
         api_calls += 1
         return fixture_onpage_instant_pages_response(request_body[0]["url"])
 
@@ -972,7 +972,7 @@ def test_build_live_payload_includes_backlinks_in_raw_provider_data(
             return fixture_serp_response("technical seo")
         if url.endswith("/on_page/content_parsing/live"):
             return fixture_page_text_response(request_body[0]["url"], "technical seo")
-        if url.endswith("/on_page/instant_pages/live"):
+        if url.endswith("/on_page/instant_pages"):
             return fixture_onpage_instant_pages_response(request_body[0]["url"])
         if url.endswith("/backlinks/summary/live"):
             return fixture_backlinks_response_for_request_body(request_body)
@@ -1042,7 +1042,7 @@ def test_run_stored_run_cli_live_providers_fetches_onpage_when_missing(
         request_body = json.loads(body.decode("utf-8"))
         if url.endswith("/backlinks/summary/live"):
             return fixture_backlinks_response_for_request_body(request_body)
-        if url.endswith("/on_page/instant_pages/live"):
+        if url.endswith("/on_page/instant_pages"):
             target_url = request_body[0]["url"]
             live_onpage_targets.append(target_url)
             return fixture_onpage_instant_pages_response(target_url)
@@ -1620,7 +1620,7 @@ def test_run_stored_run_backfills_only_missing_backlinks_in_place(
             return fixture_serp_response("technical seo")
         if url.endswith("/on_page/content_parsing/live"):
             return fixture_page_text_response(request_body[0]["url"], "technical seo")
-        if url.endswith("/on_page/instant_pages/live"):
+        if url.endswith("/on_page/instant_pages"):
             return fixture_onpage_instant_pages_response(request_body[0]["url"])
         if url.endswith("/backlinks/summary/live"):
             target = request_body[0]["target"]
@@ -1749,7 +1749,7 @@ def test_run_stored_run_backfills_only_missing_onpage_in_place(
             return fixture_serp_response("technical seo")
         if url.endswith("/on_page/content_parsing/live"):
             return fixture_page_text_response(request_body[0]["url"], "technical seo")
-        if url.endswith("/on_page/instant_pages/live"):
+        if url.endswith("/on_page/instant_pages"):
             target_url = request_body[0]["url"]
             live_onpage_targets.append(target_url)
             return fixture_onpage_instant_pages_response(target_url)
@@ -1865,7 +1865,7 @@ def test_run_stored_run_does_not_refetch_onpage_when_partition_complete(
             return fixture_serp_response("technical seo")
         if url.endswith("/on_page/content_parsing/live"):
             return fixture_page_text_response(request_body[0]["url"], "technical seo")
-        if url.endswith("/on_page/instant_pages/live"):
+        if url.endswith("/on_page/instant_pages"):
             target_url = request_body[0]["url"]
             live_onpage_targets.append(target_url)
             return fixture_onpage_instant_pages_response(target_url)
@@ -1952,7 +1952,7 @@ def test_run_stored_run_refetches_empty_onpage_partition_row(
             return fixture_serp_response("technical seo")
         if url.endswith("/on_page/content_parsing/live"):
             return fixture_page_text_response(request_body[0]["url"], "technical seo")
-        if url.endswith("/on_page/instant_pages/live"):
+        if url.endswith("/on_page/instant_pages"):
             target_url = request_body[0]["url"]
             live_onpage_targets.append(target_url)
             return fixture_onpage_instant_pages_response(target_url)
@@ -2070,7 +2070,7 @@ def test_run_stored_run_cli_live_providers_backfills_backlinks_when_stored_confi
     ) -> dict[str, object]:
         del method, headers, timeout
         request_body = json.loads(body.decode("utf-8"))
-        if url.endswith("/on_page/instant_pages/live"):
+        if url.endswith("/on_page/instant_pages"):
             return fixture_onpage_instant_pages_response(request_body[0]["url"])
         if url.endswith("/backlinks/summary/live"):
             target = request_body[0]["target"]
@@ -2170,7 +2170,7 @@ def test_run_stored_run_live_providers_refetches_legacy_shaped_backlinks(
             return fixture_serp_response("technical seo")
         if url.endswith("/on_page/content_parsing/live"):
             return fixture_page_text_response(request_body[0]["url"], "technical seo")
-        if url.endswith("/on_page/instant_pages/live"):
+        if url.endswith("/on_page/instant_pages"):
             return fixture_onpage_instant_pages_response(request_body[0]["url"])
         if url.endswith("/backlinks/summary/live"):
             target = request_body[0]["target"]
@@ -2315,7 +2315,7 @@ def test_run_stored_run_reuses_successful_empty_backlink_summaries(
             return fixture_serp_response("technical seo")
         if url.endswith("/on_page/content_parsing/live"):
             return fixture_page_text_response(request_body[0]["url"], "technical seo")
-        if url.endswith("/on_page/instant_pages/live"):
+        if url.endswith("/on_page/instant_pages"):
             return fixture_onpage_instant_pages_response(request_body[0]["url"])
         if url.endswith("/backlinks/summary/live"):
             target = request_body[0]["target"]
@@ -2431,7 +2431,7 @@ def test_run_stored_run_skip_textrazor_disables_stored_live_textrazor(
             return fixture_serp_response("technical seo")
         if url.endswith("/on_page/content_parsing/live"):
             return fixture_page_text_response(request_body[0]["url"], "technical seo")
-        if url.endswith("/on_page/instant_pages/live"):
+        if url.endswith("/on_page/instant_pages"):
             return fixture_onpage_instant_pages_response(request_body[0]["url"])
         if url.endswith("/backlinks/summary/live"):
             return fixture_backlinks_response_for_request_body(request_body)
@@ -2874,7 +2874,7 @@ def test_run_stored_run_refreshes_only_stale_serps_in_place(
                     }
                 ],
             }
-        if url.endswith("/on_page/instant_pages/live"):
+        if url.endswith("/on_page/instant_pages"):
             request_body = json.loads(body.decode("utf-8"))
             return fixture_onpage_instant_pages_response(request_body[0]["url"])
         if url.endswith("/backlinks/summary/live"):
@@ -3180,7 +3180,7 @@ def test_run_live_providers_without_optional_flags_does_not_require_optional_cre
                     }
                 ],
             }
-        if url.endswith("/on_page/instant_pages/live"):
+        if url.endswith("/on_page/instant_pages"):
             request_body = json.loads(body.decode("utf-8"))
             return fixture_onpage_instant_pages_response(request_body[0]["url"])
         if url.endswith("/backlinks/summary/live"):
@@ -3531,7 +3531,7 @@ def test_run_live_gemini_uses_live_gemini_page_scores(
                     }
                 ],
             }
-        if url.endswith("/on_page/instant_pages/live"):
+        if url.endswith("/on_page/instant_pages"):
             request_body = json.loads(body.decode("utf-8"))
             return fixture_onpage_instant_pages_response(request_body[0]["url"])
         if url.endswith("/backlinks/summary/live"):
@@ -3699,7 +3699,7 @@ def test_run_live_bge_replaces_only_bge_page_scores(
                     }
                 ],
             }
-        if url.endswith("/on_page/instant_pages/live"):
+        if url.endswith("/on_page/instant_pages"):
             request_body = json.loads(body.decode("utf-8"))
             return fixture_onpage_instant_pages_response(request_body[0]["url"])
         if url.endswith("/backlinks/summary/live"):
@@ -3886,7 +3886,7 @@ def test_run_live_providers_skips_textrazor_when_not_requested(
                     }
                 ],
             }
-        if url.endswith("/on_page/instant_pages/live"):
+        if url.endswith("/on_page/instant_pages"):
             request_body = json.loads(body.decode("utf-8"))
             return fixture_onpage_instant_pages_response(request_body[0]["url"])
         if url.endswith("/backlinks/summary/live"):
@@ -3998,7 +3998,7 @@ def test_run_live_providers_writes_artifacts_with_injected_transports(
                     }
                 ],
             }
-        if url.endswith("/on_page/instant_pages/live"):
+        if url.endswith("/on_page/instant_pages"):
             request_body = json.loads(body.decode("utf-8"))
             return fixture_onpage_instant_pages_response(request_body[0]["url"])
         if url.endswith("/backlinks/summary/live"):

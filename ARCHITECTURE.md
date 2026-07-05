@@ -55,9 +55,10 @@ page, up to `--depth` organic rows per keyword). Raw responses land in
 `raw_responses/endpoint=entities`; normalization emits entity rows plus a separate
 `textrazor_page_metrics_curated` table and `textrazor_page_metrics` feature mart
 at the same `target_keyword × SERP URL` grain as `analysis_mart`. The similarity
-mart stays unchanged; TextRazor and backlinks count families are additive for
-Phase 5 stats (TextRazor slices 27–30 and 32–33 shipped, golden fixtures
-slice 31 open; backlinks Phase 6.2 shipped).
+mart stays unchanged; TextRazor, backlinks count, and OnPage signal families are
+additive for Phase 5 stats (TextRazor slices 27–30 and 32–33 shipped, golden
+fixtures slice 31 open; backlinks Phase 6.2 shipped; OnPage Phase 7.1 slices
+1–9 shipped, slice 10 regression open).
 
 Product architecture, scope, and phased backlog live in root markdown:
 `ARCHITECTURE.md` (this file), `GOALS.md`, and `ROADMAP.md`.
@@ -93,7 +94,7 @@ The repository contains an **offline-verifiable CLI scaffold** (Phase 1 shipped)
   `build-features`, `analyze`, `replay`, and `run --stored-run`, which resumes
   partial runs in place from the stored lake before re-materializing downstream
   marts
-- **Tests:** 331 unit tests under `tests/unit/`; full suite collects 332 tests
+- **Tests:** 400 unit tests under `tests/unit/`; full suite collects 401 tests
   (1 opt-in integration); gate: `python -m pytest tests/unit`; Phase 4.5 Slice 7
   shipped the round-trip regression sweep in `test_sdlc_docs.py`
 - **Product docs:** `ARCHITECTURE.md`, `GOALS.md`, `ROADMAP.md`, `README.md`,
@@ -352,7 +353,7 @@ Derived from curated tables via `features.py`. Filter and select **before** join
 | `passage_features` | Passage-level features (Phase 5.5 expands scoring scope) |
 | `domain_features` | Domain-level aggregates (Phase 5.5 expands URL inventory) |
 | `backlinks_analysis` | `analysis_mart` panel grain left-joined with curated `backlinks` count columns (`backlinks_count`, `referring_domains_count`, `dofollow_backlinks_count` nullable); feeds the `backlinks_counts` signal family (Phase 6.2) |
-| `onpage_features` | `analysis_mart` panel grain left-joined with curated `onpage_signals` (`onpage_score`, technical checks, readability, CWV timing, transfer size, microdata summary); feeds three `onpage_metric` signal families loaded by `build_family_source_frames()` (Phase 7.1 Slice 8) |
+| `onpage_features` | `analysis_mart` panel grain left-joined with curated `onpage_signals` (`onpage_score`, technical checks, readability, CWV timing, transfer size, microdata summary); feeds three `onpage_metric` signal families (`onpage_content_quality`, `onpage_core_web_vitals`, `onpage_technical_checks`) via `build_family_source_frames()` with full Spearman / OLS / diagnostics / family Plackett-Luce (Phase 7.1 slices 7–9). `ensure_feature_marts_for_analysis()` in `data/features.py` rebuilds this partition on legacy run trees when `run.json` exists |
 | `textrazor_page_metrics` | TextRazor page-signal columns keyed like `analysis_mart` (not joined into similarity mart); includes `textrazor_page_metrics_complete` |
 
 ### Layer 4 — analysis mart

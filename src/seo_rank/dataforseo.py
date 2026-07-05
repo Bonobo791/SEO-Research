@@ -25,7 +25,7 @@ DATAFORSEO_KEYWORD_EXPANSION_PATH = (
 )
 DATAFORSEO_SERP_PATH = "/v3/serp/google/organic/live/advanced"
 DATAFORSEO_PAGE_TEXT_PATH = "/v3/on_page/content_parsing/live"
-DATAFORSEO_ONPAGE_INSTANT_PAGES_PATH = "/v3/on_page/instant_pages/live"
+DATAFORSEO_ONPAGE_INSTANT_PAGES_PATH = "/v3/on_page/instant_pages"
 DATAFORSEO_BACKLINKS_PATH = "/v3/backlinks/summary/live"
 BACKLINKS_QUERY_SUMMARY = "summary"
 BACKLINKS_QUERY_DOFOLLOW = "dofollow"
@@ -127,7 +127,7 @@ DATAFORSEO_RESPONSE_SCHEMAS: dict[str, tuple[DataForSeoFieldSchema, ...]] = {
         ),
         DataForSeoFieldSchema(
             ("tasks", "[]", "result", "[]", "items", "[]", "onpage_score"),
-            (int, float),
+            (int, float, type(None)),
         ),
         DataForSeoFieldSchema(
             ("tasks", "[]", "result", "[]", "items", "[]", "page_timing"),

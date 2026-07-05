@@ -73,7 +73,7 @@ def test_stored_run_docs_describe_partial_resume_and_current_suite_status() -> N
     assert "reuses existing raw responses" in readme
     assert "`--stored-run` resumes partial runs in place" in architecture
     assert "refreshes only missing work" in architecture
-    assert "331 unit tests pass" in testing or "331 unit tests" in testing
+    assert "400 unit tests" in testing or "400 unit tests pass" in testing
     assert "resumes from the saved raw lake" in roadmap
 
 
@@ -145,8 +145,8 @@ def test_phase_45_slice_9_regression_sweep_marks_mart_sink_docs_as_shipped() -> 
     assert "Phase 4.5 Slice 9 shipped" in roadmap
     assert "Phase 4.5 Slice 10 shipped" in roadmap
     assert "Phase 4.5 signed off" in roadmap
-    assert "331 unit tests" in architecture or "331 tests" in architecture or "331 unit tests pass" in architecture
-    assert "331 unit tests pass" in testing or "331 unit tests" in testing
+    assert "400 unit tests" in architecture or "400 tests" in architecture or "400 unit tests pass" in architecture
+    assert "400 unit tests" in testing or "400 unit tests pass" in testing
     assert "sink feature marts lazily with Parquet statistics" in testing
 
 
@@ -455,3 +455,29 @@ def test_phase_6_1_plans_ols_pl_standardization() -> None:
     assert "Phase 6.1" in architecture
     assert "test_stats_scaling_contract.py" in testing
     assert "6.1 Slice 1" in fixups
+
+
+def test_phase_7_1_onpage_slices_1_9_shipped() -> None:
+    goals = (ROOT / "GOALS.md").read_text(encoding="utf-8")
+    roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
+    architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
+    testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "Phase 7.1 acceptance criteria (OnPage instant_pages)" in goals
+    assert "9 of 10 slices shipped" in goals
+    assert "onpage_instant_pages" in goals
+    assert "onpage_features" in goals
+    assert "ensure_feature_marts_for_analysis()" in goals
+    assert "#### 7.1 — OnPage page signals" in roadmap
+    assert "**Progress:** 9 of 10 shipped." in roadmap
+    assert "**[x] Slice 9 — Artifacts follow-ups**" in roadmap
+    assert "Phase 7.1 slices 1–9 shipped (2026-07-05)" in roadmap
+    assert "onpage_signals" in architecture
+    assert "onpage_features" in architecture
+    assert "ensure_feature_marts_for_analysis()" in architecture
+    assert "Phase 7.1 slices 1–9" in testing
+    assert "test_onpage_stats_golden_contract_with_combined_feature_marts" in testing
+    assert "endpoint=onpage_instant_pages" in readme
+    assert "onpage_features" in readme
+    assert "onpage_content_quality" in readme

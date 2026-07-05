@@ -89,11 +89,11 @@ def test_build_page_text_request_uses_content_parsing_endpoint() -> None:
     ]
 
 
-def test_build_onpage_instant_pages_request_uses_live_endpoint_and_flags() -> None:
+def test_build_onpage_instant_pages_request_uses_instant_pages_endpoint_and_flags() -> None:
     request = build_onpage_instant_pages_request("https://example.com/technical-seo/1")
 
     assert request.method == "POST"
-    assert request.path == "/v3/on_page/instant_pages/live"
+    assert request.path == "/v3/on_page/instant_pages"
     assert request.body == [
         {
             "url": "https://example.com/technical-seo/1",
@@ -461,7 +461,7 @@ def test_validate_dataforseo_response_rejects_onpage_instant_pages_score_drift()
     error = exc_info.value
     assert error.endpoint == "onpage_instant_pages"
     assert error.path == "tasks[0].result[0].items[0].onpage_score"
-    assert error.expected in {"int", "int or float"}
+    assert error.expected in {"int", "int or float", "int or float or NoneType"}
     assert "got str" in str(error)
 
 
@@ -541,6 +541,36 @@ def test_validate_dataforseo_response_accepts_onpage_instant_pages_sparse_item()
     }
 
     assert validate_dataforseo_response("onpage_instant_pages", response) is response
+
+
+def test_validate_dataforseo_response_accepts_onpage_instant_pages_missing_score_item() -> None:
+    response = {
+        "status_code": 20000,
+        "tasks": [
+            {
+                "status_code": 20000,
+                "result": [
+                    {
+                        "items_count": 1,
+                        "items": [
+                            {
+                                "resource_type": "broken",
+                                "url": "https://example.com/broken",
+                                "total_transfer_size": 0,
+                                "checks": {
+                                    "is_broken": True,
+                                    "is_4xx_code": True,
+                                },
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+
+    assert validate_dataforseo_response("onpage_instant_pages", response) is response
+    assert onpage_instant_pages_response_is_usable(response) is False
 
 
 @pytest.mark.parametrize(
@@ -977,29 +1007,6 @@ def test_validate_dataforseo_response_rejects_content_item_without_body() -> Non
                 ],
             },
             "tasks[0].result[0].items[0].url",
-            "present",
-        ),
-        (
-            "onpage_instant_pages",
-            {
-                "status_code": 20000,
-                "tasks": [
-                    {
-                        "status_code": 20000,
-                        "result": [
-                            {
-                                "items_count": 1,
-                                "items": [
-                                    {
-                                        "url": "https://example.com/sparse",
-                                    }
-                                ],
-                            }
-                        ],
-                    }
-                ],
-            },
-            "tasks[0].result[0].items[0].onpage_score",
             "present",
         ),
     ],

@@ -92,6 +92,10 @@ slices 21–26 shipped; shared raw-response schema contract (slice 26) is shippe
 TextRazor signal expansion: slices 27–30 and 32–33 shipped; slice 31 (golden fixtures) open.
 Backlinks count analysis: **Phase 6.2** shipped (`backlinks_analysis` mart +
 `backlinks_counts` family in `stats_*`).
+OnPage page signals: **Phase 7.1** slices **1–9 shipped** (`onpage_instant_pages`
+→ `onpage_signals` → `onpage_features` → three `onpage_metric` families with
+full Spearman / OLS / diagnostics / Plackett-Luce in `stats_*`; slice 10 stored-run
+regression open). See `ROADMAP.md` § 7.1 and `TESTING.md` § OnPage instant_pages.
 Signal proxy / factor diagnostics: **Phase 5.6** (slice 34 tracker). Precursor:
 `analysis/textrazor_ranking_r2.py` (similarity + TextRazor adjusted R²,
 curated multivariate model, PNG charts via `ranking_explainability_viz.py`).
@@ -523,6 +527,14 @@ schema drift).
   `ranking_explainability_viz.py` (exploratory adjusted R² + curated-model charts).
 - TextRazor structured signals & entity salience (`relevanceScore`) — **Phase 5.7**
   (slices 35–42). Full gap analysis and slices: `ROADMAP.md` § Phase 5.7.
+- Backlinks count signals on `backlinks_analysis` — **Phase 6.2** shipped
+  (`backlinks_counts` family in `stats_*`; `analysis_mart.v1` unchanged).
+- OnPage instant_pages pipeline — **Phase 7.1** slices 1–9 shipped: raw
+  `endpoint=onpage_instant_pages`, curated `onpage_signals`, feature mart
+  `onpage_features`, three `onpage_metric` families (`onpage_content_quality`,
+  `onpage_core_web_vitals`, `onpage_technical_checks`) with full family stats in
+  `stats_*`; `ensure_feature_marts_for_analysis()` rebuilds missing
+  `onpage_features` on legacy run trees before analyze / `run_phase5_stats`.
 - Phase 5 slice 33 follow-up: streaming TextRazor persistence
   - Flush each pulled TextRazor entity/section to disk as it arrives instead of
     buffering the full run in memory.
@@ -614,6 +626,32 @@ Backlinks count signals (`backlinks_count`, `referring_domains_count`,
 `dofollow_backlinks_count`) are additive: they live on `parquet/backlinks_analysis/`
 and join into stats via `SOURCE_MART_BY_KIND["backlinks_metric"]`. The similarity
 `analysis_mart` contract (`analysis_mart.v1`) is unchanged.
+
+---
+
+## Phase 7.1 acceptance criteria (OnPage instant_pages)
+
+**Status:** 9 of 10 slices shipped.
+
+| Acceptance item | Slice(s) | Status |
+| --------------- | -------- | ------ |
+| `build_onpage_instant_pages_request()` + schema + offline fixture | 1 | Shipped |
+| Offline request/schema tests in `test_dataforseo_requests.py` | 2 | Shipped |
+| `fetch_onpage_signals_for_urls` + `endpoint=onpage_instant_pages` persistence | 3 | Shipped |
+| Live-run wiring alongside backlinks fetch | 4 | Shipped |
+| Stored-run backfill for missing `(target_keyword, url)` OnPage rows | 5 | Shipped |
+| Curated `parquet/onpage_signals` (`build_onpage_signals_frame`) | 6 | Shipped |
+| `parquet/onpage_features` feature mart at panel grain | 7 | Shipped |
+| Three `onpage_metric` families without `analysis_mart` schema bump | 8 | Shipped |
+| Full family stats (Spearman / OLS / diagnostics / PL) + legacy mart rebuild guard | 9 | Shipped |
+| Stored-run end-to-end regression + full-layer CLI pipeline tests | 10 | Open |
+
+OnPage signals are additive: they live on `parquet/onpage_features/` and join
+into stats via `SOURCE_MART_BY_KIND["onpage_metric"]`. The similarity
+`analysis_mart` contract (`analysis_mart.v1`) is unchanged. Legacy run directories
+created before Slice 8 get `onpage_features` materialized (null OnPage columns when
+raw data is absent) via `ensure_feature_marts_for_analysis()` in
+`data/features.py`, invoked from `seo-rank analyze` and `run_phase5_stats()`.
 
 ---
 

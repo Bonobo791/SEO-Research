@@ -1595,10 +1595,25 @@ or task id needed, and no `task_post` crawl/poll flow.
    `test_stats_family_artifacts.py`.
 9. **[x] Slice 9 — Artifacts follow-ups** — family Plackett-Luce enabled for
    `onpage_metric` with shared-prep perf refactor (`FAMILY_PLACKETT_LUCE_OPTIMIZER_OPTIONS`,
-   zero-variance fast skip), `ensure_feature_marts_for_analysis` includes
-   `onpage_features`, golden contract + hard-fail OnPage assertions.
-10. **[ ] Slice 10 — Fixtures and regressions** — golden fixtures, stored-run
-    regression, full-layer unit tests.
+   zero-variance fast skip), `ensure_feature_marts_for_analysis()` in
+   `data/features.py` (requires `onpage_features`; rebuilds when `run.json`
+   exists), same guard from `run_phase5_stats()` for legacy upgrade paths,
+   golden contract + hard-fail OnPage assertions.
+10. **[ ] Slice 10 — Fixtures and regressions** — stored-run end-to-end
+    regression, full-layer CLI pipeline tests beyond analyze/mart guards.
+
+| Acceptance item | Slice(s) | Status |
+| --------------- | -------- | ------ |
+| OnPage instant_pages request/schema/fixture | 1 | Shipped |
+| Offline request/schema tests | 2 | Shipped |
+| Fetch + raw partition persistence | 3 | Shipped |
+| Live-run wiring | 4 | Shipped |
+| Stored-run backfill (OnPage partition only) | 5 | Shipped |
+| Curated `onpage_signals` | 6 | Shipped |
+| Feature mart `onpage_features` | 7 | Shipped |
+| Three `onpage_metric` families; no `analysis_mart` schema bump | 8 | Shipped |
+| Full family stats + legacy `onpage_features` rebuild on analyze | 9 | Shipped |
+| Stored-run regression + full-layer CLI tests | 10 | Open |
 
 #### 7.2 — Backlink quality & anchor relevance (`backlinks/backlinks/live`)
 
@@ -1737,13 +1752,14 @@ endpoint, no fetch/backfill wiring for the core slices.
 
 | Acceptance item | Sub-phase | Status |
 | --------------- | --------- | ------ |
-| OnPage content/CWV/technical-check families land without an `analysis_mart` schema bump | 7.1 | Shipped |
+| OnPage content/CWV/technical-check families land without an `analysis_mart` schema bump | 7.1 | Shipped (slices 8–9) |
+| OnPage stored-run backfill without refetching unrelated partitions | 7.1 | Shipped (slice 5) |
 | Backlink quality + anchor-relevance families are separate from the existing counts family | 7.2 | Open |
 | Backlink velocity family lands at URL grain | 7.3 | Open |
 | Domain authority family lands at domain grain, deduped once per run | 7.4 | Open |
 | Domain technology/age family lands at domain grain | 7.5 | Open |
 | SERP feature presence lands from stored SERP payloads with no new API calls | 7.6 | Open |
-| `run --stored-run` backfills every new source's missing raw partition without refetching unrelated data | 7.1–7.5 | Open |
+| `run --stored-run` backfills every new source's missing raw partition without refetching unrelated data | 7.2–7.5 | Open |
 
 ### Phase 8 — Non-DataForSEO API integrations
 
@@ -2107,6 +2123,16 @@ with 8.3 and is a lower-priority cross-check.
   unchanged; `ensure_feature_marts_for_analysis` requires `backlinks_analysis`
   and `onpage_features`; `run_phase5_stats` invokes the same guard before loading
   family source frames.
+- **Phase 7.1 slices 1–9 shipped (2026-07-05):** OnPage `instant_pages` live
+  path from request/fixture through raw `endpoint=onpage_instant_pages`,
+  curated `onpage_signals`, feature mart `onpage_features`, and three
+  `onpage_metric` signal families (`onpage_content_quality`,
+  `onpage_core_web_vitals`, `onpage_technical_checks`) with Spearman, pooled OLS,
+  diagnostics, and family Plackett-Luce at all confirmatory rank depths.
+  `ensure_feature_marts_for_analysis()` lives in `data/features.py` and rebuilds
+  missing `onpage_features` on legacy run trees (when `run.json` exists) from
+  both `seo-rank analyze` and `run_phase5_stats()`. Slice 10 (stored-run
+  end-to-end regression, full-layer CLI tests) remains open.
 - **Phase 6.1 Slice 3 partial (2026-07-03):** `src/seo_rank/data/ranks.py`
   ships Polars-lazy `add_within_keyword_similarity_ranks()` with unit tests in
   `tests/unit/test_within_keyword_ranks.py`; mart wiring remains Slice 4.

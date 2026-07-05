@@ -36,6 +36,7 @@ Use these commands in order. Each step reads or extends the same run tree under
 | **Resume stored run in place** | `seo-rank run --seed "technical seo" --stored-run runs/RUN_ID` |
 | **Backfill live TextRazor on stored run** | `seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-textrazor-only` |
 | **Backfill DataForSEO backlinks on stored run** | `seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-providers` |
+| **Backfill DataForSEO OnPage on stored run** | Same as backlinks backfill (`--live-providers` fetches missing `onpage_instant_pages` rows) |
 | **Brand-new run with live TextRazor only** | `seo-rank run --seed "technical seo" --live-textrazor-only --output-dir runs/demo` |
 | **Expand existing run in place** | `seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --keyword-limit 25` |
 | **Audit one raw HTTP response** | `seo-rank replay --run runs/RUN_ID --response-id RESPONSE_ID` |
@@ -101,6 +102,28 @@ dofollow variant is missing; `backlinks_metrics_complete` flags paired rows).
 `build-features` materializes `parquet/backlinks_analysis/` (panel grain plus
 backlinks count columns) for the `backlinks_counts` signal family in analyze.
 
+**Backfill DataForSEO OnPage signals on a stored run** (same live-provider gate
+and credentials as backlinks):
+
+```bash
+seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-providers
+```
+
+OnPage uses the same missing-URL overlay as backlinks: only SERP URLs without a
+usable `endpoint=onpage_instant_pages` row are fetched. One synchronous
+`on_page/instant_pages/live` call per URL (JavaScript rendering, resource loading,
+and micromarkup validation on the same request). Raw rows land in
+`parquet/raw_responses/endpoint=onpage_instant_pages/` (dedupe on
+`(target_keyword, url)`). Normalize materializes curated
+`parquet/onpage_signals/` (score, technical checks, readability, CWV timing,
+transfer size, micromarkup summary). `build-features` materializes
+`parquet/onpage_features/` at the `analysis_mart` panel grain for three
+`onpage_metric` signal families in analyze (`onpage_content_quality`,
+`onpage_core_web_vitals`, `onpage_technical_checks`). Legacy run trees created
+before Phase 7.1 Slice 8 get `onpage_features` rebuilt automatically when
+`run.json` exists (`ensure_feature_marts_for_analysis()` in analyze and the
+stats path).
+
 TextRazor responses are stored under `raw_responses/endpoint=entities`, use
 `provider=textrazor`, and share the same `RAW_RESPONSE_SCHEMA` as the other
 raw-response rows. Normalization also materializes `parquet/entities/` (entity
@@ -128,7 +151,9 @@ seo-rank build-features --run runs/RUN_ID
 seo-rank analyze --run runs/RUN_ID
 ```
 
-`analyze` backfills missing feature marts automatically. On non–dry-run runs it
+`analyze` backfills missing feature marts automatically (including
+`backlinks_analysis` and `onpage_features` when curated upstream tables or
+`run.json` allow rebuild). On non–dry-run runs it
 also writes `runs/{run_id}/stats/` (`stats_summary.json`, `stats_diagnostics.json`,
 `stats_report.md`) and exits `1` when guardrails hard-fail (stderr message only;
 no traceback). `--dry-run` runs skip Phase 5 stats via `run_manifest_is_dry_run()`.
@@ -148,16 +173,20 @@ On every `run` (offline or live), per expanded cluster keyword:
    per target for both calls combined); incremental raw-lake persistence to
    `endpoint=backlinks_summary` and `endpoint=backlinks_dofollow_summary`;
    curated `backlinks` on normalize
-3. Page text from fixtures or DataForSEO `content_parsing/live`
-4. Passage splitting
-5. **Passage-level similarity features** — max/mean cosine per URL from deterministic
+3. DataForSEO `on_page/instant_pages/live` — **one call per SERP URL** when live
+   providers are on; incremental persistence to `endpoint=onpage_instant_pages`;
+   curated `onpage_signals` on normalize; feature mart `onpage_features` on
+   `build-features` / analyze
+4. Page text from fixtures or DataForSEO `content_parsing/live`
+5. Passage splitting
+6. **Passage-level similarity features** — max/mean cosine per URL from deterministic
    fixture embeddings (`compute_page_similarity_features`)
-6. **Page-level similarity scores** — three backends per URL (`compute_page_similarity_scores`
+7. **Page-level similarity scores** — three backends per URL (`compute_page_similarity_scores`
    or live overrides below)
-7. TextRazor page metrics (fixture unless `--live-providers --live-textrazor`):
+8. TextRazor page metrics (fixture unless `--live-providers --live-textrazor`):
    one call per parsed SERP URL with extractors
    `entities,topics,categories,entailments,words,relations,properties,nounPhrases`
-8. Artifacts: `run.json`, `report.md`, `parquet/raw_responses/`, curated tables,
+9. Artifacts: `run.json`, `report.md`, `parquet/raw_responses/`, curated tables,
    feature marts, `analysis_mart`, and Phase 5 stats unless `--dry-run` is set
 
 `seo-rank run` now performs the full postprocessing chain after writing raw
@@ -203,7 +232,8 @@ re-fetch pages or re-run embeddings. The stats path runs guardrails, Spearman
 summaries, pooled regression summaries, and page-level Plackett-Luce summaries
 at four confirmatory rank depths (`top_20`, `top_10`, `top_5`, `top_3`) for
 every registered signal family (similarity backends, TextRazor page-signal
-families, and the `backlinks_counts` family on `backlinks_analysis`) into `runs/{run_id}/stats/`, including nested `rank_depths` and
+families, the `backlinks_counts` family on `backlinks_analysis`, and three
+OnPage families on `onpage_features`) into `runs/{run_id}/stats/`, including nested `rank_depths` and
 `rank_depths.*.families` in `stats_summary.json` and
 `stats_diagnostics.json`, four `## Rank depth:` sections with `### Families`
 subsections, and `actionable_association_by_rank_depth`.
@@ -323,19 +353,22 @@ runs/{run_id}/
   run.json
   report.md
   parquet/
-    raw_responses/endpoint={keyword_expansion|serp|page_text|entities|backlinks_summary|backlinks_dofollow_summary}/part-*.parquet
+    raw_responses/endpoint={keyword_expansion|serp|page_text|entities|backlinks_summary|backlinks_dofollow_summary|onpage_instant_pages}/part-*.parquet
     keywords/part-*.parquet
     serp_items/part-*.parquet
     pages/part-*.parquet
     passages/part-*.parquet
     entities/part-*.parquet
     backlinks/part-*.parquet
+    onpage_signals/part-*.parquet
     textrazor_page_metrics_curated/part-*.parquet
     similarity_scores/part-*.parquet
     keyword_serp/part-*.parquet
     page_features/part-*.parquet
     passage_features/part-*.parquet
     domain_features/part-*.parquet
+    backlinks_analysis/part-*.parquet
+    onpage_features/part-*.parquet
     textrazor_page_metrics/part-*.parquet
     analysis_mart/part-*.parquet
   stats/

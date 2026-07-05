@@ -14,7 +14,7 @@ Pytest configuration and verification contract for SEO-Research.
   interpreter
 - Lint / type-check / build / coverage: not configured
 - Expected test duration: fast (< 1s)
-- **Current verification status:** 331 unit tests pass (`python -m pytest tests/unit`); full suite collects 332 tests including 1 opt-in integration test
+- **Current verification status:** 400 unit tests under `tests/unit/` (`python -m pytest tests/unit`); full suite collects 401 tests including 1 opt-in integration test
 
 ## Active Verification Command
 
@@ -254,20 +254,20 @@ exist.
   legacy `endpoint=backlinks` read-compat, hard-fail on malformed summary
   aggregates,   and distribution maps as JSON-string columns.
 
-## Shipped tests — OnPage instant_pages (Phase 7.1 slices 1–6, Jul 2026)
+## Shipped tests — OnPage instant_pages (Phase 7.1 slices 1–9, Jul 2026)
 
 - **OnPage instant_pages endpoint (offline contract)** —
   `tests/unit/test_dataforseo_requests.py` covers
   `build_onpage_instant_pages_request()` against
-  `/v3/on_page/instant_pages/live` (JS rendering, resource loading,
+  `/v3/on_page/instant_pages` (JS rendering, resource loading,
   `validate_micromarkup`), schema accept on `fixture_onpage_instant_pages_response()`,
   score and url type-drift rejection, null/missing optional sections
   (`page_timing`, `checks`, `content`, `total_transfer_size`, micromarkup flags),
-  sparse items (url + score only), and required-leaf parity cases (missing
-  `url` or `onpage_score`).
+  sparse items (url + score only), broken-page rows without `onpage_score`,
+  and required-leaf parity cases (missing `url`).
 - **OnPage fetch + persistence (Phase 7.1 slice 3)** —
   `tests/unit/test_cli_run.py` covers `fetch_onpage_signals_for_urls()` against
-  `/v3/on_page/instant_pages/live` (one call per URL, request metadata with
+  `/v3/on_page/instant_pages` (one call per URL, request metadata with
   rendering/micromarkup flags), single-partition persistence to
   `endpoint=onpage_instant_pages`, one rewrite per batch, and partial durability
   on mid-loop failure via `finally`.
@@ -335,6 +335,13 @@ exist.
   `tests/unit/test_stats_golden_fixtures.py` pins OnPage contract fields with
   combined feature marts (`test_onpage_stats_golden_contract_with_combined_feature_marts`).
   Combined family-artifacts integration completes in ≤60s with full OnPage PL enabled.
+
+## Planned tests (not yet in suite) — Phase 7.1 slice 10
+
+- Stored-run end-to-end regression proving OnPage backfill composes with the full
+  post-run materialization chain without refetching unrelated partitions.
+- Full-layer CLI pipeline tests beyond analyze / mart-rebuild guards (see
+  `ROADMAP.md` § 7.1 Slice 10).
 
 ## Shipped tests — Phase 6.2 backlinks count analysis (Jul 2026)
 
