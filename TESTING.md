@@ -252,7 +252,19 @@ exist.
   `backlinks` table materialization from paired raw responses (42 / 12 / 35),
   null `dofollow_backlinks_count` when the dofollow variant is absent,
   legacy `endpoint=backlinks` read-compat, hard-fail on malformed summary
-  aggregates, and distribution maps as JSON-string columns.
+  aggregates,   and distribution maps as JSON-string columns.
+
+## Shipped tests — OnPage instant_pages (Phase 7.1 slices 1–2, Jul 2026)
+
+- **OnPage instant_pages endpoint (offline contract)** —
+  `tests/unit/test_dataforseo_requests.py` covers
+  `build_onpage_instant_pages_request()` against
+  `/v3/on_page/instant_pages/live` (JS rendering, resource loading,
+  `validate_micromarkup`), schema accept on `fixture_onpage_instant_pages_response()`,
+  score and url type-drift rejection, null/missing optional sections
+  (`page_timing`, `checks`, `content`, `total_transfer_size`, micromarkup flags),
+  sparse items (url + score only), and required-leaf parity cases (missing
+  `url` or `onpage_score`).
 
 ## Shipped tests — Phase 6.2 backlinks count analysis (Jul 2026)
 

@@ -464,6 +464,20 @@ def test_validate_dataforseo_response_rejects_onpage_instant_pages_score_drift()
     assert "got str" in str(error)
 
 
+def test_validate_dataforseo_response_rejects_onpage_instant_pages_url_drift() -> None:
+    response = fixture_onpage_instant_pages_response("https://example.com/technical-seo/1")
+    response["tasks"][0]["result"][0]["items"][0]["url"] = 123
+
+    with pytest.raises(DataForSeoParseError) as exc_info:
+        validate_dataforseo_response("onpage_instant_pages", response)
+
+    error = exc_info.value
+    assert error.endpoint == "onpage_instant_pages"
+    assert error.path == "tasks[0].result[0].items[0].url"
+    assert error.expected == "str"
+    assert "got int" in str(error)
+
+
 @pytest.mark.parametrize(
     "nullable_field",
     [
@@ -902,6 +916,52 @@ def test_validate_dataforseo_response_rejects_content_item_without_body() -> Non
                 ],
             },
             "tasks[0].result[0].items[0].title",
+            "present",
+        ),
+        (
+            "onpage_instant_pages",
+            {
+                "status_code": 20000,
+                "tasks": [
+                    {
+                        "status_code": 20000,
+                        "result": [
+                            {
+                                "items_count": 1,
+                                "items": [
+                                    {
+                                        "onpage_score": 42.0,
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            },
+            "tasks[0].result[0].items[0].url",
+            "present",
+        ),
+        (
+            "onpage_instant_pages",
+            {
+                "status_code": 20000,
+                "tasks": [
+                    {
+                        "status_code": 20000,
+                        "result": [
+                            {
+                                "items_count": 1,
+                                "items": [
+                                    {
+                                        "url": "https://example.com/sparse",
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            },
+            "tasks[0].result[0].items[0].onpage_score",
             "present",
         ),
     ],

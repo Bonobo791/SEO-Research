@@ -1535,16 +1535,24 @@ or task id needed, and no `task_post` crawl/poll flow.
 
 ##### Dev slices
 
-**Progress:** 0 of 10 shipped.
+**Progress:** 2 of 10 shipped.
 
 1. **[x] Slice 1 — Request/schema/fixture** — `build_onpage_instant_pages_request()`,
    `DATAFORSEO_RESPONSE_SCHEMAS["onpage_instant_pages"]`,
    `fixture_onpage_instant_pages_response()` in `dataforseo.py`.
-2. **[ ] Slice 2 — Offline tests** — request shape, schema-accept, schema-drift
-   rejection.
+2. **[x] Slice 2 — Offline tests** — request shape, schema-accept, schema-drift
+   rejection, null/missing optional sections, required-leaf parity cases in
+   `tests/unit/test_dataforseo_requests.py`.
 3. **[ ] Slice 3 — Fetch + persistence** — `fetch_onpage_signals_for_urls` in
    `cli.py`, one call per unique `(target_keyword, url)`, persisted to
-   `raw_responses/endpoint=onpage_instant_pages`.
+   `raw_responses/endpoint=onpage_instant_pages`. Copy
+   `fetch_dataforseo_backlinks_for_urls` / `persist_backlink_raw_responses`:
+   `execute_validated_dataforseo_request("onpage_instant_pages", …)` with
+   `build_onpage_instant_pages_request(url)`, dedupe key `(target_keyword, url)`,
+   `build_raw_response_record(..., endpoint="onpage_instant_pages")`, partial
+   batch persistence in a `finally:` block, request metadata
+   (`target_keyword`, `url`, rendering/micromarkup flags). Tests in
+   `tests/unit/test_cli_run.py` and `tests/unit/test_raw_response_merge.py`.
 4. **[ ] Slice 4 — Live-run wiring** — call alongside the existing backlinks
    fetch in the live keyword-result build path.
 5. **[ ] Slice 5 — Stored-run backfill** — extend `expand_stored_run` reuse-check
