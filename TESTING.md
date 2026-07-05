@@ -265,6 +265,15 @@ exist.
   (`page_timing`, `checks`, `content`, `total_transfer_size`, micromarkup flags),
   sparse items (url + score only), and required-leaf parity cases (missing
   `url` or `onpage_score`).
+- **OnPage fetch + persistence (Phase 7.1 slice 3)** —
+  `tests/unit/test_cli_run.py` covers `fetch_onpage_signals_for_urls()` against
+  `/v3/on_page/instant_pages/live` (one call per URL, request metadata with
+  rendering/micromarkup flags), single-partition persistence to
+  `endpoint=onpage_instant_pages`, one rewrite per batch, and partial durability
+  on mid-loop failure via `finally`.
+  `tests/unit/test_raw_response_merge.py` covers
+  `persist_onpage_raw_responses()` merge/dedupe on `(target_keyword, url)` without
+  touching unrelated partitions.
 
 ## Shipped tests — Phase 6.2 backlinks count analysis (Jul 2026)
 

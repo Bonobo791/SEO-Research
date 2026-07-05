@@ -1535,7 +1535,7 @@ or task id needed, and no `task_post` crawl/poll flow.
 
 ##### Dev slices
 
-**Progress:** 2 of 10 shipped.
+**Progress:** 3 of 10 shipped.
 
 1. **[x] Slice 1 — Request/schema/fixture** — `build_onpage_instant_pages_request()`,
    `DATAFORSEO_RESPONSE_SCHEMAS["onpage_instant_pages"]`,
@@ -1543,7 +1543,7 @@ or task id needed, and no `task_post` crawl/poll flow.
 2. **[x] Slice 2 — Offline tests** — request shape, schema-accept, schema-drift
    rejection, null/missing optional sections, required-leaf parity cases in
    `tests/unit/test_dataforseo_requests.py`.
-3. **[ ] Slice 3 — Fetch + persistence** — `fetch_onpage_signals_for_urls` in
+3. **[x] Slice 3 — Fetch + persistence** — `fetch_onpage_signals_for_urls` in
    `cli.py`, one call per unique `(target_keyword, url)`, persisted to
    `raw_responses/endpoint=onpage_instant_pages`. Copy
    `fetch_dataforseo_backlinks_for_urls` / `persist_backlink_raw_responses`:

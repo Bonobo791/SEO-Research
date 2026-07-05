@@ -34,6 +34,7 @@ from seo_rank.dataforseo import (
     build_backlinks_dofollow_summary_request,
     build_backlinks_summary_request,
     build_keyword_expansion_request,
+    build_onpage_instant_pages_request,
     build_page_text_request,
     build_serp_request,
     execute_dataforseo_request,
@@ -2401,6 +2402,68 @@ def fetch_dataforseo_backlinks_for_urls(
     return responses
 
 
+def fetch_onpage_signals_for_urls(
+    target_keyword: str,
+    urls: Sequence[str],
+    *,
+    credentials: DataForSeoCredentials,
+    transport,
+    progress: RunProgress | None = None,
+    run_dir: Path | None = None,
+) -> list[dict[str, object]]:
+    responses: list[dict[str, object]] = []
+    new_records: list[dict[str, object]] = []
+    try:
+        for url in urls:
+            if progress is not None:
+                progress.keyword_log(
+                    target_keyword,
+                    f"dataforseo {ONPAGE_INSTANT_PAGES_ENDPOINT} ({url})",
+                )
+            request = build_onpage_instant_pages_request(url)
+            response = execute_validated_dataforseo_request(
+                ONPAGE_INSTANT_PAGES_ENDPOINT,
+                request,
+                credentials=credentials,
+                transport=transport,
+            )
+            raise_for_failed_dataforseo_tasks(
+                ONPAGE_INSTANT_PAGES_ENDPOINT,
+                response,
+                target_keyword=target_keyword,
+            )
+            response_with_url = {**response, "url": url}
+            responses.append(response_with_url)
+            if run_dir is not None:
+                request_body = request.body[0]
+                new_records.append(
+                    build_raw_response_record(
+                        run_dir.name,
+                        endpoint=ONPAGE_INSTANT_PAGES_ENDPOINT,
+                        provider="dataforseo",
+                        response=response_with_url,
+                        target_keyword=target_keyword,
+                        request_metadata={
+                            "target_keyword": target_keyword,
+                            "url": url,
+                            "enable_javascript": request_body["enable_javascript"],
+                            "enable_browser_rendering": request_body[
+                                "enable_browser_rendering"
+                            ],
+                            "load_resources": request_body["load_resources"],
+                            "validate_micromarkup": request_body["validate_micromarkup"],
+                            "accept_language": request_body["accept_language"],
+                            "browser_preset": request_body["browser_preset"],
+                        },
+                        recorded_at=datetime.now(UTC).isoformat(),
+                    )
+                )
+    finally:
+        if run_dir is not None and new_records:
+            persist_onpage_raw_responses(run_dir, new_records)
+    return responses
+
+
 def annotate_target_keyword(
     row: dict[str, object],
     target_keyword: str,
@@ -3088,6 +3151,8 @@ BACKLINKS_VARIANT_ENDPOINTS: dict[str, str] = {
     BACKLINKS_QUERY_DOFOLLOW: "backlinks_dofollow_summary",
 }
 
+ONPAGE_INSTANT_PAGES_ENDPOINT = "onpage_instant_pages"
+
 
 def persist_backlink_raw_responses(
     run_dir: Path,
@@ -3107,6 +3172,43 @@ def persist_backlink_raw_responses(
                 existing_rows, endpoint_records, endpoint=endpoint
             )
             rewrite_backlink_endpoint_partition(run_dir, merged_rows, endpoint=endpoint)
+        refresh_run_json_raw_response_catalog(run_dir)
+    except STORAGE_COMMAND_EXCEPTIONS as error:
+        raise CliCommandError(str(error)) from error
+
+
+def merge_onpage_raw_response_rows(
+    existing_rows: Sequence[Mapping[str, object]],
+    new_records: Sequence[Mapping[str, object]],
+    *,
+    endpoint: str = ONPAGE_INSTANT_PAGES_ENDPOINT,
+) -> list[dict[str, object]]:
+    merged_rows: dict[tuple[str, str], dict[str, object]] = {}
+    for row in existing_rows:
+        normalized_row = validate_raw_response_record(row, endpoint=endpoint)
+        merged_rows[entity_raw_response_key(normalized_row)] = normalized_row
+    for row in new_records:
+        normalized_row = validate_raw_response_record(row, endpoint=endpoint)
+        merged_rows[entity_raw_response_key(normalized_row)] = normalized_row
+    return sorted(merged_rows.values(), key=entity_raw_response_key)
+
+
+def persist_onpage_raw_responses(
+    run_dir: Path,
+    records: Sequence[Mapping[str, object]],
+) -> None:
+    if not records:
+        return
+    try:
+        merged_rows = merge_onpage_raw_response_rows(
+            load_raw_response_partition_rows(run_dir, ONPAGE_INSTANT_PAGES_ENDPOINT),
+            records,
+        )
+        rewrite_endpoint_partition(
+            run_dir,
+            ONPAGE_INSTANT_PAGES_ENDPOINT,
+            merged_rows,
+        )
         refresh_run_json_raw_response_catalog(run_dir)
     except STORAGE_COMMAND_EXCEPTIONS as error:
         raise CliCommandError(str(error)) from error

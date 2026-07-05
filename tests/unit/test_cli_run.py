@@ -14,17 +14,20 @@ from seo_rank.dataforseo import fixture_backlinks_response
 from seo_rank.dataforseo import fixture_backlinks_response_for_request_body
 from seo_rank.dataforseo import fixture_keyword_expansion_response
 from seo_rank.dataforseo import fixture_page_text_response
+from seo_rank.dataforseo import fixture_onpage_instant_pages_response
 from seo_rank.dataforseo import fixture_serp_response
 from seo_rank.cli import RAW_RESPONSE_SCHEMA
 from seo_rank.cli import build_raw_response_record
 from seo_rank.cli import build_live_payload
 from seo_rank.cli import enrich_run_payload_page_similarity
 from seo_rank.cli import fetch_dataforseo_backlinks_for_urls
+from seo_rank.cli import fetch_onpage_signals_for_urls
 from seo_rank.cli import main
 from seo_rank.cli import RunConfig
 from seo_rank.cli import prepare_textrazor_only_context
 from seo_rank.cli import render_markdown_report
 from seo_rank.cli import rewrite_backlink_endpoint_partition
+from seo_rank.cli import rewrite_endpoint_partition
 from seo_rank.cli import stored_serp_response_is_usable
 from seo_rank.textrazor import fixture_entity_response
 from seo_rank.textrazor import TextRazorCredentials
@@ -823,6 +826,111 @@ def test_fetch_dataforseo_backlinks_for_urls_persists_partial_progress_on_mid_lo
     }
     assert persisted_urls == {urls[0], urls[1]}
     assert persisted_dofollow_urls == {urls[0], urls[1]}
+
+
+def test_fetch_onpage_signals_for_urls_persists_partition_once_per_batch(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    run_dir = tmp_path / "artifacts"
+    rewrite_calls = 0
+    api_calls = 0
+
+    def counting_rewrite(run_dir_arg, endpoint, rows):  # noqa: ANN001
+        nonlocal rewrite_calls
+        rewrite_calls += 1
+        return rewrite_endpoint_partition(run_dir_arg, endpoint, rows)
+
+    monkeypatch.setattr("seo_rank.cli.rewrite_endpoint_partition", counting_rewrite)
+
+    def dataforseo_transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        nonlocal api_calls
+        del method, headers, timeout
+        request_body = json.loads(body.decode("utf-8"))
+        assert url.endswith("/on_page/instant_pages/live")
+        api_calls += 1
+        return fixture_onpage_instant_pages_response(request_body[0]["url"])
+
+    urls = [f"https://example.com/technical-seo/{index}" for index in range(1, 4)]
+    responses = fetch_onpage_signals_for_urls(
+        "technical seo",
+        urls,
+        credentials=DataForSeoCredentials("login", "password"),
+        transport=dataforseo_transport,
+        run_dir=run_dir,
+    )
+
+    assert api_calls == 3
+    assert len(responses) == 3
+    assert rewrite_calls == 1
+    onpage_path = (
+        run_dir
+        / "parquet"
+        / "raw_responses"
+        / "endpoint=onpage_instant_pages"
+        / "part-0.parquet"
+    )
+    assert onpage_path.exists()
+    persisted_rows = pq.ParquetFile(onpage_path).read().to_pylist()
+    assert len(persisted_rows) == 3
+    metadata = json.loads(str(persisted_rows[0]["request_metadata_json"]))
+    assert metadata["validate_micromarkup"] is True
+
+
+def test_fetch_onpage_signals_for_urls_persists_partial_progress_on_mid_loop_failure(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "artifacts"
+    urls = [
+        "https://example.com/technical-seo/1",
+        "https://example.com/technical-seo/2",
+        "https://example.com/technical-seo/3",
+    ]
+
+    def dataforseo_transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        del method, headers, timeout
+        request_body = json.loads(body.decode("utf-8"))
+        target_url = request_body[0]["url"]
+        if target_url == urls[2]:
+            raise DataForSeoClientError("onpage failed on third url")
+        return fixture_onpage_instant_pages_response(target_url)
+
+    with pytest.raises(DataForSeoClientError, match="third url"):
+        fetch_onpage_signals_for_urls(
+            "technical seo",
+            urls,
+            credentials=DataForSeoCredentials("login", "password"),
+            transport=dataforseo_transport,
+            run_dir=run_dir,
+        )
+
+    onpage_path = (
+        run_dir
+        / "parquet"
+        / "raw_responses"
+        / "endpoint=onpage_instant_pages"
+        / "part-0.parquet"
+    )
+    assert onpage_path.exists()
+    persisted_urls = {
+        json.loads(str(row["request_metadata_json"]))["url"]
+        for row in pq.ParquetFile(onpage_path).read().to_pylist()
+    }
+    assert persisted_urls == {urls[0], urls[1]}
 
 
 def test_build_live_payload_includes_backlinks_in_raw_provider_data(

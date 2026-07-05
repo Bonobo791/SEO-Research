@@ -11,7 +11,9 @@ from seo_rank.cli import build_raw_response_record
 from seo_rank.cli import merge_backlink_raw_response_rows
 from seo_rank.cli import merge_raw_response_records
 from seo_rank.cli import persist_backlink_raw_responses
+from seo_rank.cli import persist_onpage_raw_responses
 from seo_rank.dataforseo import fixture_backlinks_response
+from seo_rank.dataforseo import fixture_onpage_instant_pages_response
 from seo_rank.textrazor import fixture_entity_response
 
 
@@ -494,3 +496,87 @@ def test_persist_backlink_raw_responses_rewrites_each_partition_once(
     merged_dofollow = pq.ParquetFile(dofollow_dir / "part-0.parquet").read().to_pylist()
     assert len(merged_summary) == 4
     assert len(merged_dofollow) == 3
+
+
+def _onpage_raw_response_record(
+    *,
+    run_id: str,
+    response_id: str,
+    target_keyword: str,
+    url: str,
+) -> dict[str, object]:
+    row = build_raw_response_record(
+        run_id,
+        endpoint="onpage_instant_pages",
+        provider="dataforseo",
+        response={**fixture_onpage_instant_pages_response(url), "url": url},
+        target_keyword=target_keyword,
+        request_metadata={
+            "target_keyword": target_keyword,
+            "url": url,
+            "enable_javascript": True,
+            "enable_browser_rendering": True,
+            "load_resources": True,
+            "validate_micromarkup": True,
+        },
+        recorded_at="2026-07-02T12:00:00+00:00",
+    )
+    row["response_id"] = response_id
+    return row
+
+
+def test_persist_onpage_raw_responses_merges_by_target_keyword_and_url(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "artifacts"
+    onpage_dir = run_dir / "parquet" / "raw_responses" / "endpoint=onpage_instant_pages"
+    backlinks_dir = run_dir / "parquet" / "raw_responses" / "endpoint=backlinks_summary"
+    existing_onpage = _onpage_raw_response_record(
+        run_id="artifacts",
+        response_id="onpage-existing-old",
+        target_keyword="technical seo",
+        url="https://example.com/existing",
+    )
+    existing_backlink = _backlink_raw_response_record(
+        run_id="artifacts",
+        response_id="backlink-existing",
+        target_keyword="technical seo",
+        url="https://example.com/existing",
+        endpoint="backlinks_summary",
+        variant="summary",
+    )
+    _write_raw_response_partition(onpage_dir, [existing_onpage])
+    _write_raw_response_partition(backlinks_dir, [existing_backlink])
+    (run_dir / "run.json").write_text(
+        json.dumps({"run_id": "artifacts", "catalog": {"datasets": {}}}, indent=2)
+        + "\n",
+        encoding="utf-8",
+    )
+
+    incoming = [
+        _onpage_raw_response_record(
+            run_id="artifacts",
+            response_id="onpage-existing-new",
+            target_keyword=" technical seo ",
+            url="https://example.com/existing",
+        ),
+        *[
+            _onpage_raw_response_record(
+                run_id="artifacts",
+                response_id=f"onpage-{index}",
+                target_keyword="technical seo",
+                url=f"https://example.com/{index}",
+            )
+            for index in range(3)
+        ],
+    ]
+
+    persist_onpage_raw_responses(run_dir, incoming)
+
+    merged_onpage = pq.ParquetFile(onpage_dir / "part-0.parquet").read().to_pylist()
+    merged_backlinks = pq.ParquetFile(backlinks_dir / "part-0.parquet").read().to_pylist()
+    assert len(merged_onpage) == 4
+    merged_by_id = {str(row["response_id"]): row for row in merged_onpage}
+    assert merged_by_id["onpage-existing-new"]["response_id"] == "onpage-existing-new"
+    assert len(merged_backlinks) == 1
+    assert merged_backlinks[0]["response_id"] == "backlink-existing"
