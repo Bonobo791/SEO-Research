@@ -1535,7 +1535,7 @@ or task id needed, and no `task_post` crawl/poll flow.
 
 ##### Dev slices
 
-**Progress:** 6 of 10 shipped.
+**Progress:** 7 of 10 shipped.
 
 1. **[x] Slice 1 — Request/schema/fixture** — `build_onpage_instant_pages_request()`,
    `DATAFORSEO_RESPONSE_SCHEMAS["onpage_instant_pages"]`,
@@ -1577,8 +1577,12 @@ or task id needed, and no `task_post` crawl/poll flow.
    unusable empty raw rows; dedupes by `(target_keyword, url)` on latest
    `timestamp` with `response_id` tie-break. Tests in
    `tests/unit/test_run_normalize.py`.
-7. **[ ] Slice 7 — Feature mart** — `onpage_features`, URL-grain join,
-   bounded validation (score 0-100, non-negative counts/timing).
+7. **[x] Slice 7 — Feature mart** — `onpage_features`, URL-grain join of
+   curated `onpage_signals` onto the `analysis_mart` panel
+   (`build_feature_lazyframes` left join on
+   `run_id`, `target_keyword_id`, `canonical_url_hash`, `url`); bounded
+   validation (`onpage_score` 0–100, non-negative counts/timing). Tests in
+   `tests/unit/test_feature_marts.py`.
 8. **[ ] Slice 8 — Family registry** — new kind `onpage_metric`; add
    `onpage_content_quality`, `onpage_core_web_vitals`, and
    `onpage_technical_checks` families to `analysis_spec.v1.yaml` (grouped by

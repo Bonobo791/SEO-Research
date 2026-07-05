@@ -211,7 +211,7 @@ current limit. `raw_responses` stays out of normal analytical joins
 provider long-term.
 
 **Phase 5 stats today:** lazy Polars joins on `analysis_mart`,
-`backlinks_analysis`, and `textrazor_page_metrics` (per-family source marts from
+`backlinks_analysis`, `onpage_features`, and `textrazor_page_metrics` (per-family source marts from
 `families.py`) → guardrails → parallel confirmatory rank-depth bundles
 (top 20 / 10 / 5 / 3) per signal family → keyword-level Spearman ρ with BH per
 family → pooled OLS with clustered SEs and diagnostics → primary-depth
@@ -274,7 +274,7 @@ runs/{run_id}/
 | Layer | Tables | Producer | Purpose |
 |-------|--------|----------|---------|
 | **Curated** | `keywords`, `serp_items`, `pages`, `page_content_fields`, `passages`, `entities`, `backlinks`, `onpage_signals`, `textrazor_page_metrics_curated`, `similarity_scores` | `normalize.py` | Parse `raw_responses` once into typed tables |
-| **Feature marts** | `keyword_serp`, `page_features`, `passage_features`, `domain_features`, `backlinks_analysis`, `textrazor_page_metrics` | `features.py` | Reusable similarity, ranking, backlinks, and TextRazor page features |
+| **Feature marts** | `keyword_serp`, `page_features`, `passage_features`, `domain_features`, `backlinks_analysis`, `onpage_features`, `textrazor_page_metrics` | `features.py` | Reusable similarity, ranking, backlinks, OnPage, and TextRazor page features |
 | **Analysis mart** | `analysis_mart` | `marts.py` | One row per `target_keyword × SERP URL` for Phase 5 |
 
 ### Layer 1 — `raw_responses` (authoritative)
@@ -348,6 +348,7 @@ Derived from curated tables via `features.py`. Filter and select **before** join
 | `passage_features` | Passage-level features (Phase 5.5 expands scoring scope) |
 | `domain_features` | Domain-level aggregates (Phase 5.5 expands URL inventory) |
 | `backlinks_analysis` | `analysis_mart` panel grain left-joined with curated `backlinks` count columns (`backlinks_count`, `referring_domains_count`, `dofollow_backlinks_count` nullable); feeds the `backlinks_counts` signal family (Phase 6.2) |
+| `onpage_features` | `analysis_mart` panel grain left-joined with curated `onpage_signals` (`onpage_score`, technical checks, readability, CWV timing, transfer size, microdata summary); feeds Phase 7.1 OnPage signal families (Slice 8) |
 | `textrazor_page_metrics` | TextRazor page-signal columns keyed like `analysis_mart` (not joined into similarity mart); includes `textrazor_page_metrics_complete` |
 
 ### Layer 4 — analysis mart

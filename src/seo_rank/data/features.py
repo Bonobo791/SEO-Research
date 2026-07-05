@@ -441,6 +441,51 @@ FEATURE_VALIDATION_RULES["backlinks_analysis"] = {
     "bounded_columns": BACKLINKS_ANALYSIS_BOUNDED_COLUMNS,
 }
 
+ONPAGE_FEATURES_EXCLUDED_COLUMNS = {
+    "run_id",
+    "target_keyword_id",
+    "target_keyword",
+    "response_id",
+    "canonical_url_hash",
+    "url",
+    "schema_version",
+}
+ONPAGE_FEATURES_EXTRA_COLUMNS = tuple(
+    column
+    for column in CURATED_VALIDATION_RULES["onpage_signals"]["expected_schema"].keys()
+    if column not in ONPAGE_FEATURES_EXCLUDED_COLUMNS
+)
+ONPAGE_FEATURES_REQUIRED_COLUMNS = (
+    *ANALYSIS_REQUIRED_COLUMNS,
+    *ONPAGE_FEATURES_EXTRA_COLUMNS,
+)
+ONPAGE_FEATURES_EXPECTED_SCHEMA = {
+    **FEATURE_VALIDATION_RULES["analysis_mart"]["expected_schema"],
+    **{
+        column: CURATED_VALIDATION_RULES["onpage_signals"]["expected_schema"][column]
+        for column in ONPAGE_FEATURES_EXTRA_COLUMNS
+    },
+}
+ONPAGE_FEATURES_BOUNDED_COLUMNS = {
+    **FEATURE_VALIDATION_RULES["analysis_mart"]["bounded_columns"],
+    "onpage_score": (0, 100),
+    "plain_text_word_count": (0, None),
+    "time_to_first_byte_ms": (0, None),
+    "largest_contentful_paint_ms": (0, None),
+    "cumulative_layout_shift": (0, None),
+    "total_transfer_size": (0, None),
+    "micromarkup_items_count": (0, None),
+    "micromarkup_errors_count": (0, None),
+    "micromarkup_warnings_count": (0, None),
+}
+FEATURE_REQUIRED_COLUMNS["onpage_features"] = ONPAGE_FEATURES_REQUIRED_COLUMNS
+FEATURE_VALIDATION_RULES["onpage_features"] = {
+    "expected_schema": ONPAGE_FEATURES_EXPECTED_SCHEMA,
+    "unique_columns": FEATURE_VALIDATION_RULES["analysis_mart"]["unique_columns"],
+    "non_null_columns": FEATURE_VALIDATION_RULES["analysis_mart"]["non_null_columns"],
+    "bounded_columns": ONPAGE_FEATURES_BOUNDED_COLUMNS,
+}
+
 
 def build_feature_lazyframes(
     curated_frames: Mapping[str, pl.LazyFrame],
@@ -451,6 +496,7 @@ def build_feature_lazyframes(
     passages = curated_frames["passages"]
     similarity_scores = curated_frames["similarity_scores"]
     backlinks = curated_frames["backlinks"]
+    onpage_signals = curated_frames["onpage_signals"]
 
     keyword_serp = (
         keywords.join(
@@ -598,6 +644,23 @@ def build_feature_lazyframes(
         .with_columns(pl.lit(FEATURE_SCHEMA_VERSION).alias("schema_version"))
         .sort(["target_keyword_id", "serp_rank", "canonical_url_hash"])
     )
+    onpage_features = (
+        analysis_base.join(
+            onpage_signals.select(
+                [
+                    "run_id",
+                    "target_keyword_id",
+                    "canonical_url_hash",
+                    "url",
+                    *ONPAGE_FEATURES_EXTRA_COLUMNS,
+                ]
+            ),
+            on=["run_id", "target_keyword_id", "canonical_url_hash", "url"],
+            how="left",
+        )
+        .with_columns(pl.lit(FEATURE_SCHEMA_VERSION).alias("schema_version"))
+        .sort(["target_keyword_id", "serp_rank", "canonical_url_hash"])
+    )
 
     return {
         "keyword_serp": keyword_serp,
@@ -605,6 +668,7 @@ def build_feature_lazyframes(
         "passage_features": passage_features,
         "domain_features": domain_features,
         "backlinks_analysis": backlinks_analysis,
+        "onpage_features": onpage_features,
         "textrazor_page_metrics": curated_frames["textrazor_page_metrics_curated"],
     }
 
@@ -630,6 +694,7 @@ def build_feature_marts(run_dir: Path) -> dict[str, object]:
             "passages",
             "similarity_scores",
             "backlinks",
+            "onpage_signals",
             "textrazor_page_metrics_curated",
         )
     }

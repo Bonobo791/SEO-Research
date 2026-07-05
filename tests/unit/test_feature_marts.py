@@ -11,10 +11,12 @@ from seo_rank.cli import main
 from seo_rank.cli import RAW_RESPONSE_SCHEMA
 from seo_rank.cli import build_raw_response_record
 from seo_rank.data.features import BACKLINKS_ANALYSIS_REQUIRED_COLUMNS
+from seo_rank.data.features import ONPAGE_FEATURES_REQUIRED_COLUMNS
 from seo_rank.data.features import build_feature_marts, write_feature_dataset
 from seo_rank.data.normalize import normalize_run
 from seo_rank.dataforseo import BACKLINKS_QUERY_SUMMARY
 from seo_rank.dataforseo import fixture_backlinks_response
+from seo_rank.dataforseo import fixture_onpage_instant_pages_response
 
 
 def test_build_feature_marts_materializes_lazy_joins_from_curated_tables(
@@ -60,6 +62,30 @@ def test_build_feature_marts_materializes_lazy_joins_from_curated_tables(
         summary_dir / "part-0.parquet",
     )
 
+    onpage_dir = (
+        output_dir
+        / "parquet"
+        / "raw_responses"
+        / "endpoint=onpage_instant_pages"
+    )
+    onpage_dir.mkdir(parents=True, exist_ok=True)
+    onpage_record = build_raw_response_record(
+        output_dir.name,
+        endpoint="onpage_instant_pages",
+        provider="dataforseo",
+        response=fixture_onpage_instant_pages_response(target_url),
+        target_keyword="technical seo",
+        request_metadata={
+            "target_keyword": "technical seo",
+            "url": target_url,
+        },
+        recorded_at="2026-07-05T12:00:00+00:00",
+    )
+    pq.write_table(
+        pa.Table.from_pylist([onpage_record], schema=RAW_RESPONSE_SCHEMA),
+        onpage_dir / "part-0.parquet",
+    )
+
     normalize_run(output_dir)
     catalog = build_feature_marts(output_dir)
 
@@ -68,6 +94,7 @@ def test_build_feature_marts_materializes_lazy_joins_from_curated_tables(
     assert catalog["datasets"]["passage_features"]["row_count"] == 2
     assert catalog["datasets"]["domain_features"]["row_count"] == 1
     assert catalog["datasets"]["backlinks_analysis"]["row_count"] == 1
+    assert catalog["datasets"]["onpage_features"]["row_count"] == 1
 
     keyword_serp = ds.dataset(
         output_dir / "parquet" / "keyword_serp",
@@ -75,6 +102,10 @@ def test_build_feature_marts_materializes_lazy_joins_from_curated_tables(
     ).to_table().to_pylist()
     backlinks_analysis = ds.dataset(
         output_dir / "parquet" / "backlinks_analysis",
+        format="parquet",
+    ).to_table().to_pylist()
+    onpage_features = ds.dataset(
+        output_dir / "parquet" / "onpage_features",
         format="parquet",
     ).to_table().to_pylist()
     domain_features = ds.dataset(
@@ -86,11 +117,53 @@ def test_build_feature_marts_materializes_lazy_joins_from_curated_tables(
     assert any(row["domain"] == "example.com" for row in domain_features)
     assert any(row["backlinks_count"] == 42 for row in backlinks_analysis)
     assert any(row["referring_links_types_json"] is not None for row in backlinks_analysis)
+    assert any(row["onpage_score"] == 85.5 for row in onpage_features)
+    assert any(row["is_https"] is True for row in onpage_features)
+    assert any(row["time_to_first_byte_ms"] == 120 for row in onpage_features)
+    assert any(row["has_valid_structured_data"] is True for row in onpage_features)
 
     run_json = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
     assert run_json["catalog"]["datasets"]["keyword_serp"]["row_count"] == 1
     assert run_json["catalog"]["datasets"]["domain_features"]["row_count"] == 1
     assert run_json["catalog"]["datasets"]["backlinks_analysis"]["row_count"] == 1
+    assert run_json["catalog"]["datasets"]["onpage_features"]["row_count"] == 1
+
+
+def test_build_feature_marts_onpage_features_null_when_partition_missing(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--depth",
+            "1",
+            "--output-dir",
+            str(output_dir),
+            "--dry-run",
+        ]
+    )
+
+    assert exit_code == 0
+
+    normalize_run(output_dir)
+    catalog = build_feature_marts(output_dir)
+
+    assert catalog["datasets"]["onpage_features"]["row_count"] == 1
+    onpage_features = ds.dataset(
+        output_dir / "parquet" / "onpage_features",
+        format="parquet",
+    ).to_table().to_pylist()
+    row = onpage_features[0]
+    assert row["serp_rank"] == 1
+    assert row["onpage_score"] is None
+    assert row["onpage_signal_id"] is None
+    assert row["has_valid_structured_data"] is None
 
 
 def test_build_feature_marts_validates_each_feature_frame_before_sinking(
@@ -116,6 +189,7 @@ def test_build_feature_marts_validates_each_feature_frame_before_sinking(
             "passage_features": pl.DataFrame([{"run_id": "run-1"}]).lazy(),
             "domain_features": pl.DataFrame([{"run_id": "run-1"}]).lazy(),
             "backlinks_analysis": pl.DataFrame([{"run_id": "run-1"}]).lazy(),
+            "onpage_features": pl.DataFrame([{"run_id": "run-1"}]).lazy(),
             "textrazor_page_metrics": pl.DataFrame([{"run_id": "run-1"}]).lazy(),
         }
 
@@ -144,9 +218,12 @@ def test_build_feature_marts_validates_each_feature_frame_before_sinking(
     build_feature_marts(run_dir)
 
     assert ("validate", BACKLINKS_ANALYSIS_REQUIRED_COLUMNS) in calls
+    assert ("validate", ONPAGE_FEATURES_REQUIRED_COLUMNS) in calls
     assert ("write", "backlinks_analysis") in calls
+    assert ("write", "onpage_features") in calls
     assert calls.index(("write", "backlinks_analysis")) > calls.index(("write", "domain_features"))
-    assert calls.index(("write", "textrazor_page_metrics")) > calls.index(("write", "backlinks_analysis"))
+    assert calls.index(("write", "onpage_features")) > calls.index(("write", "backlinks_analysis"))
+    assert calls.index(("write", "textrazor_page_metrics")) > calls.index(("write", "onpage_features"))
 
 
 def test_write_feature_dataset_uses_lazy_sink_parquet_with_statistics(

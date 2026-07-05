@@ -301,6 +301,14 @@ exist.
   `build_onpage_signals_frame` dedupe by `(target_keyword, url)` on latest
   `timestamp` with `response_id` tie-break
   (`test_build_onpage_signals_frame_dedupes_by_target_keyword_and_url`).
+- **OnPage feature mart (Phase 7.1 slice 7)** —
+  `tests/unit/test_feature_marts.py` covers `onpage_features` materialization
+  from curated `onpage_signals` left-joined onto the analysis panel
+  (`test_build_feature_marts_materializes_lazy_joins_from_curated_tables`),
+  null OnPage columns when the raw partition is absent
+  (`test_build_feature_marts_onpage_features_null_when_partition_missing`),
+  and bounded validation via `ONPAGE_FEATURES_REQUIRED_COLUMNS`
+  (`test_build_feature_marts_validates_each_feature_frame_before_sinking`).
 
 ## Shipped tests — Phase 6.2 backlinks count analysis (Jul 2026)
 
