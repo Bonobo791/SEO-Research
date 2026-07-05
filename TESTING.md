@@ -56,7 +56,7 @@ placeholders only.
 | `test_run_normalize.py` | Stored `raw_responses` normalize into curated Parquet tables (including `similarity_scores` copied from `run.json` `page_similarity`, `page_content_fields`, `backlinks` from paired `backlinks/summary/live` responses, and `textrazor_page_metrics_curated` from TextRazor page-metrics responses) via lazy scan + batch UDFs; TextRazor entailment scores above 1.0 validate; dataset-name validation errors; refresh the run catalog |
 | `test_data_scans_validate.py` | Raw-response scans use `pl.scan_parquet()`, lazy curated frames are built, schema-only validation rejects missing columns, and materialized row-rule checks stay off the lazy edge |
 | `test_data_marts.py` | Analysis mart lazy join lives in `seo_rank.data.marts` and preserves the feature-mart contract |
-| `test_feature_marts.py` | Feature marts materialize lazy joins, validate before sink, sink feature marts lazily with Parquet statistics, audit the written parquet row rules, allow unbounded TextRazor entailment scores, surface dataset names on validation failure, and refresh the run catalog |
+| `test_feature_marts.py` | Feature marts materialize lazy joins (including `backlinks_analysis` from curated `backlinks`), validate before sink, sink feature marts lazily with Parquet statistics, audit the written parquet row rules, allow unbounded TextRazor entailment scores, surface dataset names on validation failure, and refresh the run catalog |
 | `test_analysis_mart.py` | Feature marts materialize the lazy analysis mart, preserve unmatched SERP rows with nullable feature columns, validate before sink, audit the written parquet row rules, and refresh the run catalog |
 | `test_stats_panel.py` | Guardrail evaluation (SERP-rank variance hard-fail, similarity-variance warn), panel grain filtering, full vs minimal stats artifact writing on pass/fail |
 | `test_stats_spearman.py` | Benjamini-Hochberg adjustment, backend Spearman summaries, and Spearman artifact emission on passing panels |
@@ -65,7 +65,7 @@ placeholders only.
 | `test_stats_plackett_luce.py` | Page-level Plackett-Luce rank-ordered logit summaries, partial-ranking handling, optimizer / leave-one-out IIA diagnostics, and PL artifact emission on passing panels |
 | `test_stats_families.py` | Declarative signal-family registry loading, ordered enumeration, panel-grain preservation, and malformed-entry rejection |
 | `test_stats_family_dispatch.py` | Family-aware Spearman summaries with BH scoped per signal family (similarity vs TextRazor source marts) |
-| `test_stats_family_artifacts.py` | Combined `stats_*` artifact tree for all signal families, hard-fail family skip path, and underpowered `inference_mode` labeling |
+| `test_stats_family_artifacts.py` | Combined `stats_*` artifact tree for all signal families (similarity, TextRazor, `backlinks_counts`), hard-fail family skip path, and underpowered `inference_mode` labeling |
 | `test_stats_rank_depth.py` | Rank-depth confirmatory slices: spec accessors, panel filtering, per-depth Spearman/OLS/PL, monotonic row counts, `rank_depths` JSON + report sections |
 | `test_stats_scale.py` | Within-keyword and global z-score helpers (`stats.scale`) for OLS/PL effect-size contract |
 | `test_textrazor_ingest.py` | TextRazor endpoint registry, page entity fetch, and dedupe helpers with injected transport |
@@ -253,6 +253,23 @@ exist.
   null `dofollow_backlinks_count` when the dofollow variant is absent,
   legacy `endpoint=backlinks` read-compat, hard-fail on malformed summary
   aggregates, and distribution maps as JSON-string columns.
+
+## Shipped tests — Phase 6.2 backlinks count analysis (Jul 2026)
+
+- **Feature mart** — `tests/unit/test_feature_marts.py` covers
+  `backlinks_analysis` materialization from curated `backlinks`, bounded count
+  validation (`BACKLINKS_ANALYSIS_REQUIRED_COLUMNS`), and catalog refresh.
+- **Signal family registry** — `tests/unit/test_stats_families.py` and
+  `test_stats_spec.py` cover `backlinks_counts` (`backlinks_metric` kind) and
+  the three count signal columns.
+- **Stats artifacts** — `tests/unit/test_stats_family_artifacts.py` covers
+  combined `stats_*` output with `#### Family: backlinks_counts` in
+  `stats_report.md` and per-signal Spearman / OLS / diagnostics / PL blocks.
+- **Curated null semantics** — `tests/unit/test_run_normalize.py` covers null
+  `dofollow_backlinks_count` when the dofollow variant is absent (upstream of
+  the analysis mart).
+- **Raw partition CLI** — Phase 5.91 tests in `test_cli_run.py` (see § DataForSEO
+  backlinks above).
 
 ## Shipped tests — Phase 6.1 partial (within-keyword ranks)
 

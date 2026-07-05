@@ -55,8 +55,9 @@ page, up to `--depth` organic rows per keyword). Raw responses land in
 `raw_responses/endpoint=entities`; normalization emits entity rows plus a separate
 `textrazor_page_metrics_curated` table and `textrazor_page_metrics` feature mart
 at the same `target_keyword × SERP URL` grain as `analysis_mart`. The similarity
-mart stays unchanged; TextRazor families are additive for Phase 5 stats (slices
-27–30 and 32–33 shipped; golden fixtures slice 31 open).
+mart stays unchanged; TextRazor and backlinks count families are additive for
+Phase 5 stats (TextRazor slices 27–30 and 32–33 shipped, golden fixtures
+slice 31 open; backlinks Phase 6.2 shipped).
 
 Product architecture, scope, and phased backlog live in root markdown:
 `ARCHITECTURE.md` (this file), `GOALS.md`, and `ROADMAP.md`.
@@ -209,8 +210,9 @@ current limit. `raw_responses` stays out of normal analytical joins
 (replay/re-normalization only). Live DataForSEO payloads are not retained by the
 provider long-term.
 
-**Phase 5 stats today:** lazy Polars joins on `analysis_mart` and
-`textrazor_page_metrics` → guardrails → parallel confirmatory rank-depth bundles
+**Phase 5 stats today:** lazy Polars joins on `analysis_mart`,
+`backlinks_analysis`, and `textrazor_page_metrics` (per-family source marts from
+`families.py`) → guardrails → parallel confirmatory rank-depth bundles
 (top 20 / 10 / 5 / 3) per signal family → keyword-level Spearman ρ with BH per
 family → pooled OLS with clustered SEs and diagnostics → primary-depth
 multivariate VIF sensitivity (`rank_depths.top_20.multivariate_sensitivity`
@@ -255,12 +257,14 @@ runs/{run_id}/
     page_content_fields/part-*.parquet
     passages/part-*.parquet
     entities/part-*.parquet
+    backlinks/part-*.parquet
     textrazor_page_metrics_curated/part-*.parquet
     similarity_scores/part-*.parquet
     keyword_serp/part-*.parquet
     page_features/part-*.parquet
     passage_features/part-*.parquet
     domain_features/part-*.parquet
+    backlinks_analysis/part-*.parquet
     textrazor_page_metrics/part-*.parquet
     analysis_mart/part-*.parquet
 ```
@@ -269,8 +273,8 @@ runs/{run_id}/
 
 | Layer | Tables | Producer | Purpose |
 |-------|--------|----------|---------|
-| **Curated** | `keywords`, `serp_items`, `pages`, `page_content_fields`, `passages`, `entities`, `textrazor_page_metrics_curated`, `similarity_scores` | `normalize.py` | Parse `raw_responses` once into typed tables |
-| **Feature marts** | `keyword_serp`, `page_features`, `passage_features`, `domain_features`, `textrazor_page_metrics` | `features.py` | Reusable similarity, ranking, and TextRazor page features |
+| **Curated** | `keywords`, `serp_items`, `pages`, `page_content_fields`, `passages`, `entities`, `backlinks`, `textrazor_page_metrics_curated`, `similarity_scores` | `normalize.py` | Parse `raw_responses` once into typed tables |
+| **Feature marts** | `keyword_serp`, `page_features`, `passage_features`, `domain_features`, `backlinks_analysis`, `textrazor_page_metrics` | `features.py` | Reusable similarity, ranking, backlinks, and TextRazor page features |
 | **Analysis mart** | `analysis_mart` | `marts.py` | One row per `target_keyword × SERP URL` for Phase 5 |
 
 ### Layer 1 — `raw_responses` (authoritative)
@@ -342,6 +346,7 @@ Derived from curated tables via `features.py`. Filter and select **before** join
 | `page_features` | Page-level similarity and text features |
 | `passage_features` | Passage-level features (Phase 5.5 expands scoring scope) |
 | `domain_features` | Domain-level aggregates (Phase 5.5 expands URL inventory) |
+| `backlinks_analysis` | `analysis_mart` panel grain left-joined with curated `backlinks` count columns (`backlinks_count`, `referring_domains_count`, `dofollow_backlinks_count` nullable); feeds the `backlinks_counts` signal family (Phase 6.2) |
 | `textrazor_page_metrics` | TextRazor page-signal columns keyed like `analysis_mart` (not joined into similarity mart); includes `textrazor_page_metrics_complete` |
 
 ### Layer 4 — analysis mart

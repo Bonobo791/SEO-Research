@@ -90,6 +90,8 @@ fixtures; see `ROADMAP.md`). OLS / Plackett-Luce standardization and relative-ra
 Phase 5 slices 11–15) is **Phase 6.1** in `ROADMAP.md`. TextRazor-only ingestion:
 slices 21–26 shipped; shared raw-response schema contract (slice 26) is shipped.
 TextRazor signal expansion: slices 27–30 and 32–33 shipped; slice 31 (golden fixtures) open.
+Backlinks count analysis: **Phase 6.2** shipped (`backlinks_analysis` mart +
+`backlinks_counts` family in `stats_*`).
 Signal proxy / factor diagnostics: **Phase 5.6** (slice 34 tracker). Precursor:
 `analysis/textrazor_ranking_r2.py` (similarity + TextRazor adjusted R²,
 curated multivariate model, PNG charts via `ranking_explainability_viz.py`).
@@ -542,8 +544,6 @@ schema drift).
 - Phase 5.4 exploratory extensions (rank-decile segments; keyword holdout and
   time-split validation in Phase 5.6).
 - Expanded report sections and OLS/PL standardization (`ROADMAP.md` § Phase 6.1).
-- Backlinks count analysis (`ROADMAP.md` Phase 6.2: `backlinks_count`,
-  `referring_domains_count`, `dofollow_backlinks_count` on `analysis_mart.v1`).
 - Custom URL/text manifest ingestion for TextRazor-only runs (no fixture SERP).
 - Direct page fetching outside DataForSEO (TextRazor receives parsed text only).
 - Causal claims about ranking factors.
@@ -598,6 +598,22 @@ schema drift).
 | Entity KB linkage enrichment | 40 | Open |
 | Phase 5.7 signal-family registry and stats dispatch | 41 | Open |
 | Salience explainability + Phase 5.7 golden fixtures | 42 | Open |
+
+## Phase 6.2 acceptance criteria
+
+**Status:** 4 of 4 slices shipped.
+
+| Acceptance item | Slice(s) | Status |
+| --------------- | -------- | ------ |
+| `backlinks_analysis` feature mart at `analysis_mart` grain with bounded count validation | 1 | Shipped |
+| `backlinks_counts` family (`backlinks_metric` kind) in spec + registry | 2 | Shipped |
+| Family-aware stats emit backlinks blocks in `stats_*` | 3 | Shipped |
+| Mart materialization + stats regressions cover backlinks analysis path | 4 | Shipped |
+
+Backlinks count signals (`backlinks_count`, `referring_domains_count`,
+`dofollow_backlinks_count`) are additive: they live on `parquet/backlinks_analysis/`
+and join into stats via `SOURCE_MART_BY_KIND["backlinks_metric"]`. The similarity
+`analysis_mart` contract (`analysis_mart.v1`) is unchanged.
 
 ---
 

@@ -98,6 +98,8 @@ including partial progress when a later URL in the same batch fails; survives
 later provider failures before `run.json` is written. Curated rows materialize in
 `parquet/backlinks/` on normalize (`dofollow_backlinks_count` is null when the
 dofollow variant is missing; `backlinks_metrics_complete` flags paired rows).
+`build-features` materializes `parquet/backlinks_analysis/` (panel grain plus
+backlinks count columns) for the `backlinks_counts` signal family in analyze.
 
 TextRazor responses are stored under `raw_responses/endpoint=entities`, use
 `provider=textrazor`, and share the same `RAW_RESPONSE_SCHEMA` as the other
@@ -200,8 +202,8 @@ missing, it materializes them first from the curated tables. It does **not**
 re-fetch pages or re-run embeddings. The stats path runs guardrails, Spearman
 summaries, pooled regression summaries, and page-level Plackett-Luce summaries
 at four confirmatory rank depths (`top_20`, `top_10`, `top_5`, `top_3`) for
-every registered signal family (similarity backends plus TextRazor page-signal
-families) into `runs/{run_id}/stats/`, including nested `rank_depths` and
+every registered signal family (similarity backends, TextRazor page-signal
+families, and the `backlinks_counts` family on `backlinks_analysis`) into `runs/{run_id}/stats/`, including nested `rank_depths` and
 `rank_depths.*.families` in `stats_summary.json` and
 `stats_diagnostics.json`, four `## Rank depth:` sections with `### Families`
 subsections, and `actionable_association_by_rank_depth`.

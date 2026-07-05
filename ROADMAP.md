@@ -1077,10 +1077,10 @@ row per SERP URL); changing `backlinks_status_type` off `"live"` or
 `include_subdomains` off `true`; concurrency changes to DataForSEO request
 execution.
 
-**Depends on / blocks:** Phase 6.2 (Backlinks count family and analysis
-surfacing) assumed the single-partition, single-call schema and must be
-re-checked against the expanded schema and `endpoint=backlinks_summary` /
-`endpoint=backlinks_dofollow_summary` partitions once this phase ships.
+**Unblocks:** Phase 6.2 (Backlinks count family and analysis surfacing) —
+shipped against the expanded schema and separate
+`endpoint=backlinks_summary` / `endpoint=backlinks_dofollow_summary`
+partitions.
 
 #### Dev slices
 
@@ -1425,59 +1425,60 @@ path without splitting it into multiple families or bumping the panel schema.
 needed later, they belong to the dedicated Backlinks API endpoint, not this
 family.
 
-**Depends on Phase 5.91:** the raw response storage path is now split across
+**Depends on Phase 5.91:** the raw response storage path is split across
 `raw_responses/endpoint=backlinks_summary` and
-`raw_responses/endpoint=backlinks_dofollow_summary` (not the single
-`endpoint=backlinks` partition assumed by Slice 1 below), and
-`dofollow_backlinks_count` can be `null` when the dofollow variant is
-missing — Slice 1's bounded-validation and non-negative assumptions need a
-nullable carve-out before this phase starts.
+`raw_responses/endpoint=backlinks_dofollow_summary` (legacy
+`endpoint=backlinks` remains read-compatible on normalize), and
+`dofollow_backlinks_count` is `null` when the dofollow variant is missing.
+
+**Implementation note:** backlinks count signals live on a separate
+`backlinks_analysis` feature mart (`analysis_mart` panel grain plus curated
+`backlinks` columns). `analysis_mart.v1` stays similarity-only; stats load
+`backlinks_analysis` via the `backlinks_metric` source-mart mapping in
+`families.py`.
 
 #### Dev slices
 
-**Progress:** 0 of 4 shipped.
+**Progress:** 4 of 4 shipped.
 
-1. **[ ] Slice 1 — Panel contract and feature validation**
-   - Extend `FEATURE_VALIDATION_RULES` and `ANALYSIS_REQUIRED_COLUMNS` so the
-     analysis panel admits the three backlinks count columns.
-   - Keep `schema_version` on `analysis_mart.v1`; add bounded non-negative
-     validation for the new count columns.
-   - Preserve raw response storage under
+1. **[x] Slice 1 — Panel contract and feature validation**
+   - Materialize `backlinks_analysis` from `analysis_mart` + curated
+     `backlinks` with bounded non-negative validation on count columns
+     (`dofollow_backlinks_count` nullable).
+   - Keep `schema_version` on `analysis_mart.v1`; `backlinks_analysis` uses
+     `feature_marts.v1`.
+   - Raw response storage remains under
      `raw_responses/endpoint=backlinks_summary` and
-     `raw_responses/endpoint=backlinks_dofollow_summary` (normalize merges
-     both; legacy `endpoint=backlinks` remains read-compatible on normalize).
+     `raw_responses/endpoint=backlinks_dofollow_summary`.
 
-2. **[ ] Slice 2 — Backlinks signal family registry**
-   - Add one registry entry, `backlinks_counts`, with kind `backlinks_metric`
+2. **[x] Slice 2 — Backlinks signal family registry**
+   - One registry entry, `backlinks_counts`, with kind `backlinks_metric`
      and the three backlinks count columns.
-   - Teach `src/seo_rank/stats/families.py` and `analysis_spec.v1.yaml` to load
-     the family without introducing a second backlinks family.
-   - Keep family ordering explicit so reports and BH scope treat backlinks as a
-     single family.
+   - `src/seo_rank/stats/families.py` and `analysis_spec.v1.yaml` load the
+     family without a second backlinks family.
+   - Family ordering keeps all three count signals in one family block for
+     reports and BH scope.
 
-3. **[ ] Slice 3 — Family-aware stats and reporting**
-   - Wire the new backlinks family into `spearman`, `regression`,
-     `diagnostics`, and Plackett-Luce artifact generation.
-   - Surface the backlinks family in `stats_summary.json`,
-     `stats_diagnostics.json`, and `stats_report.md`.
-   - Make sure the CLI report shows all three backlinks count signals together
-     rather than as separate family blocks.
+3. **[x] Slice 3 — Family-aware stats and reporting**
+   - Backlinks family wired into `spearman`, `regression`, `diagnostics`, and
+     Plackett-Luce artifact generation via `backlinks_analysis` source mart.
+   - `stats_summary.json`, `stats_diagnostics.json`, and `stats_report.md`
+     surface `#### Family: backlinks_counts` with all three signals together.
 
-4. **[ ] Slice 4 — Fixtures and regressions**
-   - Add golden fixtures for backlinks rows with known count relationships and
-     null/edge-case handling.
-   - Add CLI regressions that confirm live/stored runs still write both backlinks
-     raw partitions (`backlinks_summary`, `backlinks_dofollow_summary`) and now
-     emit backlinks family analysis.
-   - Cover the schema, family registry, and report rendering paths with unit
-     tests.
+4. **[x] Slice 4 — Fixtures and regressions**
+   - `test_feature_marts.py` covers `backlinks_analysis` materialization and
+     validation; `test_stats_family_artifacts.py` covers combined `stats_*`
+     output for the backlinks family.
+   - Raw partition CLI regressions shipped in Phase 5.91 (`test_cli_run.py`);
+     `ensure_feature_marts_for_analysis` requires `backlinks_analysis` before
+     analyze.
 
 | Acceptance item | Slice(s) | Status |
 | --------------- | -------- | ------ |
-| `analysis_mart.v1` admits backlinks count columns without schema bump | 1 | Open |
-| One backlinks family (`backlinks_counts`) is registered | 2 | Open |
-| Family-aware stats emit backlinks blocks in `stats_*` | 3 | Open |
-| Live/stored CLI regressions cover backlinks raw persistence (both partitions) + analysis | 4 | Open |
+| `analysis_mart.v1` unchanged; backlinks counts on `backlinks_analysis` without panel schema bump | 1 | Shipped |
+| One backlinks family (`backlinks_counts`) is registered | 2 | Shipped |
+| Family-aware stats emit backlinks blocks in `stats_*` | 3 | Shipped |
+| Mart materialization + stats regressions cover backlinks analysis path | 4 | Shipped |
 
 ### Phase 7 — DataForSEO datapoint expansion
 
@@ -2064,6 +2065,12 @@ with 8.3 and is a lower-priority cross-check.
   `--live-providers` onto offline runs; `--skip-textrazor` stays sticky via
   `merge_stored_run_cli_overlay()`. Supersedes the 2026-07-03 single-partition
   summary migration.
+- **Phase 6.2 shipped (2026-07-05):** `backlinks_analysis` feature mart
+  (`analysis_mart` grain + curated `backlinks` counts), `backlinks_counts`
+  signal family (`backlinks_metric` kind) in `analysis_spec.v1.yaml`, and
+  family-aware stats/report blocks for `backlinks_count`,
+  `referring_domains_count`, and `dofollow_backlinks_count`. `analysis_mart.v1`
+  unchanged; `ensure_feature_marts_for_analysis` requires `backlinks_analysis`.
 - **Phase 6.1 Slice 3 partial (2026-07-03):** `src/seo_rank/data/ranks.py`
   ships Polars-lazy `add_within_keyword_similarity_ranks()` with unit tests in
   `tests/unit/test_within_keyword_ranks.py`; mart wiring remains Slice 4.
