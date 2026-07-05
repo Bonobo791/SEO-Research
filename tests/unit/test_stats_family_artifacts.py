@@ -83,6 +83,53 @@ def _combined_textrazor_frame() -> pl.DataFrame:
     return pl.DataFrame(rows)
 
 
+def _combined_backlinks_analysis_frame() -> pl.DataFrame:
+    rows: list[dict[str, object]] = []
+    for row in _combined_analysis_mart_frame().to_dicts():
+        keyword_index = int(str(row["target_keyword_id"]).split("-")[-1])
+        serp_rank = int(row["serp_rank"])
+        rows.append(
+            {
+                **row,
+                "backlink_id": f"backlink-{keyword_index}-{serp_rank}",
+                "summary_response_id": f"backlinks-summary-{keyword_index}-{serp_rank}",
+                "dofollow_summary_response_id": f"backlinks-dofollow-{keyword_index}-{serp_rank}",
+                "backlinks_count": 42 + keyword_index,
+                "referring_domains_count": 12 + keyword_index,
+                "dofollow_backlinks_count": 35 + keyword_index,
+                "dofollow_referring_domains_count": 10 + keyword_index,
+                "rank": 400 + serp_rank,
+                "backlinks_spam_score": 1 + serp_rank,
+                "target_spam_score": 6,
+                "new_backlinks": 2 + serp_rank,
+                "lost_backlinks": 1,
+                "new_referring_domains": 3,
+                "lost_referring_domains": 1,
+                "referring_pages": 20 + serp_rank,
+                "referring_main_domains": 15 + serp_rank,
+                "referring_ips": 5 + serp_rank,
+                "referring_subnets": 4 + serp_rank,
+                "broken_backlinks": 0,
+                "broken_pages": 0,
+                "referring_domains_nofollow": 8 + serp_rank,
+                "crawled_pages": 100 + serp_rank,
+                "internal_links_count": 200 + serp_rank,
+                "external_links_count": 300 + serp_rank,
+                "first_seen": "2026-07-01",
+                "lost_date": None,
+                "referring_links_types_json": "{\"nofollow\":1}",
+                "referring_links_tld_json": "{\"com\":1}",
+                "referring_links_platform_types_json": "{\"cms\":1}",
+                "referring_links_semantic_locations_json": "{\"content\":1}",
+                "referring_links_attributes_json": "{\"rel\":1}",
+                "referring_links_countries_json": "{\"us\":1}",
+                "backlinks_metrics_complete": True,
+                "schema_version": "feature_marts.v1",
+            }
+        )
+    return pl.DataFrame(rows)
+
+
 def _single_keyword_analysis_mart_frame() -> pl.DataFrame:
     return _combined_analysis_mart_frame().filter(pl.col("target_keyword_id") == "kw-1")
 
@@ -92,10 +139,14 @@ def test_run_phase5_stats_emits_combined_family_tree_and_keeps_similarity_compat
 ) -> None:
     run_dir = tmp_path / "runs" / "run-1"
     (run_dir / "parquet" / "analysis_mart").mkdir(parents=True)
+    (run_dir / "parquet" / "backlinks_analysis").mkdir(parents=True)
     (run_dir / "parquet" / "textrazor_page_metrics").mkdir(parents=True)
 
     _combined_analysis_mart_frame().write_parquet(
         run_dir / "parquet" / "analysis_mart" / "part-0.parquet"
+    )
+    _combined_backlinks_analysis_frame().write_parquet(
+        run_dir / "parquet" / "backlinks_analysis" / "part-0.parquet"
     )
     _combined_textrazor_frame().write_parquet(
         run_dir / "parquet" / "textrazor_page_metrics" / "part-0.parquet"
@@ -116,11 +167,13 @@ def test_run_phase5_stats_emits_combined_family_tree_and_keeps_similarity_compat
     assert summary["regression"]["backends"]["bge"]["backend"] == "bge"
     assert summary["plackett_luce"]["backends"]["bge"]["backend"] == "bge"
     assert list(summary["rank_depths"]["top_20"]["families"]) == list(spec.signal_family_keys)
+    assert summary["rank_depths"]["top_20"]["families"]["backlinks_counts"]["kind"] == "backlinks_metric"
 
     topic_family = summary["rank_depths"]["top_20"]["families"]["textrazor_topic_score"]
     sparse_family = summary["rank_depths"]["top_20"]["families"][
         "textrazor_relation_property_noun_phrase"
     ]
+    backlinks_family = summary["rank_depths"]["top_20"]["families"]["backlinks_counts"]
 
     assert topic_family["spearman"]["signals"]["textrazor_topic_score"]["status"] == "computed"
     assert topic_family["regression"]["signals"]["textrazor_topic_score"]["status"] == "computed"
@@ -133,14 +186,25 @@ def test_run_phase5_stats_emits_combined_family_tree_and_keeps_similarity_compat
     assert sparse_family["regression"]["status"] == "skipped"
     assert sparse_family["diagnostics"]["status"] == "skipped"
     assert sparse_family["plackett_luce"]["status"] == "skipped"
+    assert backlinks_family["spearman"]["signals"]["backlinks_count"]["status"] == "computed"
+    assert backlinks_family["regression"]["signals"]["backlinks_count"]["status"] == "computed"
+    assert backlinks_family["diagnostics"]["signals"]["backlinks_count"]["status"] == "computed"
+    assert backlinks_family["plackett_luce"]["signals"]["backlinks_count"]["status"] in {
+        "computed",
+        "unstable",
+    }
 
     assert diagnostics["metadata"]["signal_family_order"] == list(spec.signal_family_keys)
     assert diagnostics["rank_depths"]["top_20"]["families"]["textrazor_topic_score"]["diagnostics"][
         "signals"
     ]["textrazor_topic_score"]["status"] == "computed"
+    assert diagnostics["rank_depths"]["top_20"]["families"]["backlinks_counts"]["diagnostics"][
+        "signals"
+    ]["backlinks_count"]["status"] == "computed"
     assert "### Families" in report
     assert "#### Family: textrazor_topic_score" in report
     assert "#### Family: textrazor_relation_property_noun_phrase" in report
+    assert "#### Family: backlinks_counts" in report
 
 
 def test_run_phase5_stats_marks_textrazor_family_blocks_skipped_on_hard_fail(
@@ -148,12 +212,16 @@ def test_run_phase5_stats_marks_textrazor_family_blocks_skipped_on_hard_fail(
 ) -> None:
     run_dir = tmp_path / "runs" / "run-1"
     (run_dir / "parquet" / "analysis_mart").mkdir(parents=True)
+    (run_dir / "parquet" / "backlinks_analysis").mkdir(parents=True)
     (run_dir / "parquet" / "textrazor_page_metrics").mkdir(parents=True)
 
     hard_fail_frame = _combined_analysis_mart_frame().with_columns(
         pl.lit(1, dtype=pl.Int64).alias("serp_rank")
     )
     hard_fail_frame.write_parquet(run_dir / "parquet" / "analysis_mart" / "part-0.parquet")
+    _combined_backlinks_analysis_frame().write_parquet(
+        run_dir / "parquet" / "backlinks_analysis" / "part-0.parquet"
+    )
     _combined_textrazor_frame().write_parquet(
         run_dir / "parquet" / "textrazor_page_metrics" / "part-0.parquet"
     )
@@ -171,8 +239,12 @@ def test_run_phase5_stats_marks_textrazor_family_blocks_skipped_on_hard_fail(
     assert summary["rank_depths"]["top_20"]["families"]["textrazor_topic_score"]["regression"][
         "status"
     ] == "skipped"
+    assert summary["rank_depths"]["top_20"]["families"]["backlinks_counts"]["spearman"][
+        "status"
+    ] == "skipped"
     assert "Confirmatory inference skipped because hard-fail guardrails did not pass." in report
     assert "#### Family: textrazor_topic_score" in report
+    assert "#### Family: backlinks_counts" in report
 
 
 def test_run_phase5_stats_marks_single_keyword_runs_as_underpowered(

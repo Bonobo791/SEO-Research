@@ -1509,6 +1509,7 @@ def ensure_feature_marts_for_analysis(run_dir: Path) -> None:
         "page_features",
         "passage_features",
         "domain_features",
+        "backlinks_analysis",
     )
     parquet_dir = Path(run_dir) / "parquet"
     if all((parquet_dir / name).exists() for name in required_feature_marts):

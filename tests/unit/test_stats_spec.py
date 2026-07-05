@@ -47,6 +47,7 @@ def test_load_analysis_spec_reads_repo_root_yaml() -> None:
         "textrazor_entailment_score_prior_context",
         "textrazor_word_grammar_sense_spelling",
         "textrazor_relation_property_noun_phrase",
+        "backlinks_counts",
     )
     assert analysis_spec.estimand["outcome"] == "-log(serp_rank)"
 
@@ -74,6 +75,12 @@ def test_load_analysis_spec_exposes_signal_family_metadata() -> None:
         "textrazor_topic_score",
     )
     assert analysis_spec.signal_family("textrazor_word_grammar_sense_spelling").kind == "textrazor_structural"
+    assert analysis_spec.signal_family("backlinks_counts").kind == "backlinks_metric"
+    assert analysis_spec.signal_family("backlinks_counts").signal_columns == (
+        "backlinks_count",
+        "referring_domains_count",
+        "dofollow_backlinks_count",
+    )
     assert analysis_spec.signal_families.similarity_keys == (
         "bge",
         "gemini_doc_retrieval",
@@ -121,13 +128,14 @@ def test_build_stats_output_metadata_exposes_estimand_version() -> None:
             "bge",
             "gemini_doc_retrieval",
             "gemini_semantic_similarity",
-            "textrazor_entity_confidence_relevance",
-            "textrazor_topic_score",
-            "textrazor_category_classifier_score",
-            "textrazor_entailment_score_prior_context",
-            "textrazor_word_grammar_sense_spelling",
-            "textrazor_relation_property_noun_phrase",
-        ],
+        "textrazor_entity_confidence_relevance",
+        "textrazor_topic_score",
+        "textrazor_category_classifier_score",
+        "textrazor_entailment_score_prior_context",
+        "textrazor_word_grammar_sense_spelling",
+        "textrazor_relation_property_noun_phrase",
+        "backlinks_counts",
+    ],
         "primary_rank_depth": "top_20",
         "confirmatory_rank_depths": ["top_20", "top_10", "top_5", "top_3"],
     }

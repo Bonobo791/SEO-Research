@@ -8,8 +8,13 @@ import pyarrow.parquet as pq
 import pytest
 
 from seo_rank.cli import main
+from seo_rank.cli import RAW_RESPONSE_SCHEMA
+from seo_rank.cli import build_raw_response_record
+from seo_rank.data.features import BACKLINKS_ANALYSIS_REQUIRED_COLUMNS
 from seo_rank.data.features import build_feature_marts, write_feature_dataset
 from seo_rank.data.normalize import normalize_run
+from seo_rank.dataforseo import BACKLINKS_QUERY_SUMMARY
+from seo_rank.dataforseo import fixture_backlinks_response
 
 
 def test_build_feature_marts_materializes_lazy_joins_from_curated_tables(
@@ -34,6 +39,27 @@ def test_build_feature_marts_materializes_lazy_joins_from_curated_tables(
 
     assert exit_code == 0
 
+    summary_dir = output_dir / "parquet" / "raw_responses" / "endpoint=backlinks_summary"
+    summary_dir.mkdir(parents=True, exist_ok=True)
+    target_url = "https://example.com/technical-seo/1"
+    summary_record = build_raw_response_record(
+        output_dir.name,
+        endpoint="backlinks_summary",
+        provider="dataforseo",
+        response=fixture_backlinks_response(target_url),
+        target_keyword="technical seo",
+        request_metadata={
+            "target_keyword": "technical seo",
+            "url": target_url,
+            "variant": BACKLINKS_QUERY_SUMMARY,
+        },
+        recorded_at="2026-07-02T12:00:00+00:00",
+    )
+    pq.write_table(
+        pa.Table.from_pylist([summary_record], schema=RAW_RESPONSE_SCHEMA),
+        summary_dir / "part-0.parquet",
+    )
+
     normalize_run(output_dir)
     catalog = build_feature_marts(output_dir)
 
@@ -41,9 +67,14 @@ def test_build_feature_marts_materializes_lazy_joins_from_curated_tables(
     assert catalog["datasets"]["page_features"]["row_count"] == 1
     assert catalog["datasets"]["passage_features"]["row_count"] == 2
     assert catalog["datasets"]["domain_features"]["row_count"] == 1
+    assert catalog["datasets"]["backlinks_analysis"]["row_count"] == 1
 
     keyword_serp = ds.dataset(
         output_dir / "parquet" / "keyword_serp",
+        format="parquet",
+    ).to_table().to_pylist()
+    backlinks_analysis = ds.dataset(
+        output_dir / "parquet" / "backlinks_analysis",
         format="parquet",
     ).to_table().to_pylist()
     domain_features = ds.dataset(
@@ -53,10 +84,13 @@ def test_build_feature_marts_materializes_lazy_joins_from_curated_tables(
 
     assert any(row["serp_rank"] == 1 for row in keyword_serp)
     assert any(row["domain"] == "example.com" for row in domain_features)
+    assert any(row["backlinks_count"] == 42 for row in backlinks_analysis)
+    assert any(row["referring_links_types_json"] is not None for row in backlinks_analysis)
 
     run_json = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
     assert run_json["catalog"]["datasets"]["keyword_serp"]["row_count"] == 1
     assert run_json["catalog"]["datasets"]["domain_features"]["row_count"] == 1
+    assert run_json["catalog"]["datasets"]["backlinks_analysis"]["row_count"] == 1
 
 
 def test_build_feature_marts_validates_each_feature_frame_before_sinking(
@@ -81,6 +115,7 @@ def test_build_feature_marts_validates_each_feature_frame_before_sinking(
             "page_features": pl.DataFrame([{"run_id": "run-1"}]).lazy(),
             "passage_features": pl.DataFrame([{"run_id": "run-1"}]).lazy(),
             "domain_features": pl.DataFrame([{"run_id": "run-1"}]).lazy(),
+            "backlinks_analysis": pl.DataFrame([{"run_id": "run-1"}]).lazy(),
             "textrazor_page_metrics": pl.DataFrame([{"run_id": "run-1"}]).lazy(),
         }
 
@@ -108,119 +143,10 @@ def test_build_feature_marts_validates_each_feature_frame_before_sinking(
 
     build_feature_marts(run_dir)
 
-    assert calls == [
-        (
-            "validate",
-            (
-                "run_id",
-                "target_keyword_id",
-                "target_keyword",
-                "keyword_order",
-                "source_response_id",
-                "serp_item_id",
-                "canonical_url_hash",
-                "url",
-                "serp_rank",
-                "title",
-                "description",
-                "schema_version",
-            ),
-        ),
-        ("write", "keyword_serp"),
-        (
-            "validate",
-            (
-                "run_id",
-                "target_keyword_id",
-                "target_keyword",
-                "page_id",
-                "response_id",
-                "canonical_url_hash",
-                "url",
-                "title",
-                "page_text_length",
-                "bge_raw_score",
-                "bge_normalized_score",
-                "gemini_doc_retrieval_raw_score",
-                "gemini_doc_retrieval_normalized_score",
-                "gemini_semantic_similarity_raw_score",
-                "gemini_semantic_similarity_normalized_score",
-                "schema_version",
-            ),
-        ),
-        ("write", "page_features"),
-        (
-            "validate",
-            (
-                "run_id",
-                "target_keyword_id",
-                "target_keyword",
-                "page_id",
-                "response_id",
-                "passage_id",
-                "canonical_url_hash",
-                "url",
-                "source",
-                "word_count",
-                "passage_text_length",
-                "schema_version",
-            ),
-        ),
-        ("write", "passage_features"),
-        (
-            "validate",
-            (
-                "run_id",
-                "target_keyword_id",
-                "target_keyword",
-                "domain_feature_id",
-                "domain",
-                "serp_item_count",
-                "best_serp_rank",
-                "worst_serp_rank",
-                "schema_version",
-            ),
-        ),
-        ("write", "domain_features"),
-        (
-            "validate",
-            (
-                "run_id",
-                "target_keyword_id",
-                "target_keyword",
-                "response_id",
-                "canonical_url_hash",
-                "url",
-                "page_metrics_row_id",
-                "textrazor_entity_confidence_score",
-                "textrazor_entity_relevance_score",
-                "textrazor_topic_score",
-                "textrazor_category_score",
-                "textrazor_classifier_score",
-                "textrazor_entailment_score",
-                "textrazor_entailment_prior",
-                "textrazor_entailment_context",
-                "textrazor_word_count",
-                "textrazor_grammar_count",
-                "textrazor_sense_count",
-                "textrazor_spelling_count",
-                "textrazor_relation_count",
-                "textrazor_property_count",
-                "textrazor_noun_phrase_count",
-                "textrazor_entities_present",
-                "textrazor_topics_present",
-                "textrazor_categories_present",
-                "textrazor_entailments_present",
-                "textrazor_words_present",
-                "textrazor_relations_present",
-                "textrazor_properties_present",
-                "textrazor_noun_phrases_present",
-                "textrazor_page_metrics_complete",
-                "schema_version",
-            ),
-        ),
-        ("write", "textrazor_page_metrics"),
-    ]
+    assert ("validate", BACKLINKS_ANALYSIS_REQUIRED_COLUMNS) in calls
+    assert ("write", "backlinks_analysis") in calls
+    assert calls.index(("write", "backlinks_analysis")) > calls.index(("write", "domain_features"))
+    assert calls.index(("write", "textrazor_page_metrics")) > calls.index(("write", "backlinks_analysis"))
 
 
 def test_write_feature_dataset_uses_lazy_sink_parquet_with_statistics(

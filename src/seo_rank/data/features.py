@@ -9,6 +9,7 @@ import polars as pl
 import pyarrow.parquet as pq
 
 from seo_rank.data.marts import build_analysis_lazyframe
+from seo_rank.data.normalize import CURATED_VALIDATION_RULES
 from seo_rank.data.scans import scan_curated_table
 from seo_rank.data.validate import (
     validate_frame_contract,
@@ -108,6 +109,7 @@ FEATURE_REQUIRED_COLUMNS = {
         "textrazor_page_metrics_complete",
         "schema_version",
     ),
+    "backlinks_analysis": tuple(CURATED_VALIDATION_RULES["backlinks"]["expected_schema"].keys()),
 }
 ANALYSIS_REQUIRED_COLUMNS = (
     "run_id",
@@ -349,6 +351,7 @@ FEATURE_VALIDATION_RULES = {
             "textrazor_noun_phrase_count": (0, None),
         },
     },
+    "backlinks_analysis": CURATED_VALIDATION_RULES["backlinks"],
     "analysis_mart": {
         "expected_schema": {
             "run_id": pl.Utf8,
@@ -398,6 +401,46 @@ FEATURE_VALIDATION_RULES = {
     },
 }
 
+BACKLINKS_ANALYSIS_EXCLUDED_COLUMNS = {
+    "run_id",
+    "target_keyword_id",
+    "target_keyword",
+    "response_id",
+    "canonical_url_hash",
+    "url",
+    "schema_version",
+}
+BACKLINKS_ANALYSIS_EXTRA_COLUMNS = tuple(
+    column
+    for column in CURATED_VALIDATION_RULES["backlinks"]["expected_schema"].keys()
+    if column not in BACKLINKS_ANALYSIS_EXCLUDED_COLUMNS
+)
+BACKLINKS_ANALYSIS_REQUIRED_COLUMNS = (
+    *ANALYSIS_REQUIRED_COLUMNS,
+    *BACKLINKS_ANALYSIS_EXTRA_COLUMNS,
+)
+BACKLINKS_ANALYSIS_EXPECTED_SCHEMA = {
+    **FEATURE_VALIDATION_RULES["analysis_mart"]["expected_schema"],
+    **{
+        column: CURATED_VALIDATION_RULES["backlinks"]["expected_schema"][column]
+        for column in BACKLINKS_ANALYSIS_EXTRA_COLUMNS
+    },
+}
+BACKLINKS_ANALYSIS_BOUNDED_COLUMNS = {
+    **FEATURE_VALIDATION_RULES["analysis_mart"]["bounded_columns"],
+    "backlinks_count": (0, None),
+    "referring_domains_count": (0, None),
+    "dofollow_backlinks_count": (0, None),
+    "dofollow_referring_domains_count": (0, None),
+}
+FEATURE_REQUIRED_COLUMNS["backlinks_analysis"] = BACKLINKS_ANALYSIS_REQUIRED_COLUMNS
+FEATURE_VALIDATION_RULES["backlinks_analysis"] = {
+    "expected_schema": BACKLINKS_ANALYSIS_EXPECTED_SCHEMA,
+    "unique_columns": FEATURE_VALIDATION_RULES["analysis_mart"]["unique_columns"],
+    "non_null_columns": FEATURE_VALIDATION_RULES["analysis_mart"]["non_null_columns"],
+    "bounded_columns": BACKLINKS_ANALYSIS_BOUNDED_COLUMNS,
+}
+
 
 def build_feature_lazyframes(
     curated_frames: Mapping[str, pl.LazyFrame],
@@ -407,6 +450,7 @@ def build_feature_lazyframes(
     pages = curated_frames["pages"]
     passages = curated_frames["passages"]
     similarity_scores = curated_frames["similarity_scores"]
+    backlinks = curated_frames["backlinks"]
 
     keyword_serp = (
         keywords.join(
@@ -531,11 +575,36 @@ def build_feature_lazyframes(
         .sort(["target_keyword_id", "domain"])
     )
 
+    analysis_base = build_analysis_lazyframe(
+        {
+            "keyword_serp": keyword_serp,
+            "page_features": page_features,
+        }
+    )
+    backlinks_analysis = (
+        analysis_base.join(
+            backlinks.select(
+                [
+                    "run_id",
+                    "target_keyword_id",
+                    "canonical_url_hash",
+                    "url",
+                    *BACKLINKS_ANALYSIS_EXTRA_COLUMNS,
+                ]
+            ),
+            on=["run_id", "target_keyword_id", "canonical_url_hash", "url"],
+            how="left",
+        )
+        .with_columns(pl.lit(FEATURE_SCHEMA_VERSION).alias("schema_version"))
+        .sort(["target_keyword_id", "serp_rank", "canonical_url_hash"])
+    )
+
     return {
         "keyword_serp": keyword_serp,
         "page_features": page_features,
         "passage_features": passage_features,
         "domain_features": domain_features,
+        "backlinks_analysis": backlinks_analysis,
         "textrazor_page_metrics": curated_frames["textrazor_page_metrics_curated"],
     }
 
@@ -560,6 +629,7 @@ def build_feature_marts(run_dir: Path) -> dict[str, object]:
             "pages",
             "passages",
             "similarity_scores",
+            "backlinks",
             "textrazor_page_metrics_curated",
         )
     }

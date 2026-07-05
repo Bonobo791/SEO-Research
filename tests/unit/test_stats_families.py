@@ -31,6 +31,7 @@ def test_signal_family_registry_preserves_order_and_panel_grain() -> None:
         "textrazor_entailment_score_prior_context",
         "textrazor_word_grammar_sense_spelling",
         "textrazor_relation_property_noun_phrase",
+        "backlinks_counts",
     )
     assert registry.family("gemini_doc_retrieval").signal_columns == (
         "gemini_doc_retrieval_normalized_score",
@@ -39,6 +40,12 @@ def test_signal_family_registry_preserves_order_and_panel_grain() -> None:
         "textrazor_entailment_score",
         "textrazor_entailment_prior",
         "textrazor_entailment_context",
+    )
+    assert registry.family("backlinks_counts").kind == "backlinks_metric"
+    assert registry.family("backlinks_counts").signal_columns == (
+        "backlinks_count",
+        "referring_domains_count",
+        "dofollow_backlinks_count",
     )
     assert registry.families_by_kind("similarity")[0].key == "bge"
 

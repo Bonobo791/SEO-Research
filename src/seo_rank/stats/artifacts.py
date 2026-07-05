@@ -83,6 +83,7 @@ def build_family_source_frames(
 
     source_frames: dict[str, pl.DataFrame] = {
         "analysis_mart": analysis_mart,
+        "backlinks_analysis": _load_backlinks_family_frame(run_dir),
         "textrazor_page_metrics": _load_textrazor_family_frame(
             run_dir,
             analysis_mart=analysis_mart,
@@ -112,6 +113,17 @@ def _load_textrazor_family_frame(
         textrazor_page_metrics,
         signal_columns=signal_columns,
     )
+
+
+def _load_backlinks_family_frame(run_dir: Path) -> pl.DataFrame:
+    backlinks_path = Path(run_dir) / "parquet" / "backlinks_analysis"
+    if not backlinks_path.exists():
+        return pl.DataFrame()
+
+    try:
+        return scan_curated_table(run_dir, "backlinks_analysis").collect()
+    except OSError:
+        return pl.DataFrame()
 
 
 def merge_keyword_analysis_frame(

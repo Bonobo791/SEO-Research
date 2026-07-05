@@ -11,6 +11,7 @@ from typing import Any
 VALID_SIGNAL_FAMILY_KINDS = frozenset(
     {
         "similarity",
+        "backlinks_metric",
         "textrazor_scalar",
         "textrazor_structural",
     }
@@ -18,6 +19,7 @@ VALID_SIGNAL_FAMILY_KINDS = frozenset(
 
 SOURCE_MART_BY_KIND = {
     "similarity": "analysis_mart",
+    "backlinks_metric": "backlinks_analysis",
     "textrazor_scalar": "textrazor_page_metrics",
     "textrazor_structural": "textrazor_page_metrics",
 }

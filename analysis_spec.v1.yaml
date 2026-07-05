@@ -93,6 +93,12 @@ signal_families:
         - textrazor_relation_count
         - textrazor_property_count
         - textrazor_noun_phrase_count
+    - key: backlinks_counts
+      kind: backlinks_metric
+      signal_columns:
+        - backlinks_count
+        - referring_domains_count
+        - dofollow_backlinks_count
 
 estimand:
   outcome: -log(serp_rank)

@@ -1479,6 +1479,394 @@ nullable carve-out before this phase starts.
 | Family-aware stats emit backlinks blocks in `stats_*` | 3 | Open |
 | Live/stored CLI regressions cover backlinks raw persistence (both partitions) + analysis | 4 | Open |
 
+### Phase 7 — DataForSEO datapoint expansion
+
+Widen the factor set with DataForSEO data already paid for but unused:
+on-page content/CWV/structured-data signals, backlink quality and
+anchor-relevance (not just counts), backlink velocity, domain authority,
+domain technology/age, and SERP feature presence. Every new source is
+**additive** — new signal families and feature marts, no `analysis_mart`
+schema bump — raw-persisted to disk immediately per call (DataForSEO Live
+endpoints are not retained provider-side), backfillable onto existing runs
+via `run --stored-run` without refetching unrelated data, and covered by
+offline fixtures before any live wiring. Partial/missing per-source data is
+represented as null (mirrors `dofollow_backlinks_count` /
+`backlinks_metrics_complete`), never as a fetch failure — a run missing one
+new source must still produce full stats for every other family.
+
+**Depends on Phase 6.2:** reuses the `backlinks_metric` family kind and
+`backlinks_analysis` mart pattern established there.
+
+**Shared implementation pattern per source** (apply once per sub-phase, not
+restated per slice): (1) client module — request builder(s), a response
+schema table (new `DATAFORSEO_RESPONSE_SCHEMAS` entries for DataForSEO
+endpoints in `dataforseo.py`), one `fixture_*_response()`, offline
+request/schema tests, no live wiring yet; (2) fetch + partial-durability
+persistence — a `fetch_<source>_for_*` function building raw records via
+`build_raw_response_record(..., endpoint="<partition>")`, persisted in a
+`finally:` block so a mid-batch crash keeps prior progress (copy
+`fetch_dataforseo_backlinks_for_urls` / `persist_backlink_raw_responses` in
+`cli.py`, including the dedupe key and `refresh_run_json_raw_response_catalog`);
+(3) live-run wiring alongside the existing backlinks fetch so new runs
+collect the source automatically; (4) `--stored-run` backfill — extend
+`expand_stored_run` / `build_resumed_keyword_result`'s reuse-check (mirrors
+`_register_usable_backlink_response`) so only missing URLs/domains are
+(re)fetched; this is the **one** general backfill mechanism for every source
+in this phase, not a per-source CLI flag; (5) curated builder in
+`data/normalize.py`, feature mart entry in `data/features.py` joined on the
+correct grain (URL sources join like `backlinks_analysis` on
+`["run_id","target_keyword_id","canonical_url_hash","url"]`; domain sources
+derive `domain` the way `domain_features` does), a new family `kind` in
+`stats/families.py` (`VALID_SIGNAL_FAMILY_KINDS` + `SOURCE_MART_BY_KIND`),
+and a family block appended (never reordered) to
+`analysis_spec.v1.yaml` `signal_families.families`; (6) artifacts wiring
+(spearman/regression/diagnostics/Plackett-Luce per new family) plus golden
+fixtures and a stored-run regression proving only the missing source gets
+(re)fetched.
+
+#### 7.1 — OnPage page signals (`on_page/instant_pages`)
+
+URL grain (`canonical_url_hash` + `url`), one synchronous live call per SERP
+URL with `enable_javascript`, `enable_browser_rendering`, `load_resources`,
+and `validate_micromarkup: true` all set on the same request — structured-data
+validation rides along in one call, no separate `on_page/microdata` endpoint
+or task id needed, and no `task_post` crawl/poll flow.
+
+##### Dev slices
+
+**Progress:** 0 of 10 shipped.
+
+1. **[ ] Slice 1 — Request/schema/fixture** — `build_onpage_instant_pages_request()`,
+   `DATAFORSEO_RESPONSE_SCHEMAS["onpage_instant_pages"]`,
+   `fixture_onpage_instant_pages_response()` in `dataforseo.py`.
+2. **[ ] Slice 2 — Offline tests** — request shape, schema-accept, schema-drift
+   rejection.
+3. **[ ] Slice 3 — Fetch + persistence** — `fetch_onpage_signals_for_urls` in
+   `cli.py`, one call per unique `(target_keyword, url)`, persisted to
+   `raw_responses/endpoint=onpage_instant_pages`.
+4. **[ ] Slice 4 — Live-run wiring** — call alongside the existing backlinks
+   fetch in the live keyword-result build path.
+5. **[ ] Slice 5 — Stored-run backfill** — extend `expand_stored_run` reuse-check
+   for the `onpage_instant_pages` partition.
+6. **[ ] Slice 6 — Curated builder** — `build_onpage_signals_frame`: `onpage_score`;
+   a fixed ~12-check subset (title/meta length, h1 present, canonical present,
+   is_https, render-blocking resources); `content` word count, plain-text
+   rate, readability scores (Flesch-Kincaid, Coleman-Liau, SMOG, Dale-Chall);
+   `page_timing` TTFB, LCP, CLS; `total_transfer_size`; microdata summary
+   (`items_count`, `errors_count`, `warnings_count`, `has_valid_structured_data`).
+7. **[ ] Slice 7 — Feature mart** — `onpage_features`, URL-grain join,
+   bounded validation (score 0-100, non-negative counts/timing).
+8. **[ ] Slice 8 — Family registry** — new kind `onpage_metric`; add
+   `onpage_content_quality`, `onpage_core_web_vitals`, and
+   `onpage_technical_checks` families to `analysis_spec.v1.yaml` (grouped by
+   concept, not one giant family).
+9. **[ ] Slice 9 — Artifacts wiring** — spearman/regression/diagnostics/PL
+   per new family, report sections.
+10. **[ ] Slice 10 — Fixtures and regressions** — golden fixtures, stored-run
+    regression, full-layer unit tests.
+
+#### 7.2 — Backlink quality & anchor relevance (`backlinks/backlinks/live`)
+
+URL grain. One call per SERP URL, `mode: one_per_domain`, `limit: 100`,
+`order_by` on `rank` descending. Anchor-text relevance is derived from the
+`anchor` field already on this response — the dedicated
+`backlinks/anchors/live` endpoint is skipped as redundant, cutting an entire
+API source.
+
+##### Dev slices
+
+**Progress:** 0 of 9 shipped.
+
+1. **[ ] Slice 1 — Request/schema/fixture** — `build_backlinks_detail_request()`
+   in `dataforseo.py`.
+2. **[ ] Slice 2 — Offline tests.**
+3. **[ ] Slice 3 — Fetch + persistence** — `fetch_backlinks_detail_for_urls`,
+   `raw_responses/endpoint=backlinks_detail`.
+4. **[ ] Slice 4 — Live-run wiring.**
+5. **[ ] Slice 5 — Stored-run backfill** for `backlinks_detail`.
+6. **[ ] Slice 6 — Curated builder** — `build_backlink_details_frame`: one row
+   per `(run_id, target_keyword_id, canonical_url_hash, backlink_id)` with
+   `domain_from_rank`, `page_from_rank`, `backlink_spam_score`, `anchor`,
+   `dofollow`, `tld_from`, `domain_from_country`, `first_seen`.
+7. **[ ] Slice 7 — Aggregation feature mart** — `backlink_quality_features`
+   grouped back to URL grain: `avg_domain_from_rank`, `max_domain_from_rank`,
+   `avg_backlink_spam_score`, `anchor_keyword_match_ratio` (lexical overlap
+   between anchor text and `target_keyword`, no new NLP dependency),
+   `referring_tld_diversity_count`, `referring_country_diversity_count`; null
+   the whole row when zero backlinks returned (distinct from not-yet-fetched).
+8. **[ ] Slice 8 — Family registry** — new kind `backlinks_quality`; add
+   `backlinks_quality` and `backlinks_anchor_relevance` families, kept
+   separate from the existing `backlinks_counts` family (Phase 6.2).
+9. **[ ] Slice 9 — Artifacts, fixtures, stored-run regression, tests.**
+
+#### 7.3 — Backlink velocity (`backlinks/timeseries_new_lost_summary/live`)
+
+URL grain, one call per SERP URL, `group_range: month`, `date_from` 90 days
+before the run's collection date.
+
+##### Dev slices
+
+**Progress:** 0 of 9 shipped.
+
+1. **[ ] Slice 1 — Request/schema/fixture.**
+2. **[ ] Slice 2 — Offline tests.**
+3. **[ ] Slice 3 — Fetch + persistence** — `fetch_backlink_velocity_for_urls`,
+   `raw_responses/endpoint=backlinks_velocity`.
+4. **[ ] Slice 4 — Live-run wiring.**
+5. **[ ] Slice 5 — Stored-run backfill.**
+6. **[ ] Slice 6 — Curated builder** — sum monthly buckets into
+   `new_backlinks_90d`, `lost_backlinks_90d`,
+   `net_backlink_velocity_90d = new - lost`.
+7. **[ ] Slice 7 — Feature mart** — `backlink_velocity_features`, URL-grain join.
+8. **[ ] Slice 8 — Family registry** — `backlinks_velocity` family, kind
+   `backlinks_metric` (same shape as counts).
+9. **[ ] Slice 9 — Artifacts, fixtures, stored-run regression, tests.**
+
+#### 7.4 — Domain authority (`dataforseo_labs/google/domain_rank_overview/live`)
+
+Domain grain, one call per **unique domain** in the run (dedupe the way
+`domain_features` derives `domain` from SERP URLs).
+
+##### Dev slices
+
+**Progress:** 0 of 9 shipped.
+
+1. **[ ] Slice 1 — Request/schema/fixture** — `target`, `location_code`,
+   `language_code`, `limit: 1`.
+2. **[ ] Slice 2 — Offline tests.**
+3. **[ ] Slice 3 — Fetch + persistence** — `fetch_domain_rank_overview_for_domains`,
+   dedupe domains across the whole run before fetching, `raw_responses/endpoint=domain_rank_overview`.
+4. **[ ] Slice 4 — Live-run wiring** — once per run after SERP collection.
+5. **[ ] Slice 5 — Stored-run backfill**, keyed on domain not URL.
+6. **[ ] Slice 6 — Curated builder** — `build_domain_rank_overview_frame`:
+   `domain_rank`, `estimated_organic_traffic` (`etv`), `ranked_keywords_count`
+   (`count`); one row per `(run_id, domain)`.
+7. **[ ] Slice 7 — Feature mart** — `domain_authority_features`, joined via
+   derived `domain` column the way `domain_features` joins.
+8. **[ ] Slice 8 — Family registry** — new kind `domain_authority`; add
+   `domain_authority` family.
+9. **[ ] Slice 9 — Artifacts, fixtures, stored-run regression, tests.**
+
+#### 7.5 — Domain technology & age (`domain_analytics/technologies/domain_technologies/live` + `domain_analytics/whois/overview/live`)
+
+Domain grain, same dedupe-once-per-run approach as 7.4. Two endpoints in one
+sub-phase since both are cheap per-domain lookups feeding the same mart.
+
+##### Dev slices
+
+**Progress:** 0 of 9 shipped.
+
+1. **[ ] Slice 1 — Request/schema/fixture for both endpoints** —
+   `build_domain_technologies_request`, `build_domain_whois_request` (whois
+   uses `filters: [["domain","=",target]]`, not a bare `target` field).
+2. **[ ] Slice 2 — Offline tests for both.**
+3. **[ ] Slice 3 — Fetch + persistence for both** —
+   `fetch_domain_technology_for_domains` + `fetch_domain_whois_for_domains`,
+   `raw_responses/endpoint=domain_technologies` and `endpoint=domain_whois`.
+4. **[ ] Slice 4 — Live-run wiring for both.**
+5. **[ ] Slice 5 — Stored-run backfill for both partitions.**
+6. **[ ] Slice 6 — Curated builder** — `domain_age_days` (today minus
+   `created_datetime`, computed at normalize time so it stays current across
+   re-normalizes); CMS/web-dev tech boolean flags (e.g. `uses_wordpress`,
+   `uses_shopify`, `uses_react`); `tech_stack_count`.
+7. **[ ] Slice 7 — Feature mart** — `domain_technology_features`, same
+   domain-grain join as 7.4.
+8. **[ ] Slice 8 — Family registry** — new kind `domain_technology`; add
+   `domain_technology` family (age + tech flags).
+9. **[ ] Slice 9 — Artifacts, fixtures, stored-run regression, tests.**
+
+#### 7.6 — SERP feature presence (normalize-only, no new API calls)
+
+Parses already-stored `raw_responses/endpoint=serp` payloads — no new
+endpoint, no fetch/backfill wiring for the core slices.
+
+##### Dev slices
+
+**Progress:** 0 of 5 shipped.
+
+1. **[ ] Slice 1 — Curated builder** — `build_serp_features_frame`: parse
+   stored SERP `item_types` into `has_featured_snippet`,
+   `has_people_also_ask`, `has_video`, `has_sitelinks`, `has_faq`, plus
+   `same_domain_serp_position_count`; row grain matches `serp_items`.
+2. **[ ] Slice 2 — Feature mart** — `serp_feature_presence`, URL-grain join,
+   boolean validation rules.
+3. **[ ] Slice 3 — Family registry** — new kind `serp_feature`; add
+   `serp_features` family.
+4. **[ ] Slice 4 — Artifacts, fixtures (including a no-rich-features SERP
+   payload proving nulls/false render correctly), tests.**
+5. **[ ] Slice 5 — Forward-looking pixel position (separate, no backfill)** —
+   add `calculate_rectangles: true` to `build_serp_request()` behind a new
+   opt-in `--serp-pixel-position` CLI flag (default off); nullable
+   `serp_pixel_position_y` column; old runs stay null; explicitly no backfill
+   since re-fetching the SERP would change ranks for existing runs.
+
+| Acceptance item | Sub-phase | Status |
+| --------------- | --------- | ------ |
+| OnPage content/CWV/technical-check families land without an `analysis_mart` schema bump | 7.1 | Open |
+| Backlink quality + anchor-relevance families are separate from the existing counts family | 7.2 | Open |
+| Backlink velocity family lands at URL grain | 7.3 | Open |
+| Domain authority family lands at domain grain, deduped once per run | 7.4 | Open |
+| Domain technology/age family lands at domain grain | 7.5 | Open |
+| SERP feature presence lands from stored SERP payloads with no new API calls | 7.6 | Open |
+| `run --stored-run` backfills every new source's missing raw partition without refetching unrelated data | 7.1–7.5 | Open |
+
+### Phase 8 — Non-DataForSEO API integrations
+
+Add free-tier third-party signals DataForSEO doesn't cover: real-user Core
+Web Vitals, content freshness, and brand/entity authority. Majestic, Ahrefs,
+Moz, Similarweb, Google Search Console, and Google Natural Language are
+**deferred** — paid or account-gated, marginal value over Phase 7. Each
+source here is a brand-new client module (no existing endpoint to extend) but
+follows the identical implementation pattern from Phase 7 — client module
+with fixtures and offline tests, `SEO_RANK_ENABLE_<SOURCE>` env gate plus a
+`validate_live_<source>_config`, fetch + `finally:`-block persistence with a
+dedupe key, live-run wiring gated on that flag (these need their own
+credentials, so unlike Phase 7's bundled DataForSEO calls they stay opt-in
+like TextRazor), `--stored-run` backfill via the same reuse-check extension,
+curated builder + feature mart + new family kind + spec entry, and golden
+fixtures plus a stored-run regression. Missing/not-found data (e.g. a domain
+with no CrUX data, a URL never archived) is a valid null outcome, never a
+fetch error.
+
+#### 8.1 — Google Chrome UX Report (CrUX) API — field Core Web Vitals
+
+`POST https://chromeuxreport.googleapis.com/v1/records:queryRecord?key=<GOOGLE_API_KEY>`.
+URL grain with origin fallback: query `url` first; on 404 (no per-URL CrUX
+data), retry once with `origin` and flag `crux_is_origin_fallback: true`.
+Free, 150 req/min per GCP project.
+
+##### Dev slices
+
+**Progress:** 0 of 11 shipped.
+
+1. **[ ] Slice 1 — Client module** — new `src/seo_rank/crux.py`:
+   `CruxCredentials` (`api_key`), `build_crux_record_request(url_or_origin, form_factor=None)`,
+   `CRUX_RESPONSE_SCHEMA`, `fixture_crux_response()`,
+   `validate_crux_credentials(env)`.
+2. **[ ] Slice 2 — Offline tests** — url vs origin body shape, schema-accept,
+   schema-drift reject.
+3. **[ ] Slice 3 — Execute + retry** — `execute_crux_request()` (copy the
+   `execute_dataforseo_request` retry loop); treat HTTP 404 as "no data", not
+   a retryable error.
+4. **[ ] Slice 4 — Env gate** — `SEO_RANK_ENABLE_CRUX` +
+   `validate_live_crux_config`; `GOOGLE_API_KEY` documented (shared with 8.3).
+5. **[ ] Slice 5 — Fetch + persistence** — `fetch_crux_for_urls`: per unique
+   URL, try `url` record, fall back to `origin` on 404, persist to
+   `raw_responses/endpoint=crux`.
+6. **[ ] Slice 6 — Live-run wiring**, gated on `SEO_RANK_ENABLE_CRUX`.
+7. **[ ] Slice 7 — Stored-run backfill** for the `crux` partition.
+8. **[ ] Slice 8 — Curated builder** — `build_crux_frame`: `crux_lcp_p75`,
+   `crux_inp_p75`, `crux_cls_p75` (p75 from each histogram metric),
+   `crux_is_origin_fallback`, `crux_has_data` (false when neither url nor
+   origin returned a record — not a fetch error).
+9. **[ ] Slice 9 — Feature mart** — `crux_features`, URL-grain join.
+10. **[ ] Slice 10 — Family registry** — new kind `crux_field_data`; add
+    `crux_core_web_vitals` family.
+11. **[ ] Slice 11 — Fixtures (url-hit, origin-fallback, no-data), stored-run
+    regression, tests.**
+
+#### 8.2 — Wayback Machine CDX Server API — content freshness
+
+`GET http://web.archive.org/cdx/search/cdx?url=<url>&output=json&limit=1&fl=timestamp&filter=statuscode:200`
+for first capture, plus `output=json&fl=timestamp&collapse=timestamp:8` for a
+distinct-capture count. No auth. URL grain.
+
+##### Dev slices
+
+**Progress:** 0 of 10 shipped.
+
+1. **[ ] Slice 1 — Client module** — new `src/seo_rank/wayback.py`:
+   `build_wayback_first_capture_request(url)`,
+   `build_wayback_capture_count_request(url)`; validate the bare-JSON-array
+   CDX response shape (header row + field count) instead of a
+   path-based schema; `fixture_wayback_response()`. No credentials object
+   (public API) — skip `validate_*_credentials`, but still add
+   `SEO_RANK_ENABLE_WAYBACK` for gate consistency.
+2. **[ ] Slice 2 — Offline tests** — request shape, response-shape
+   validation, drift rejection (e.g. missing header row).
+3. **[ ] Slice 3 — Execute + retry** — `execute_wayback_request()` (no auth,
+   simplest client in this phase).
+4. **[ ] Slice 4 — Fetch + persistence** — `fetch_wayback_for_urls`: two
+   calls per unique URL, persisted to
+   `raw_responses/endpoint=wayback_first_capture` and
+   `endpoint=wayback_capture_count`.
+5. **[ ] Slice 5 — Live-run wiring**, gated on `SEO_RANK_ENABLE_WAYBACK`.
+6. **[ ] Slice 6 — Stored-run backfill** for both partitions.
+7. **[ ] Slice 7 — Curated builder** — `first_capture_date`,
+   `days_since_first_capture` (computed at normalize time), `capture_count`;
+   null when never archived (a valid outcome, not an error).
+8. **[ ] Slice 8 — Feature mart** — `wayback_features`, URL-grain join.
+9. **[ ] Slice 9 — Family registry** — new kind `content_freshness`; add
+   `content_freshness` family.
+10. **[ ] Slice 10 — Fixtures (found / never-archived), stored-run
+    regression, tests.**
+
+#### 8.3 — Google Knowledge Graph Search API — brand entity confirmation
+
+`GET https://kgsearch.googleapis.com/v1/entities:search?query=<brand>&key=<GOOGLE_API_KEY>&limit=1`.
+Domain grain; brand name derived from the registrable domain label (reuse
+whatever label extraction `domain_features` already does).
+
+##### Dev slices
+
+**Progress:** 0 of 11 shipped.
+
+1. **[ ] Slice 1 — Client module** — new `src/seo_rank/knowledge_graph.py`:
+   `KnowledgeGraphCredentials` (`api_key`, shared `GOOGLE_API_KEY`),
+   `build_kg_search_request(query)`, response schema, `fixture_kg_response()`,
+   `validate_knowledge_graph_credentials(env)`.
+2. **[ ] Slice 2 — Offline tests.**
+3. **[ ] Slice 3 — Execute + retry** — `execute_kg_request()`.
+4. **[ ] Slice 4 — Env gate** — `SEO_RANK_ENABLE_KNOWLEDGE_GRAPH` + validator.
+5. **[ ] Slice 5 — Fetch + persistence** — `fetch_knowledge_graph_for_domains`,
+   dedupe-by-domain, `raw_responses/endpoint=knowledge_graph`.
+6. **[ ] Slice 6 — Live-run wiring**, gated on the flag.
+7. **[ ] Slice 7 — Stored-run backfill**, keyed on domain.
+8. **[ ] Slice 8 — Curated builder** — `kg_entity_found` (`itemListElement`
+   non-empty), `kg_result_score` (top hit's `resultScore`, null when not found).
+9. **[ ] Slice 9 — Feature mart** — `knowledge_graph_features`, domain-grain join.
+10. **[ ] Slice 10 — Family registry** — new kind `entity_authority`; add
+    `knowledge_graph_entity` family.
+11. **[ ] Slice 11 — Fixtures (found / not-found), stored-run regression, tests.**
+
+#### 8.4 — Wikidata entity search — supplementary brand notability
+
+`GET https://www.wikidata.org/w/api.php?action=wbsearchentities&search=<brand>&language=en&format=json&limit=1`.
+Domain grain, no auth. Kept deliberately thin (existence flag only) — overlaps
+with 8.3 and is a lower-priority cross-check.
+
+##### Dev slices
+
+**Progress:** 0 of 10 shipped.
+
+1. **[ ] Slice 1 — Client module** — new `src/seo_rank/wikidata.py`:
+   `build_wikidata_search_request(query)`, response schema,
+   `fixture_wikidata_response()`. No credentials needed; still add
+   `SEO_RANK_ENABLE_WIKIDATA` for gate consistency.
+2. **[ ] Slice 2 — Offline tests.**
+3. **[ ] Slice 3 — Execute + retry** — `execute_wikidata_request()`.
+4. **[ ] Slice 4 — Fetch + persistence** — `fetch_wikidata_for_domains`,
+   dedupe-by-domain, `raw_responses/endpoint=wikidata`.
+5. **[ ] Slice 5 — Live-run wiring**, gated on `SEO_RANK_ENABLE_WIKIDATA`.
+6. **[ ] Slice 6 — Stored-run backfill**, keyed on domain.
+7. **[ ] Slice 7 — Curated builder** — `wikidata_entity_found`,
+   `wikidata_label_match` (exact case-insensitive label match, a simple
+   lexical check, not a new fuzzy-matching dependency).
+8. **[ ] Slice 8 — Feature mart** — `wikidata_features`, domain-grain join.
+9. **[ ] Slice 9 — Family registry** — add `wikidata_entity` signal columns
+   to the existing `entity_authority` kind from 8.3 (same concept, one family,
+   two extra columns) rather than inventing a new kind.
+10. **[ ] Slice 10 — Fixtures, stored-run regression, tests.**
+
+| Acceptance item | Sub-phase | Status |
+| --------------- | --------- | ------ |
+| CrUX field CWV family lands at URL grain with origin fallback | 8.1 | Open |
+| Wayback freshness family lands at URL grain | 8.2 | Open |
+| Knowledge Graph entity-authority family lands at domain grain | 8.3 | Open |
+| Wikidata notability signal joins the same entity-authority family as 8.3 | 8.4 | Open |
+| Every Phase 8 source stays opt-in behind its own `SEO_RANK_ENABLE_<SOURCE>` flag | 8.1–8.4 | Open |
+| `run --stored-run` backfills every new source's missing raw partition without refetching unrelated data | 8.1–8.4 | Open |
+
 ## Deferred
 
 - Entity-derived features beyond Phase 5.6 density bundle (keyword–entity overlap,
@@ -1487,6 +1875,12 @@ nullable carve-out before this phase starts.
 - CI, release packaging, coverage thresholds
 - Production deployment, databases, cache
 - Parquet `Variant` type for provider payloads
+- Content Analysis API (citation-index brand mentions) — marginal value over
+  TextRazor, doesn't fit a per-URL/per-domain grain cleanly (considered and
+  cut from Phase 7/8 scope)
+- Majestic, Ahrefs, Moz, Similarweb, Google Search Console, Google Natural
+  Language API — paid/account-gated third-party signals (considered and cut
+  from Phase 8 scope in favor of free-tier sources)
 
 ## History
 
