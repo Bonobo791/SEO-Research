@@ -8,6 +8,7 @@ from seo_rank.stats.textrazor_explainability import (
     CURATED_RANKING_SCORE_COLUMNS,
     SIMILARITY_RANKING_METRICS,
     TEXTRAZOR_RANKING_METRICS,
+    fit_multivariate_ranking_model,
     summarize_ranking_explainability,
     summarize_similarity_ranking_explainability,
     summarize_textrazor_ranking_explainability,
@@ -53,6 +54,24 @@ def _textrazor_panel_frame() -> pl.DataFrame:
                 }
             )
     return pl.DataFrame(rows)
+
+
+def test_fit_multivariate_ranking_model_skips_when_design_matrix_is_column_rank_deficient() -> None:
+    # Mirrors the regression.py rank-deficiency case: df_resid (rank-based) is
+    # positive, but nobs == raw exog column count, which previously reached
+    # get_robustcov_results(cov_type="cluster") and raised ZeroDivisionError.
+    panel = pl.DataFrame(
+        {
+            "target_keyword_id": ["k0", "k1", "k2", "k3", "k4", "k4", "k4"],
+            "serp_rank": [1, 1, 1, 1, 1, 2, 3],
+            "page_text_length": [100, 200, 300, 400, 500, 600, 600],
+            "bge_normalized_score": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.6],
+        }
+    )
+
+    fit = fit_multivariate_ranking_model(panel, score_columns=["bge_normalized_score"])
+
+    assert fit is None or fit.get("status") == "skipped"
 
 
 def test_summarize_textrazor_ranking_explainability_computes_univariate_and_multivariate() -> None:

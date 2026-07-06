@@ -27,7 +27,10 @@ from seo_rank.dataforseo import (
     validate_dataforseo_response,
     validate_dataforseo_credentials,
 )
-from seo_rank.cli import raise_for_failed_dataforseo_tasks
+from seo_rank.cli import (
+    find_skippable_onpage_task_status,
+    raise_for_failed_dataforseo_tasks,
+)
 
 
 def test_build_keyword_expansion_request_uses_dataforseo_live_endpoint() -> None:
@@ -292,6 +295,45 @@ def test_raise_for_failed_dataforseo_tasks_surfaces_task_level_status_message() 
         )
 
     assert "tasks[0]" in str(exc_info.value)
+
+
+def test_find_skippable_onpage_task_status_returns_code_for_target_timeout() -> None:
+    response = {
+        "status_code": 20000,
+        "tasks": [
+            {
+                "status_code": 50402,
+                "status_message": "Target page took too long to respond.",
+            }
+        ],
+    }
+
+    result = find_skippable_onpage_task_status(response)
+
+    assert result == (50402, "Target page took too long to respond.")
+
+
+def test_find_skippable_onpage_task_status_returns_none_for_success() -> None:
+    response = {
+        "status_code": 20000,
+        "tasks": [{"status_code": 20000}],
+    }
+
+    assert find_skippable_onpage_task_status(response) is None
+
+
+def test_find_skippable_onpage_task_status_returns_none_for_non_skippable_failure() -> None:
+    response = {
+        "status_code": 20000,
+        "tasks": [
+            {
+                "status_code": 40001,
+                "status_message": "Auth failed",
+            }
+        ],
+    }
+
+    assert find_skippable_onpage_task_status(response) is None
 
 
 def test_raise_for_failed_dataforseo_tasks_logs_task_cost(

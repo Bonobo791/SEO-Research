@@ -424,6 +424,13 @@ def _fit_backend_regression_from_model_data(
         feature_result = smf.ols(feature_formula, data=model_data).fit()
         if feature_result.df_resid <= 0:
             return None
+        # df_resid uses matrix rank, but statsmodels' cluster-robust small-sample
+        # correction divides by (nobs - raw exog column count). A column-rank-
+        # deficient design (e.g. tied predictor values within a keyword group)
+        # can leave df_resid > 0 while nobs <= exog.shape[1], causing a
+        # ZeroDivisionError inside get_robustcov_results.
+        if feature_result.nobs <= feature_result.model.exog.shape[1]:
+            return None
         clustered_result = feature_result.get_robustcov_results(
             cov_type="cluster",
             groups=model_data["target_keyword_id"],

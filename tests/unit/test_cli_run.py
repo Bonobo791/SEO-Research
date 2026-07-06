@@ -938,6 +938,66 @@ def test_fetch_onpage_signals_for_urls_persists_partial_progress_on_mid_loop_fai
     assert persisted_urls == {urls[0], urls[1]}
 
 
+def test_fetch_onpage_signals_for_urls_skips_target_page_timeout(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "artifacts"
+    urls = [
+        "https://example.com/technical-seo/1",
+        "https://example.com/technical-seo/2",
+        "https://example.com/technical-seo/3",
+    ]
+
+    def dataforseo_transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        del method, headers, timeout
+        request_body = json.loads(body.decode("utf-8"))
+        target_url = request_body[0]["url"]
+        if target_url == urls[1]:
+            return {
+                "status_code": 20000,
+                "tasks": [
+                    {
+                        "id": "fixture-onpage-instant-pages-timeout",
+                        "status_code": 50402,
+                        "status_message": "Target page took too long to respond.",
+                        "result": None,
+                    }
+                ],
+            }
+        return fixture_onpage_instant_pages_response(target_url)
+
+    responses = fetch_onpage_signals_for_urls(
+        "technical seo",
+        urls,
+        credentials=DataForSeoCredentials("login", "password"),
+        transport=dataforseo_transport,
+        run_dir=run_dir,
+    )
+
+    assert [response["url"] for response in responses] == [urls[0], urls[2]]
+
+    onpage_path = (
+        run_dir
+        / "parquet"
+        / "raw_responses"
+        / "endpoint=onpage_instant_pages"
+        / "part-0.parquet"
+    )
+    assert onpage_path.exists()
+    persisted_urls = {
+        json.loads(str(row["request_metadata_json"]))["url"]
+        for row in pq.ParquetFile(onpage_path).read().to_pylist()
+    }
+    assert persisted_urls == {urls[0], urls[2]}
+
+
 def test_build_live_payload_includes_backlinks_in_raw_provider_data(
     monkeypatch,
 ) -> None:

@@ -2365,6 +2365,38 @@ def raise_for_failed_dataforseo_tasks(
         )
 
 
+# DataForSEO onpage task status codes that indicate a problem with the specific
+# target page (timeout, unreachable, etc.), not the API call itself. These are
+# safe to skip and continue the run rather than aborting.
+ONPAGE_SKIPPABLE_TASK_STATUS_CODES = frozenset({50402})
+
+
+def find_skippable_onpage_task_status(
+    response: Mapping[str, object],
+) -> tuple[int, str] | None:
+    """Return (status_code, status_message) if response's task failed with a
+    known skippable onpage status code, else None."""
+    tasks = response.get("tasks", [])
+    if not isinstance(tasks, list):
+        return None
+    for task in tasks:
+        if not isinstance(task, Mapping):
+            continue
+        status_code = task.get("status_code")
+        if (
+            isinstance(status_code, int)
+            and status_code in ONPAGE_SKIPPABLE_TASK_STATUS_CODES
+        ):
+            status_message = task.get("status_message")
+            message = (
+                status_message
+                if isinstance(status_message, str) and status_message.strip()
+                else "unknown task failure"
+            )
+            return status_code, message
+    return None
+
+
 def execute_validated_dataforseo_request(
     endpoint: str,
     request,
@@ -2536,6 +2568,18 @@ def fetch_onpage_signals_for_urls(
                 credentials=credentials,
                 transport=transport,
             )
+            skippable = find_skippable_onpage_task_status(response)
+            if skippable is not None:
+                status_code, status_message = skippable
+                logging.getLogger("seo_rank.dataforseo.onpage").warning(
+                    "Skipping onpage_instant_pages for target_keyword=%r url=%r: "
+                    "status_code=%s (%s)",
+                    target_keyword,
+                    url,
+                    status_code,
+                    status_message,
+                )
+                continue
             raise_for_failed_dataforseo_tasks(
                 ONPAGE_INSTANT_PAGES_ENDPOINT,
                 response,

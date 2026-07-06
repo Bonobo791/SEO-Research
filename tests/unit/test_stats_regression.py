@@ -2,6 +2,7 @@ import json
 import logging
 from pathlib import Path
 
+import pandas as pd
 import polars as pl
 import pytest
 
@@ -228,6 +229,31 @@ def test_summarize_backend_regression_keeps_zero_variance_keyword_in_raw_model()
     assert summary["feature_model"]["formula"] == (
         "outcome ~ bge_normalized_score + np.log(page_text_length + 1) + C(target_keyword_id)"
     )
+
+
+def test_fit_backend_regression_skips_when_design_matrix_is_column_rank_deficient() -> None:
+    # Constructed so that np.linalg.matrix_rank(exog) == 6 (df_resid == 1, so the
+    # naive `df_resid <= 0` guard passes) while exog has 7 raw columns == nobs (7).
+    # statsmodels' cluster-robust covariance correction divides by
+    # (nobs - k_params) using the *raw* column count, not the rank, so this shape
+    # previously reached get_robustcov_results() and raised ZeroDivisionError.
+    model_data = pd.DataFrame(
+        {
+            "outcome": [1.0, 2.0, 1.5, 3.0, 2.5, 4.0, 4.2],
+            "bge_normalized_score": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.6],
+            "page_text_length": [100, 200, 300, 400, 500, 600, 600],
+            "target_keyword_id": ["k0", "k1", "k2", "k3", "k4", "k4", "k4"],
+            "serp_rank": [1, 1, 1, 1, 1, 2, 3],
+        }
+    )
+
+    fit = regression_module._fit_backend_regression_from_model_data(
+        model_data,
+        label="bge",
+        score_column="bge_normalized_score",
+    )
+
+    assert fit is None
 
 
 def test_summarize_backend_regression_skips_when_backend_has_no_usable_rows() -> None:

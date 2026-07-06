@@ -431,6 +431,18 @@ def fit_multivariate_ranking_model(
                 "row_count": model_frame.height,
                 "keyword_count": keyword_count,
             }
+        # df_resid uses matrix rank, but statsmodels' cluster-robust small-sample
+        # correction divides by (nobs - raw exog column count). A column-rank-
+        # deficient design (e.g. tied predictor values within a keyword group)
+        # can leave df_resid > 0 while nobs <= exog.shape[1], causing a
+        # ZeroDivisionError inside get_robustcov_results.
+        if feature_result.nobs <= feature_result.model.exog.shape[1]:
+            return {
+                "status": "skipped",
+                "skipped_reason": "non_positive_residual_df",
+                "row_count": model_frame.height,
+                "keyword_count": keyword_count,
+            }
         clustered_result = feature_result.get_robustcov_results(
             cov_type="cluster",
             groups=model_data["target_keyword_id"],
