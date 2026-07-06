@@ -92,8 +92,8 @@ slices 21–26 shipped; shared raw-response schema contract (slice 26) is shippe
 TextRazor signal expansion: slices 27–30 and 32–33 shipped; slice 31 (golden fixtures) open.
 Backlinks count analysis: **Phase 6.2** shipped (`backlinks_analysis` mart +
 `backlinks_counts` family in `stats_*`).
-OnPage page signals: **Phase 7.1** slices **1–11 shipped** (`onpage_instant_pages`
-→ `onpage_signals` (46 `checks` booleans) → `onpage_features` → three
+OnPage page signals: **Phase 7.1** slices **1–12 shipped** (`onpage_instant_pages`
+→ `onpage_signals` (46 `checks` booleans; 18 `meta` metrics) → `onpage_features` → three
 `onpage_metric` families with
 full Spearman / OLS / diagnostics / Plackett-Luce in `stats_*`; Slice 18 stored-run
 regression open). See `ROADMAP.md` § 7.1 and `TESTING.md` § OnPage instant_pages.
@@ -530,9 +530,9 @@ schema drift).
   (slices 35–42). Full gap analysis and slices: `ROADMAP.md` § Phase 5.7.
 - Backlinks count signals on `backlinks_analysis` — **Phase 6.2** shipped
   (`backlinks_counts` family in `stats_*`; `analysis_mart.v1` unchanged).
-- OnPage instant_pages pipeline — **Phase 7.1** slices 1–11 shipped: raw
+- OnPage instant_pages pipeline — **Phase 7.1** slices 1–12 shipped: raw
   `endpoint=onpage_instant_pages`, curated `onpage_signals` (46 `checks`
-  booleans), feature mart `onpage_features`, three `onpage_metric` families
+  booleans; 18 `meta` metrics), feature mart `onpage_features`, three `onpage_metric` families
   (`onpage_content_quality`, `onpage_core_web_vitals`, `onpage_technical_checks`)
   with full family stats in `stats_*`; `ensure_feature_marts_for_analysis()`
   rebuilds missing `onpage_features` on legacy run trees before analyze /
@@ -633,7 +633,7 @@ and join into stats via `SOURCE_MART_BY_KIND["backlinks_metric"]`. The similarit
 
 ## Phase 7.1 acceptance criteria (OnPage instant_pages)
 
-**Status:** 11 of 18 slices shipped.
+**Status:** 12 of 18 slices shipped.
 
 | Acceptance item | Slice(s) | Status |
 | --------------- | -------- | ------ |
@@ -648,6 +648,7 @@ and join into stats via `SOURCE_MART_BY_KIND["backlinks_metric"]`. The similarit
 | Full family stats (Spearman / OLS / diagnostics / PL) + legacy mart rebuild guard | 9 | Shipped |
 | Stored-run end-to-end regression + full-layer CLI pipeline tests | 10 | Shipped |
 | Full `checks` coverage (46 booleans on `onpage_signals`) | 11 | Shipped |
+| `meta` block metrics (18 columns on `onpage_signals`) | 12 | Shipped |
 
 OnPage signals are additive: they live on `parquet/onpage_features/` and join
 into stats via `SOURCE_MART_BY_KIND["onpage_metric"]`. The similarity

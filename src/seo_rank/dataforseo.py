@@ -1190,6 +1190,12 @@ def fixture_onpage_instant_pages_response(
                                 },
                                 "meta": {
                                     "cumulative_layout_shift": 0.05,
+                                    "title_length": 49,
+                                    "description_length": 128,
+                                    "internal_links_count": 98,
+                                    "external_links_count": 7,
+                                    "follow": True,
+                                    "duplicate_meta_tags": ["generator"],
                                     "content": {
                                         "plain_text_word_count": 432.0,
                                         "plain_text_rate": 0.02,
@@ -1197,6 +1203,8 @@ def fixture_onpage_instant_pages_response(
                                         "coleman_liau_readability_index": 8.6,
                                         "smog_readability_index": 17.0,
                                         "dale_chall_readability_index": 7.1,
+                                        "description_to_content_consistency": 0.4736842215061188,
+                                        "title_to_content_consistency": 0.7142857313156128,
                                     },
                                 },
                                 "checks": {

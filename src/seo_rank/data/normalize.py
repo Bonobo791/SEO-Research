@@ -369,6 +369,24 @@ CURATED_SCHEMAS = {
             ("has_micromarkup", pa.bool_()),
             ("has_micromarkup_errors", pa.bool_()),
             ("from_sitemap", pa.bool_()),
+            ("description_length", pa.int64()),
+            ("title_length", pa.int64()),
+            ("external_links_count", pa.int64()),
+            ("internal_links_count", pa.int64()),
+            ("images_count", pa.int64()),
+            ("images_size", pa.int64()),
+            ("scripts_count", pa.int64()),
+            ("scripts_size", pa.int64()),
+            ("stylesheets_count", pa.int64()),
+            ("stylesheets_size", pa.int64()),
+            ("render_blocking_scripts_count", pa.int64()),
+            ("render_blocking_stylesheets_count", pa.int64()),
+            ("follow", pa.bool_()),
+            ("inbound_links_count", pa.int64()),
+            ("duplicate_meta_tags_count", pa.int64()),
+            ("description_to_content_consistency", pa.float64()),
+            ("title_to_content_consistency", pa.float64()),
+            ("meta_keywords_to_content_consistency", pa.float64()),
             ("plain_text_word_count", pa.float64()),
             ("plain_text_rate", pa.float64()),
             ("flesch_kincaid_readability_index", pa.float64()),
@@ -823,6 +841,24 @@ CURATED_VALIDATION_RULES = {
             "has_micromarkup": pl.Boolean,
             "has_micromarkup_errors": pl.Boolean,
             "from_sitemap": pl.Boolean,
+            "description_length": pl.Int64,
+            "title_length": pl.Int64,
+            "external_links_count": pl.Int64,
+            "internal_links_count": pl.Int64,
+            "images_count": pl.Int64,
+            "images_size": pl.Int64,
+            "scripts_count": pl.Int64,
+            "scripts_size": pl.Int64,
+            "stylesheets_count": pl.Int64,
+            "stylesheets_size": pl.Int64,
+            "render_blocking_scripts_count": pl.Int64,
+            "render_blocking_stylesheets_count": pl.Int64,
+            "follow": pl.Boolean,
+            "inbound_links_count": pl.Int64,
+            "duplicate_meta_tags_count": pl.Int64,
+            "description_to_content_consistency": pl.Float64,
+            "title_to_content_consistency": pl.Float64,
+            "meta_keywords_to_content_consistency": pl.Float64,
             "plain_text_word_count": pl.Float64,
             "plain_text_rate": pl.Float64,
             "flesch_kincaid_readability_index": pl.Float64,
@@ -1769,6 +1805,15 @@ def _optional_mapping_int(mapping: object, key: str) -> int | None:
     return int(number)
 
 
+def _optional_mapping_len(mapping: object, key: str) -> int | None:
+    if not isinstance(mapping, Mapping):
+        return None
+    value = mapping.get(key)
+    if isinstance(value, list):
+        return len(value)
+    return None
+
+
 def _derive_has_valid_structured_data(
     item: Mapping[str, object],
     checks: object,
@@ -1846,6 +1891,39 @@ def _onpage_signals_row(
         "dale_chall_readability_index": _optional_mapping_number(
             content,
             "dale_chall_readability_index",
+        ),
+        "description_length": _optional_mapping_int(meta, "description_length"),
+        "title_length": _optional_mapping_int(meta, "title_length"),
+        "external_links_count": _optional_mapping_int(meta, "external_links_count"),
+        "internal_links_count": _optional_mapping_int(meta, "internal_links_count"),
+        "images_count": _optional_mapping_int(meta, "images_count"),
+        "images_size": _optional_mapping_int(meta, "images_size"),
+        "scripts_count": _optional_mapping_int(meta, "scripts_count"),
+        "scripts_size": _optional_mapping_int(meta, "scripts_size"),
+        "stylesheets_count": _optional_mapping_int(meta, "stylesheets_count"),
+        "stylesheets_size": _optional_mapping_int(meta, "stylesheets_size"),
+        "render_blocking_scripts_count": _optional_mapping_int(
+            meta,
+            "render_blocking_scripts_count",
+        ),
+        "render_blocking_stylesheets_count": _optional_mapping_int(
+            meta,
+            "render_blocking_stylesheets_count",
+        ),
+        "follow": _optional_mapping_bool(meta, "follow"),
+        "inbound_links_count": _optional_mapping_int(meta, "inbound_links_count"),
+        "duplicate_meta_tags_count": _optional_mapping_len(meta, "duplicate_meta_tags"),
+        "description_to_content_consistency": _optional_mapping_number(
+            content,
+            "description_to_content_consistency",
+        ),
+        "title_to_content_consistency": _optional_mapping_number(
+            content,
+            "title_to_content_consistency",
+        ),
+        "meta_keywords_to_content_consistency": _optional_mapping_number(
+            content,
+            "meta_keywords_to_content_consistency",
         ),
         "time_to_first_byte_ms": _optional_mapping_int(page_timing, "waiting_time"),
         "largest_contentful_paint_ms": _optional_mapping_number(

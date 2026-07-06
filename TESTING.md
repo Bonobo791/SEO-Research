@@ -254,7 +254,7 @@ exist.
   legacy `endpoint=backlinks` read-compat, hard-fail on malformed summary
   aggregates,   and distribution maps as JSON-string columns.
 
-## Shipped tests — OnPage instant_pages (Phase 7.1 slices 1–11, Jul 2026)
+## Shipped tests — OnPage instant_pages (Phase 7.1 slices 1–12, Jul 2026)
 
 - **OnPage instant_pages endpoint (offline contract)** —
   `tests/unit/test_dataforseo_requests.py` covers
@@ -350,6 +350,15 @@ exist.
   (`test_onpage_signals_row_micromarkup_checks_fallback_to_item_level`).
   `tests/unit/test_stats_families.py` allows mart columns ahead of Slice 17
   family wiring (`test_onpage_signal_columns_cover_onpage_features_mart`).
+- **OnPage meta block metrics (Phase 7.1 slice 12)** —
+  `tests/unit/test_run_normalize.py` covers 18 `meta` columns aligned with
+  PyArrow/Polars schemas (`test_onpage_meta_columns_match_onpage_signals_schema`),
+  populated `meta` + `meta.content` mapping
+  (`test_onpage_signals_row_maps_meta_block_metrics`), sparse-null semantics
+  (`test_onpage_signals_row_meta_metrics_null_when_meta_absent`), and
+  `_optional_mapping_len` for array-length counts
+  (`test_optional_mapping_len_counts_array_or_null`). Fixture integration asserts
+  representative meta fields in `test_normalize_run_materializes_onpage_signals_from_fixture`.
 
 ## Planned tests (not yet in suite) — Phase 7.1 slice 18
 

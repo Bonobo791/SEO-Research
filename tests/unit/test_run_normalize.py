@@ -26,6 +26,7 @@ from seo_rank.data.normalize import (
     CURATED_VALIDATION_RULES,
     ONPAGE_CURATED_CHECK_FIELDS,
     _onpage_signals_row,
+    _optional_mapping_len,
     build_entities_frame,
     build_onpage_signals_frame,
     build_page_html_frame,
@@ -752,6 +753,130 @@ def test_normalize_run_materializes_onpage_signals_from_fixture(
     assert row["seo_friendly_url"] is True
     assert row["is_broken"] is False
     assert row["deprecated_html_tags"] is False
+    assert row["title_length"] == 49
+    assert row["description_length"] == 128
+    assert row["internal_links_count"] == 98
+    assert row["follow"] is True
+    assert row["duplicate_meta_tags_count"] == 1
+    assert row["description_to_content_consistency"] == pytest.approx(0.4736842215061188)
+
+
+ONPAGE_META_INT_FIELDS = (
+    "description_length",
+    "title_length",
+    "external_links_count",
+    "internal_links_count",
+    "images_count",
+    "images_size",
+    "scripts_count",
+    "scripts_size",
+    "stylesheets_count",
+    "stylesheets_size",
+    "render_blocking_scripts_count",
+    "render_blocking_stylesheets_count",
+    "inbound_links_count",
+    "duplicate_meta_tags_count",
+)
+ONPAGE_META_BOOL_FIELDS = ("follow",)
+ONPAGE_META_FLOAT_FIELDS = (
+    "description_to_content_consistency",
+    "title_to_content_consistency",
+    "meta_keywords_to_content_consistency",
+)
+ONPAGE_META_FIELDS = (
+    *ONPAGE_META_INT_FIELDS,
+    *ONPAGE_META_BOOL_FIELDS,
+    *ONPAGE_META_FLOAT_FIELDS,
+)
+
+
+def test_onpage_meta_columns_match_onpage_signals_schema() -> None:
+    assert len(ONPAGE_META_FIELDS) == 18
+    arrow_schema = {
+        field.name: field.type for field in CURATED_SCHEMAS["onpage_signals"]
+    }
+    polars_schema = CURATED_VALIDATION_RULES["onpage_signals"]["expected_schema"]
+    for field in ONPAGE_META_INT_FIELDS:
+        assert arrow_schema[field] == pa.int64()
+        assert polars_schema[field] == pl.Int64
+    for field in ONPAGE_META_BOOL_FIELDS:
+        assert arrow_schema[field] == pa.bool_()
+        assert polars_schema[field] == pl.Boolean
+    for field in ONPAGE_META_FLOAT_FIELDS:
+        assert arrow_schema[field] == pa.float64()
+        assert polars_schema[field] == pl.Float64
+
+
+def test_optional_mapping_len_counts_array_or_null() -> None:
+    assert _optional_mapping_len({"tags": ["generator", "viewport"]}, "tags") == 2
+    assert _optional_mapping_len({"tags": []}, "tags") == 0
+    assert _optional_mapping_len({}, "tags") is None
+    assert _optional_mapping_len({"tags": "generator"}, "tags") is None
+    assert _optional_mapping_len(None, "tags") is None
+
+
+def test_onpage_signals_row_maps_meta_block_metrics() -> None:
+    row = _onpage_signals_row(
+        run_id="run",
+        target_keyword="kw",
+        response_id="resp",
+        url="https://example.com/meta-metrics",
+        item={
+            "onpage_score": 85.5,
+            "meta": {
+                "title_length": 49,
+                "description_length": 128,
+                "internal_links_count": 98,
+                "external_links_count": 7,
+                "inbound_links_count": 0,
+                "images_count": 11,
+                "images_size": 12_345,
+                "scripts_count": 43,
+                "scripts_size": 56_789,
+                "stylesheets_count": 2,
+                "stylesheets_size": 3_456,
+                "render_blocking_scripts_count": 23,
+                "render_blocking_stylesheets_count": 0,
+                "follow": True,
+                "duplicate_meta_tags": ["generator"],
+                "content": {
+                    "description_to_content_consistency": 0.4736842215061188,
+                    "title_to_content_consistency": 0.7142857313156128,
+                    "meta_keywords_to_content_consistency": 0.25,
+                },
+            },
+        },
+    )
+    assert row["title_length"] == 49
+    assert row["description_length"] == 128
+    assert row["internal_links_count"] == 98
+    assert row["external_links_count"] == 7
+    assert row["inbound_links_count"] == 0
+    assert row["images_count"] == 11
+    assert row["images_size"] == 12_345
+    assert row["scripts_count"] == 43
+    assert row["scripts_size"] == 56_789
+    assert row["stylesheets_count"] == 2
+    assert row["stylesheets_size"] == 3_456
+    assert row["render_blocking_scripts_count"] == 23
+    assert row["render_blocking_stylesheets_count"] == 0
+    assert row["follow"] is True
+    assert row["duplicate_meta_tags_count"] == 1
+    assert row["description_to_content_consistency"] == pytest.approx(0.4736842215061188)
+    assert row["title_to_content_consistency"] == pytest.approx(0.7142857313156128)
+    assert row["meta_keywords_to_content_consistency"] == pytest.approx(0.25)
+
+
+def test_onpage_signals_row_meta_metrics_null_when_meta_absent() -> None:
+    row = _onpage_signals_row(
+        run_id="run",
+        target_keyword="kw",
+        response_id="resp",
+        url="https://example.com/no-meta",
+        item={"onpage_score": 75.0},
+    )
+    for field in ONPAGE_META_FIELDS:
+        assert row[field] is None
 
 
 ONPAGE_NEW_CHECK_FIELDS = (

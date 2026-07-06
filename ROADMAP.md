@@ -1536,7 +1536,7 @@ or task id needed, and no `task_post` crawl/poll flow.
 
 ##### Dev slices
 
-**Progress:** 11 of 18 shipped.
+**Progress:** 12 of 18 shipped.
 
 1. **[x] Slice 1 — Request/schema/fixture** — `build_onpage_instant_pages_request()`,
    `DATAFORSEO_RESPONSE_SCHEMAS["onpage_instant_pages"]`,
@@ -1627,7 +1627,7 @@ or task id needed, and no `task_post` crawl/poll flow.
     and falls back to item-level flags for `has_micromarkup`,
     `has_micromarkup_errors`, and `from_sitemap`. Tests in
     `tests/unit/test_run_normalize.py`.
-12. **[ ] Slice 12 — `meta` block metrics.** Add columns to
+12. **[x] Slice 12 — `meta` block metrics.** Add columns to
     `onpage_signals`/curated schema for: `description_length`,
     `title_length`, `external_links_count`, `internal_links_count`,
     `images_count`, `images_size`, `scripts_count`, `scripts_size`,
@@ -2208,9 +2208,10 @@ with 8.3 and is a lower-priority cross-check.
   unchanged; `ensure_feature_marts_for_analysis` requires `backlinks_analysis`
   and `onpage_features`; `run_phase5_stats` invokes the same guard before loading
   family source frames.
-- **Phase 7.1 slices 1–11 shipped (2026-07-06):** OnPage `instant_pages` live
+- **Phase 7.1 slices 1–12 shipped (2026-07-06):** OnPage `instant_pages` live
   path from request/fixture through raw `endpoint=onpage_instant_pages`,
-  curated `onpage_signals` (46 `checks` booleans via Slice 11),
+  curated `onpage_signals` (46 `checks` booleans via Slice 11; 18 `meta` metrics
+  via Slice 12),
   feature mart `onpage_features`, and three
   `onpage_metric` signal families (`onpage_content_quality`,
   `onpage_core_web_vitals`, `onpage_technical_checks`) with Spearman, pooled OLS,
