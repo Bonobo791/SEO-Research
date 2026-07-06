@@ -13,10 +13,13 @@ def scan_raw_responses(run_dir: Path) -> pl.LazyFrame:
         hive_partitioning=True,
         missing_columns="insert",
     )
-    if "request_metadata_json" not in frame.collect_schema():
+    schema = frame.collect_schema()
+    if "request_metadata_json" not in schema:
         frame = frame.with_columns(
             pl.lit(None).cast(pl.Utf8).alias("request_metadata_json")
         )
+    if "timestamp" not in schema:
+        frame = frame.with_columns(pl.lit(None).cast(pl.Utf8).alias("timestamp"))
     return frame
 
 

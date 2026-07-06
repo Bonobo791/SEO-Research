@@ -9,6 +9,15 @@
             "command": "node .codex/hooks/git-guard.cjs"
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/user/.local/bin/graphify hook-check"
+          }
+        ]
       }
     ],
     "SessionStart": [

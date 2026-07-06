@@ -45,6 +45,7 @@ def test_scan_raw_responses_uses_lazy_parquet_scan(
             "response_id": "abc123",
             "endpoint": "serp",
             "request_metadata_json": None,
+            "timestamp": None,
         }
     ]
 
