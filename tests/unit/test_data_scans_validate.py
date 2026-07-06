@@ -5,6 +5,7 @@ import polars as pl
 from seo_rank.data.normalize import build_curated_lazyframes
 from seo_rank.data.scans import scan_raw_responses
 from seo_rank.data.validate import (
+    align_lazyframe_schema,
     validate_frame_contract,
     validate_materialized_frame_contract,
     validate_required_columns,
@@ -48,6 +49,22 @@ def test_scan_raw_responses_uses_lazy_parquet_scan(
             "timestamp": None,
         }
     ]
+
+
+def test_align_lazyframe_schema_backfills_missing_columns_with_nulls() -> None:
+    frame = pl.DataFrame([{"run_id": "run-1", "onpage_score": 85.5}]).lazy()
+    expected_schema = {
+        "run_id": pl.Utf8,
+        "onpage_score": pl.Float64,
+        "title_length": pl.Int64,
+    }
+
+    aligned = align_lazyframe_schema(frame, expected_schema)
+    collected = aligned.collect()
+
+    assert "title_length" in collected.columns
+    assert collected["title_length"].to_list() == [None]
+    assert collected["onpage_score"].to_list() == [85.5]
 
 
 def test_validate_required_columns_rejects_missing_columns() -> None:

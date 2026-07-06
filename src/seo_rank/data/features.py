@@ -12,6 +12,7 @@ from seo_rank.data.marts import build_analysis_lazyframe
 from seo_rank.data.normalize import CURATED_VALIDATION_RULES
 from seo_rank.data.scans import scan_curated_table
 from seo_rank.data.validate import (
+    align_lazyframe_schema,
     validate_frame_contract,
     validate_materialized_frame_contract,
 )
@@ -643,6 +644,15 @@ def build_feature_lazyframes(
         )
         .with_columns(pl.lit(FEATURE_SCHEMA_VERSION).alias("schema_version"))
         .sort(["target_keyword_id", "serp_rank", "canonical_url_hash"])
+    )
+    onpage_required_columns = CURATED_VALIDATION_RULES["onpage_signals"]["non_null_columns"]
+    onpage_signals = align_lazyframe_schema(
+        onpage_signals,
+        {
+            column: dtype
+            for column, dtype in CURATED_VALIDATION_RULES["onpage_signals"]["expected_schema"].items()
+            if column not in onpage_required_columns
+        },
     )
     onpage_features = (
         analysis_base.join(

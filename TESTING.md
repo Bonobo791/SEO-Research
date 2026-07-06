@@ -359,6 +359,13 @@ exist.
   `_optional_mapping_len` for array-length counts
   (`test_optional_mapping_len_counts_array_or_null`). Fixture integration asserts
   representative meta fields in `test_normalize_run_materializes_onpage_signals_from_fixture`.
+- **OnPage legacy `onpage_signals` schema backfill (Slice 12 fix)** —
+  `tests/unit/test_data_scans_validate.py` covers `align_lazyframe_schema`
+  (`test_align_lazyframe_schema_backfills_missing_columns_with_nulls`).
+  `tests/unit/test_feature_marts.py` reproduces pre-Slice-12 stored partitions
+  missing meta columns and asserts `build_feature_marts()` backfills nulls instead
+  of raising `ColumnNotFoundError`
+  (`test_build_feature_marts_legacy_onpage_signals_backfills_missing_meta_columns`).
 
 ## Planned tests (not yet in suite) — Phase 7.1 slice 18
 

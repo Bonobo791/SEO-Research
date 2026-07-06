@@ -5,6 +5,23 @@ from collections.abc import Iterable, Mapping
 import polars as pl
 
 
+def align_lazyframe_schema(
+    frame: pl.LazyFrame,
+    expected_schema: Mapping[str, pl.DataType],
+) -> pl.LazyFrame:
+    """Insert null-typed columns for keys present in expected_schema but absent from frame."""
+
+    schema = frame.collect_schema()
+    additions = [
+        pl.lit(None).cast(dtype).alias(column)
+        for column, dtype in expected_schema.items()
+        if column not in schema
+    ]
+    if not additions:
+        return frame
+    return frame.with_columns(additions)
+
+
 def validate_frame_contract(
     frame: pl.LazyFrame,
     *,

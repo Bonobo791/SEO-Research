@@ -18,6 +18,27 @@ from seo_rank.dataforseo import BACKLINKS_QUERY_SUMMARY
 from seo_rank.dataforseo import fixture_backlinks_response
 from seo_rank.dataforseo import fixture_onpage_instant_pages_response
 
+LEGACY_ONPAGE_META_COLUMNS = (
+    "description_length",
+    "title_length",
+    "external_links_count",
+    "internal_links_count",
+    "images_count",
+    "images_size",
+    "scripts_count",
+    "scripts_size",
+    "stylesheets_count",
+    "stylesheets_size",
+    "render_blocking_scripts_count",
+    "render_blocking_stylesheets_count",
+    "follow",
+    "inbound_links_count",
+    "duplicate_meta_tags_count",
+    "description_to_content_consistency",
+    "title_to_content_consistency",
+    "meta_keywords_to_content_consistency",
+)
+
 
 def test_build_feature_marts_materializes_lazy_joins_from_curated_tables(
     tmp_path: Path,
@@ -164,6 +185,75 @@ def test_build_feature_marts_onpage_features_null_when_partition_missing(
     assert row["onpage_score"] is None
     assert row["onpage_signal_id"] is None
     assert row["has_valid_structured_data"] is None
+
+
+def test_build_feature_marts_legacy_onpage_signals_backfills_missing_meta_columns(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--depth",
+            "1",
+            "--output-dir",
+            str(output_dir),
+            "--dry-run",
+        ]
+    )
+    assert exit_code == 0
+
+    onpage_dir = (
+        output_dir
+        / "parquet"
+        / "raw_responses"
+        / "endpoint=onpage_instant_pages"
+    )
+    onpage_dir.mkdir(parents=True, exist_ok=True)
+    target_url = "https://example.com/technical-seo/1"
+    onpage_record = build_raw_response_record(
+        output_dir.name,
+        endpoint="onpage_instant_pages",
+        provider="dataforseo",
+        response=fixture_onpage_instant_pages_response(target_url),
+        target_keyword="technical seo",
+        request_metadata={
+            "target_keyword": "technical seo",
+            "url": target_url,
+        },
+        recorded_at="2026-07-05T12:00:00+00:00",
+    )
+    pq.write_table(
+        pa.Table.from_pylist([onpage_record], schema=RAW_RESPONSE_SCHEMA),
+        onpage_dir / "part-0.parquet",
+    )
+
+    normalize_run(output_dir)
+
+    onpage_signals_path = output_dir / "parquet" / "onpage_signals" / "part-0.parquet"
+    legacy_table = pq.read_table(onpage_signals_path)
+    legacy_columns = [
+        name for name in legacy_table.column_names if name not in LEGACY_ONPAGE_META_COLUMNS
+    ]
+    pq.write_table(legacy_table.select(legacy_columns), onpage_signals_path)
+
+    catalog = build_feature_marts(output_dir)
+
+    assert catalog["datasets"]["onpage_features"]["row_count"] == 1
+    onpage_features = ds.dataset(
+        output_dir / "parquet" / "onpage_features",
+        format="parquet",
+    ).to_table().to_pylist()
+    row = onpage_features[0]
+    assert row["onpage_score"] == 85.5
+    assert row["title_length"] is None
+    assert row["follow"] is None
+    assert row["description_to_content_consistency"] is None
 
 
 def test_build_feature_marts_validates_each_feature_frame_before_sinking(
