@@ -24,6 +24,7 @@ from seo_rank.dataforseo import (
 from seo_rank.data.normalize import (
     CURATED_SCHEMAS,
     CURATED_VALIDATION_RULES,
+    _onpage_signals_row,
     build_entities_frame,
     build_onpage_signals_frame,
     build_page_html_frame,
@@ -747,6 +748,47 @@ def test_normalize_run_materializes_onpage_signals_from_fixture(
     assert row["micromarkup_items_count"] == 3
     assert row["micromarkup_errors_count"] == 0
     assert row["micromarkup_warnings_count"] == 1
+
+
+def test_onpage_signals_row_reads_nested_meta_content_and_cls():
+    # Real DataForSEO nests content + CLS under item["meta"].
+    item = {
+        "url": "https://example.com/a",
+        "onpage_score": 90.0,
+        "page_timing": {"waiting_time": 100, "largest_contentful_paint": 2000.0},
+        "meta": {
+            "cumulative_layout_shift": 0.03,
+            "content": {"flesch_kincaid_readability_index": 61.0},
+        },
+    }
+    row = _onpage_signals_row(
+        run_id="run",
+        target_keyword="kw",
+        response_id="resp",
+        url="https://example.com/a",
+        item=item,
+    )
+    assert row["flesch_kincaid_readability_index"] == 61.0
+    assert row["cumulative_layout_shift"] == 0.03
+
+
+def test_onpage_signals_row_flat_shape_back_compat():
+    # Pre-slice-10 persisted rows used flat content + page_timing CLS.
+    item = {
+        "url": "https://example.com/b",
+        "onpage_score": 90.0,
+        "page_timing": {"cumulative_layout_shift": 0.07},
+        "content": {"flesch_kincaid_readability_index": 55.0},
+    }
+    row = _onpage_signals_row(
+        run_id="run",
+        target_keyword="kw",
+        response_id="resp",
+        url="https://example.com/b",
+        item=item,
+    )
+    assert row["flesch_kincaid_readability_index"] == 55.0
+    assert row["cumulative_layout_shift"] == 0.07
 
 
 def test_normalize_run_onpage_signals_sparse_item_nulls_optional_sections(

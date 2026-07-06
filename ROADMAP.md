@@ -1536,7 +1536,7 @@ or task id needed, and no `task_post` crawl/poll flow.
 
 ##### Dev slices
 
-**Progress:** 9 of 10 shipped.
+**Progress:** 10 of 18 shipped.
 
 1. **[x] Slice 1 — Request/schema/fixture** — `build_onpage_instant_pages_request()`,
    `DATAFORSEO_RESPONSE_SCHEMAS["onpage_instant_pages"]`,
@@ -1599,8 +1599,85 @@ or task id needed, and no `task_post` crawl/poll flow.
    `data/features.py` (requires `onpage_features`; rebuilds when `run.json`
    exists), same guard from `run_phase5_stats()` for legacy upgrade paths,
    golden contract + hard-fail OnPage assertions.
-10. **[ ] Slice 10 — Fixtures and regressions** — stored-run end-to-end
-    regression, full-layer CLI pipeline tests beyond analyze/mart guards.
+10. **[x] Slice 10 — Fix `meta.content`/CLS nesting bug + schema/fixture
+    correction.** Fix `_onpage_signals_row` to read `item["meta"]["content"]`
+    and `item["meta"]["cumulative_layout_shift"]` (keep the existing
+    item-top-level fallback for backward compatibility with any
+    already-persisted raw rows that used the flat shape, but prefer nested).
+    Correct `fixture_onpage_instant_pages_response` to nest `content` and
+    `cumulative_layout_shift` under `meta`, matching the real payload. Update
+    `DATAFORSEO_RESPONSE_SCHEMAS["onpage_instant_pages"]` field-schema entries
+    in `normalize.py:117-156` accordingly. Regression test asserting the
+    readability/CLS fields populate from a fixture shaped like the real
+    response (nested), not just the old flat shape.
+11. **[ ] Slice 11 — Expand `checks` coverage.** Grow
+    `ONPAGE_CURATED_CHECK_FIELDS` (`normalize.py:52-65`) from 12 to the full
+    ~44-field set: `deprecated_html_tags`, `duplicate_title_tag`, `flash`,
+    `frame`, `from_sitemap`, `has_html_doctype`, `has_meta_refresh_redirect`,
+    `has_micromarkup`, `has_micromarkup_errors`, `high_character_count`,
+    `high_content_rate`, `high_loading_time`, `high_waiting_time`,
+    `https_to_http_links`, `irrelevant_meta_keywords`, `irrelevant_title`,
+    `is_4xx_code`, `is_5xx_code`, `is_broken`, `is_redirect`, `is_www`,
+    `large_page_size`, `lorem_ipsum`, `low_content_rate`,
+    `meta_charset_consistency`, `no_content_encoding`, `no_doctype`,
+    `no_encoding_meta_tag`, `no_favicon`, `no_image_alt`, `no_image_title`,
+    `seo_friendly_url`, `size_greater_than_3mb`, `small_page_size`. Extend
+    `CURATED_SCHEMAS["onpage_signals"]` (`normalize.py:275-313`) and
+    `CURATED_VALIDATION_RULES` (`normalize.py:695-744`) with the new boolean
+    columns. `_onpage_signals_row` already loops over
+    `ONPAGE_CURATED_CHECK_FIELDS` generically, so no change needed there
+    beyond the tuple. Tests in `tests/unit/test_run_normalize.py`.
+12. **[ ] Slice 12 — `meta` block metrics.** Add columns to
+    `onpage_signals`/curated schema for: `description_length`,
+    `title_length`, `external_links_count`, `internal_links_count`,
+    `images_count`, `images_size`, `scripts_count`, `scripts_size`,
+    `stylesheets_count`, `stylesheets_size`,
+    `render_blocking_scripts_count`, `render_blocking_stylesheets_count`,
+    `follow` (bool), `inbound_links_count`, `duplicate_meta_tags_count`
+    (array length), and the 3 consistency scores from `meta.content`
+    (`description_to_content_consistency`, `title_to_content_consistency`,
+    `meta_keywords_to_content_consistency`). New helper
+    `_optional_mapping_len` for array-length counts (`duplicate_meta_tags`,
+    `htags.h1/h2/h3`, reused by Slice 13). Tests in
+    `tests/unit/test_run_normalize.py`.
+13. **[ ] Slice 13 — `htags` counts + `social_media_tags` presence flags.**
+    Add `h1_count`/`h2_count`/`h3_count` (derived from `meta.htags` array
+    lengths; heading text itself stays out of scope) and
+    `has_og_tags`/`has_twitter_tags` (boolean presence of any `og:*`/
+    `twitter:*` key in `meta.social_media_tags`; tag values are not stored,
+    since title/description/canonical are already captured elsewhere).
+    Tests in `tests/unit/test_run_normalize.py`.
+14. **[ ] Slice 14 — Resource/cache/DOM/size metrics.** Add columns for
+    `cache_control.cachable`, `cache_control.ttl`, `resource_errors_count`
+    and `resource_warnings_count` (lengths of the `errors`/`warnings`
+    arrays), `broken_links`, `broken_resources`, `duplicate_content`,
+    `duplicate_description`, `duplicate_title`, `click_depth`,
+    `encoded_size`, `total_dom_size`. Tests in
+    `tests/unit/test_run_normalize.py`.
+15. **[ ] Slice 15 — Full `page_timing` expansion.** Add the remaining
+    timing columns beyond the existing TTFB/LCP/CLS:
+    `connection_time`, `time_to_secure_connection`, `request_sent_time`,
+    `download_time`, `duration_time`, `fetch_end`, `dom_complete`,
+    `time_to_interactive`, `first_input_delay`. Tests in
+    `tests/unit/test_run_normalize.py`.
+16. **[ ] Slice 16 — Feature mart + bounded validation.** Extend
+    `ONPAGE_FEATURES_EXTRA_COLUMNS`/`ONPAGE_FEATURES_EXPECTED_SCHEMA`/
+    `ONPAGE_FEATURES_BOUNDED_COLUMNS` (`features.py:444-487`) to carry all
+    new columns (Slices 11-15) into `onpage_features` (non-negative bounds
+    on new numeric/count/size/timing columns; new booleans unbounded).
+    Tests in `tests/unit/test_feature_marts.py`.
+17. **[ ] Slice 17 — Analysis family wiring for new fields.** Extend the
+    three existing `onpage_metric` families in `analysis_spec.v1.yaml` (or
+    add a 4th, e.g. `onpage_resource_profile`, if the existing three don't
+    fit thematically): link/image/script/DOM/size metrics and new technical
+    booleans into a technical/structural family, timing extensions into
+    `onpage_core_web_vitals`, consistency scores into
+    `onpage_content_quality`. No `analysis_mart` schema bump, mirroring
+    Slice 8. Tests in `test_stats_families.py`/`test_stats_spec.py`.
+18. **[ ] Slice 18 — Fixtures and regressions** — stored-run end-to-end
+    regression, full-layer CLI pipeline tests beyond analyze/mart guards,
+    now covering the full expanded field set including the corrected nested
+    `meta.content`/CLS shape.
 
 | Acceptance item | Slice(s) | Status |
 | --------------- | -------- | ------ |
@@ -1613,7 +1690,15 @@ or task id needed, and no `task_post` crawl/poll flow.
 | Feature mart `onpage_features` | 7 | Shipped |
 | Three `onpage_metric` families; no `analysis_mart` schema bump | 8 | Shipped |
 | Full family stats + legacy `onpage_features` rebuild on analyze | 9 | Shipped |
-| Stored-run regression + full-layer CLI tests | 10 | Open |
+| Fix `meta.content`/CLS nesting bug + fixture correction | 10 | Open |
+| Full `checks` coverage (~44 booleans) | 11 | Open |
+| `meta` block metrics (links/images/scripts/stylesheets/consistency) | 12 | Open |
+| `htags` counts + `social_media_tags` presence flags | 13 | Open |
+| Resource/cache/DOM/size metrics | 14 | Open |
+| Full `page_timing` expansion | 15 | Open |
+| Feature mart + bounded validation for new columns | 16 | Open |
+| Analysis family wiring for new fields | 17 | Open |
+| Stored-run regression + full-layer CLI tests | 18 | Open |
 
 #### 7.2 — Backlink quality & anchor relevance (`backlinks/backlinks/live`)
 

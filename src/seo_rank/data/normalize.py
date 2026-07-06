@@ -1683,14 +1683,19 @@ def _onpage_signals_row(
 ) -> dict[str, object]:
     target_keyword_id = stable_id(target_keyword)
     checks = item.get("checks")
-    content = item.get("content")
+    meta = item.get("meta") if isinstance(item.get("meta"), Mapping) else None
+    # Real DataForSEO nests content + CLS under meta; keep flat fallback for
+    # any raw rows persisted before slice 10.
+    content = (meta.get("content") if meta else None) or item.get("content")
     page_timing = item.get("page_timing")
     score = item.get("onpage_score")
     assert isinstance(score, (int, float))
-    cumulative_layout_shift = _optional_mapping_number(
-        page_timing,
-        "cumulative_layout_shift",
-    )
+    cumulative_layout_shift = _optional_mapping_number(meta, "cumulative_layout_shift")
+    if cumulative_layout_shift is None:
+        cumulative_layout_shift = _optional_mapping_number(
+            page_timing,
+            "cumulative_layout_shift",
+        )
     if cumulative_layout_shift is None:
         cumulative_layout_shift = _optional_mapping_number(item, "cumulative_layout_shift")
     items_count, errors_count, warnings_count = _micromarkup_summary_counts(item)

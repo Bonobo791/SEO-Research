@@ -138,7 +138,7 @@ DATAFORSEO_RESPONSE_SCHEMAS: dict[str, tuple[DataForSeoFieldSchema, ...]] = {
             (Mapping, type(None)),
         ),
         DataForSeoFieldSchema(
-            ("tasks", "[]", "result", "[]", "items", "[]", "content"),
+            ("tasks", "[]", "result", "[]", "items", "[]", "meta"),
             (Mapping, type(None)),
         ),
         DataForSeoFieldSchema(
@@ -1187,7 +1187,17 @@ def fixture_onpage_instant_pages_response(
                                 "page_timing": {
                                     "waiting_time": 120,
                                     "largest_contentful_paint": 2500.0,
+                                },
+                                "meta": {
                                     "cumulative_layout_shift": 0.05,
+                                    "content": {
+                                        "plain_text_word_count": 432.0,
+                                        "plain_text_rate": 0.02,
+                                        "flesch_kincaid_readability_index": 58.0,
+                                        "coleman_liau_readability_index": 8.6,
+                                        "smog_readability_index": 17.0,
+                                        "dale_chall_readability_index": 7.1,
+                                    },
                                 },
                                 "checks": {
                                     "is_https": True,
@@ -1202,14 +1212,6 @@ def fixture_onpage_instant_pages_response(
                                     "has_meta_title": True,
                                     "irrelevant_description": False,
                                     "low_readability_rate": False,
-                                },
-                                "content": {
-                                    "plain_text_word_count": 432.0,
-                                    "plain_text_rate": 0.02,
-                                    "flesch_kincaid_readability_index": 58.0,
-                                    "coleman_liau_readability_index": 8.6,
-                                    "smog_readability_index": 17.0,
-                                    "dale_chall_readability_index": 7.1,
                                 },
                             }
                         ],

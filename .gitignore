@@ -221,3 +221,6 @@ __marimo__/
 runs/
 .reviews
 .claude
+.tokensave
+node_modules
+.venv_probe

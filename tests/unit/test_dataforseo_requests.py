@@ -526,7 +526,7 @@ def test_validate_dataforseo_response_rejects_onpage_instant_pages_url_drift() -
     [
         "page_timing",
         "checks",
-        "content",
+        "meta",
         "total_transfer_size",
         "has_micromarkup",
         "has_micromarkup_errors",
@@ -546,7 +546,7 @@ def test_validate_dataforseo_response_accepts_onpage_instant_pages_null_sections
     [
         "page_timing",
         "checks",
-        "content",
+        "meta",
         "total_transfer_size",
         "has_micromarkup",
         "has_micromarkup_errors",
