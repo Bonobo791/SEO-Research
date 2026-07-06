@@ -457,7 +457,7 @@ def test_phase_6_1_plans_ols_pl_standardization() -> None:
     assert "6.1 Slice 1" in fixups
 
 
-def test_phase_7_1_onpage_slices_1_9_shipped() -> None:
+def test_phase_7_1_onpage_slices_1_11_shipped() -> None:
     goals = (ROOT / "GOALS.md").read_text(encoding="utf-8")
     roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
     architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
@@ -465,18 +465,19 @@ def test_phase_7_1_onpage_slices_1_9_shipped() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
     assert "Phase 7.1 acceptance criteria (OnPage instant_pages)" in goals
-    assert "9 of 10 slices shipped" in goals
+    assert "11 of 18 slices shipped" in goals
     assert "onpage_instant_pages" in goals
     assert "onpage_features" in goals
     assert "ensure_feature_marts_for_analysis()" in goals
     assert "#### 7.1 — OnPage page signals" in roadmap
-    assert "**Progress:** 9 of 10 shipped." in roadmap
-    assert "**[x] Slice 9 — Artifacts follow-ups**" in roadmap
-    assert "Phase 7.1 slices 1–9 shipped (2026-07-05)" in roadmap
+    assert "**Progress:** 11 of 18 shipped." in roadmap
+    assert "**[x] Slice 11 — Expand `checks` coverage.**" in roadmap
+    assert "Phase 7.1 slices 1–11 shipped (2026-07-06)" in roadmap
     assert "onpage_signals" in architecture
     assert "onpage_features" in architecture
     assert "ensure_feature_marts_for_analysis()" in architecture
-    assert "Phase 7.1 slices 1–9" in testing
+    assert "Phase 7.1 slices 1–11" in testing
+    assert "test_onpage_curated_check_fields_match_onpage_signals_schema" in testing
     assert "test_onpage_stats_golden_contract_with_combined_feature_marts" in testing
     assert "endpoint=onpage_instant_pages" in readme
     assert "onpage_features" in readme

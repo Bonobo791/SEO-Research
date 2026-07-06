@@ -1536,7 +1536,7 @@ or task id needed, and no `task_post` crawl/poll flow.
 
 ##### Dev slices
 
-**Progress:** 10 of 18 shipped.
+**Progress:** 11 of 18 shipped.
 
 1. **[x] Slice 1 — Request/schema/fixture** — `build_onpage_instant_pages_request()`,
    `DATAFORSEO_RESPONSE_SCHEMAS["onpage_instant_pages"]`,
@@ -1610,9 +1610,9 @@ or task id needed, and no `task_post` crawl/poll flow.
     in `normalize.py:117-156` accordingly. Regression test asserting the
     readability/CLS fields populate from a fixture shaped like the real
     response (nested), not just the old flat shape.
-11. **[ ] Slice 11 — Expand `checks` coverage.** Grow
+11. **[x] Slice 11 — Expand `checks` coverage.** Grow
     `ONPAGE_CURATED_CHECK_FIELDS` (`normalize.py:52-65`) from 12 to the full
-    ~44-field set: `deprecated_html_tags`, `duplicate_title_tag`, `flash`,
+    46-field set: `deprecated_html_tags`, `duplicate_title_tag`, `flash`,
     `frame`, `from_sitemap`, `has_html_doctype`, `has_meta_refresh_redirect`,
     `has_micromarkup`, `has_micromarkup_errors`, `high_character_count`,
     `high_content_rate`, `high_loading_time`, `high_waiting_time`,
@@ -1622,11 +1622,11 @@ or task id needed, and no `task_post` crawl/poll flow.
     `meta_charset_consistency`, `no_content_encoding`, `no_doctype`,
     `no_encoding_meta_tag`, `no_favicon`, `no_image_alt`, `no_image_title`,
     `seo_friendly_url`, `size_greater_than_3mb`, `small_page_size`. Extend
-    `CURATED_SCHEMAS["onpage_signals"]` (`normalize.py:275-313`) and
-    `CURATED_VALIDATION_RULES` (`normalize.py:695-744`) with the new boolean
-    columns. `_onpage_signals_row` already loops over
-    `ONPAGE_CURATED_CHECK_FIELDS` generically, so no change needed there
-    beyond the tuple. Tests in `tests/unit/test_run_normalize.py`.
+    `CURATED_SCHEMAS["onpage_signals"]` and `CURATED_VALIDATION_RULES` with the
+    new boolean columns. `_optional_onpage_check_bool()` reads `checks` first
+    and falls back to item-level flags for `has_micromarkup`,
+    `has_micromarkup_errors`, and `from_sitemap`. Tests in
+    `tests/unit/test_run_normalize.py`.
 12. **[ ] Slice 12 — `meta` block metrics.** Add columns to
     `onpage_signals`/curated schema for: `description_length`,
     `title_length`, `external_links_count`, `internal_links_count`,
@@ -1690,8 +1690,8 @@ or task id needed, and no `task_post` crawl/poll flow.
 | Feature mart `onpage_features` | 7 | Shipped |
 | Three `onpage_metric` families; no `analysis_mart` schema bump | 8 | Shipped |
 | Full family stats + legacy `onpage_features` rebuild on analyze | 9 | Shipped |
-| Fix `meta.content`/CLS nesting bug + fixture correction | 10 | Open |
-| Full `checks` coverage (~44 booleans) | 11 | Open |
+| Fix `meta.content`/CLS nesting bug + fixture correction | 10 | Shipped |
+| Full `checks` coverage (46 booleans) | 11 | Shipped |
 | `meta` block metrics (links/images/scripts/stylesheets/consistency) | 12 | Open |
 | `htags` counts + `social_media_tags` presence flags | 13 | Open |
 | Resource/cache/DOM/size metrics | 14 | Open |
@@ -2208,15 +2208,16 @@ with 8.3 and is a lower-priority cross-check.
   unchanged; `ensure_feature_marts_for_analysis` requires `backlinks_analysis`
   and `onpage_features`; `run_phase5_stats` invokes the same guard before loading
   family source frames.
-- **Phase 7.1 slices 1–9 shipped (2026-07-05):** OnPage `instant_pages` live
+- **Phase 7.1 slices 1–11 shipped (2026-07-06):** OnPage `instant_pages` live
   path from request/fixture through raw `endpoint=onpage_instant_pages`,
-  curated `onpage_signals`, feature mart `onpage_features`, and three
+  curated `onpage_signals` (46 `checks` booleans via Slice 11),
+  feature mart `onpage_features`, and three
   `onpage_metric` signal families (`onpage_content_quality`,
   `onpage_core_web_vitals`, `onpage_technical_checks`) with Spearman, pooled OLS,
   diagnostics, and family Plackett-Luce at all confirmatory rank depths.
   `ensure_feature_marts_for_analysis()` lives in `data/features.py` and rebuilds
   missing `onpage_features` on legacy run trees (when `run.json` exists) from
-  both `seo-rank analyze` and `run_phase5_stats()`. Slice 10 (stored-run
+  both `seo-rank analyze` and `run_phase5_stats()`. Slice 18 (stored-run
   end-to-end regression, full-layer CLI tests) remains open.
 - **Phase 6.1 Slice 3 partial (2026-07-03):** `src/seo_rank/data/ranks.py`
   ships Polars-lazy `add_within_keyword_similarity_ranks()` with unit tests in

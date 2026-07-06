@@ -24,6 +24,7 @@ from seo_rank.dataforseo import (
 from seo_rank.data.normalize import (
     CURATED_SCHEMAS,
     CURATED_VALIDATION_RULES,
+    ONPAGE_CURATED_CHECK_FIELDS,
     _onpage_signals_row,
     build_entities_frame,
     build_onpage_signals_frame,
@@ -748,6 +749,135 @@ def test_normalize_run_materializes_onpage_signals_from_fixture(
     assert row["micromarkup_items_count"] == 3
     assert row["micromarkup_errors_count"] == 0
     assert row["micromarkup_warnings_count"] == 1
+    assert row["seo_friendly_url"] is True
+    assert row["is_broken"] is False
+    assert row["deprecated_html_tags"] is False
+
+
+ONPAGE_NEW_CHECK_FIELDS = (
+    "deprecated_html_tags",
+    "duplicate_title_tag",
+    "flash",
+    "frame",
+    "from_sitemap",
+    "has_html_doctype",
+    "has_meta_refresh_redirect",
+    "has_micromarkup",
+    "has_micromarkup_errors",
+    "high_character_count",
+    "high_content_rate",
+    "high_loading_time",
+    "high_waiting_time",
+    "https_to_http_links",
+    "irrelevant_meta_keywords",
+    "irrelevant_title",
+    "is_4xx_code",
+    "is_5xx_code",
+    "is_broken",
+    "is_redirect",
+    "is_www",
+    "large_page_size",
+    "lorem_ipsum",
+    "low_content_rate",
+    "meta_charset_consistency",
+    "no_content_encoding",
+    "no_doctype",
+    "no_encoding_meta_tag",
+    "no_favicon",
+    "no_image_alt",
+    "no_image_title",
+    "seo_friendly_url",
+    "size_greater_than_3mb",
+    "small_page_size",
+)
+
+
+def test_onpage_curated_check_fields_match_onpage_signals_schema() -> None:
+    assert len(ONPAGE_CURATED_CHECK_FIELDS) == 46
+    arrow_schema = {
+        field.name: field.type for field in CURATED_SCHEMAS["onpage_signals"]
+    }
+    polars_schema = CURATED_VALIDATION_RULES["onpage_signals"]["expected_schema"]
+    for field in ONPAGE_CURATED_CHECK_FIELDS:
+        assert arrow_schema[field] == pa.bool_()
+        assert polars_schema[field] == pl.Boolean
+
+
+def test_onpage_signals_row_maps_full_checks_object() -> None:
+    checks = {field: True for field in ONPAGE_NEW_CHECK_FIELDS}
+    checks.update(
+        {
+            "title_too_long": False,
+            "title_too_short": False,
+            "no_title": False,
+            "no_description": False,
+            "no_h1_tag": False,
+            "canonical": False,
+            "is_https": False,
+            "has_render_blocking_resources": False,
+            "duplicate_meta_tags": False,
+            "has_meta_title": False,
+            "irrelevant_description": False,
+            "low_readability_rate": False,
+        }
+    )
+    row = _onpage_signals_row(
+        run_id="run",
+        target_keyword="kw",
+        response_id="resp",
+        url="https://example.com/full-checks",
+        item={"onpage_score": 75.0, "checks": checks},
+    )
+    for field in ONPAGE_NEW_CHECK_FIELDS:
+        assert row[field] is True
+
+
+def test_onpage_signals_row_sparse_checks_leave_absent_fields_null() -> None:
+    row = _onpage_signals_row(
+        run_id="run",
+        target_keyword="kw",
+        response_id="resp",
+        url="https://example.com/sparse-checks",
+        item={"onpage_score": 75.0},
+    )
+    for field in ONPAGE_CURATED_CHECK_FIELDS:
+        assert row[field] is None
+
+
+def test_onpage_signals_row_micromarkup_checks_fallback_to_item_level() -> None:
+    row = _onpage_signals_row(
+        run_id="run",
+        target_keyword="kw",
+        response_id="resp",
+        url="https://example.com/item-level-micromarkup",
+        item={
+            "onpage_score": 80.0,
+            "has_micromarkup": True,
+            "has_micromarkup_errors": False,
+        },
+    )
+    assert row["has_micromarkup"] is True
+    assert row["has_micromarkup_errors"] is False
+    assert row["has_valid_structured_data"] is True
+
+
+def test_onpage_signals_row_derives_valid_structured_data_from_checks_only_micromarkup() -> None:
+    row = _onpage_signals_row(
+        run_id="run",
+        target_keyword="kw",
+        response_id="resp",
+        url="https://example.com/checks-only-micromarkup",
+        item={
+            "onpage_score": 80.0,
+            "checks": {
+                "has_micromarkup": True,
+                "has_micromarkup_errors": False,
+            },
+        },
+    )
+    assert row["has_micromarkup"] is True
+    assert row["has_micromarkup_errors"] is False
+    assert row["has_valid_structured_data"] is True
 
 
 def test_onpage_signals_row_reads_nested_meta_content_and_cls():

@@ -254,7 +254,7 @@ exist.
   legacy `endpoint=backlinks` read-compat, hard-fail on malformed summary
   aggregates,   and distribution maps as JSON-string columns.
 
-## Shipped tests — OnPage instant_pages (Phase 7.1 slices 1–9, Jul 2026)
+## Shipped tests — OnPage instant_pages (Phase 7.1 slices 1–11, Jul 2026)
 
 - **OnPage instant_pages endpoint (offline contract)** —
   `tests/unit/test_dataforseo_requests.py` covers
@@ -335,13 +335,28 @@ exist.
   `tests/unit/test_stats_golden_fixtures.py` pins OnPage contract fields with
   combined feature marts (`test_onpage_stats_golden_contract_with_combined_feature_marts`).
   Combined family-artifacts integration completes in ≤60s with full OnPage PL enabled.
+- **OnPage nested meta.content / CLS (Phase 7.1 slice 10)** —
+  `tests/unit/test_run_normalize.py` covers `_onpage_signals_row` preferring
+  `item["meta"]["content"]` and `item["meta"]["cumulative_layout_shift"]` with
+  flat-shape back-compat (`test_onpage_signals_row_reads_nested_meta_content_and_cls`,
+  `test_onpage_signals_row_flat_shape_back_compat`).
+- **OnPage full checks coverage (Phase 7.1 slice 11)** —
+  `tests/unit/test_run_normalize.py` covers 46 `ONPAGE_CURATED_CHECK_FIELDS`
+  aligned with PyArrow/Polars schemas
+  (`test_onpage_curated_check_fields_match_onpage_signals_schema`), full `checks`
+  object mapping (`test_onpage_signals_row_maps_full_checks_object`), sparse-null
+  semantics (`test_onpage_signals_row_sparse_checks_leave_absent_fields_null`),
+  and item-level fallback for `has_micromarkup` / `has_micromarkup_errors`
+  (`test_onpage_signals_row_micromarkup_checks_fallback_to_item_level`).
+  `tests/unit/test_stats_families.py` allows mart columns ahead of Slice 17
+  family wiring (`test_onpage_signal_columns_cover_onpage_features_mart`).
 
-## Planned tests (not yet in suite) — Phase 7.1 slice 10
+## Planned tests (not yet in suite) — Phase 7.1 slice 18
 
 - Stored-run end-to-end regression proving OnPage backfill composes with the full
   post-run materialization chain without refetching unrelated partitions.
 - Full-layer CLI pipeline tests beyond analyze / mart-rebuild guards (see
-  `ROADMAP.md` § 7.1 Slice 10).
+  `ROADMAP.md` § 7.1 Slice 18).
 
 ## Shipped tests — Phase 6.2 backlinks count analysis (Jul 2026)
 

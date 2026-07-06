@@ -1212,6 +1212,9 @@ def fixture_onpage_instant_pages_response(
                                     "has_meta_title": True,
                                     "irrelevant_description": False,
                                     "low_readability_rate": False,
+                                    "seo_friendly_url": True,
+                                    "is_broken": False,
+                                    "deprecated_html_tags": False,
                                 },
                             }
                         ],

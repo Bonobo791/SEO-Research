@@ -62,6 +62,47 @@ ONPAGE_CURATED_CHECK_FIELDS = (
     "has_meta_title",
     "irrelevant_description",
     "low_readability_rate",
+    "is_4xx_code",
+    "is_5xx_code",
+    "is_broken",
+    "is_redirect",
+    "is_www",
+    "no_content_encoding",
+    "high_loading_time",
+    "high_waiting_time",
+    "no_doctype",
+    "has_html_doctype",
+    "no_encoding_meta_tag",
+    "https_to_http_links",
+    "size_greater_than_3mb",
+    "meta_charset_consistency",
+    "has_meta_refresh_redirect",
+    "low_content_rate",
+    "high_content_rate",
+    "high_character_count",
+    "small_page_size",
+    "large_page_size",
+    "irrelevant_title",
+    "irrelevant_meta_keywords",
+    "deprecated_html_tags",
+    "duplicate_title_tag",
+    "no_image_alt",
+    "no_image_title",
+    "no_favicon",
+    "seo_friendly_url",
+    "flash",
+    "frame",
+    "lorem_ipsum",
+    "has_micromarkup",
+    "has_micromarkup_errors",
+    "from_sitemap",
+)
+ONPAGE_ITEM_LEVEL_CHECK_FALLBACK_FIELDS = frozenset(
+    {
+        "has_micromarkup",
+        "has_micromarkup_errors",
+        "from_sitemap",
+    }
 )
 from seo_rank.text import normalize_page_text
 from seo_rank.textrazor import TEXTRAZOR_ENDPOINTS, normalize_entities, normalize_page_metrics
@@ -294,6 +335,40 @@ CURATED_SCHEMAS = {
             ("has_meta_title", pa.bool_()),
             ("irrelevant_description", pa.bool_()),
             ("low_readability_rate", pa.bool_()),
+            ("is_4xx_code", pa.bool_()),
+            ("is_5xx_code", pa.bool_()),
+            ("is_broken", pa.bool_()),
+            ("is_redirect", pa.bool_()),
+            ("is_www", pa.bool_()),
+            ("no_content_encoding", pa.bool_()),
+            ("high_loading_time", pa.bool_()),
+            ("high_waiting_time", pa.bool_()),
+            ("no_doctype", pa.bool_()),
+            ("has_html_doctype", pa.bool_()),
+            ("no_encoding_meta_tag", pa.bool_()),
+            ("https_to_http_links", pa.bool_()),
+            ("size_greater_than_3mb", pa.bool_()),
+            ("meta_charset_consistency", pa.bool_()),
+            ("has_meta_refresh_redirect", pa.bool_()),
+            ("low_content_rate", pa.bool_()),
+            ("high_content_rate", pa.bool_()),
+            ("high_character_count", pa.bool_()),
+            ("small_page_size", pa.bool_()),
+            ("large_page_size", pa.bool_()),
+            ("irrelevant_title", pa.bool_()),
+            ("irrelevant_meta_keywords", pa.bool_()),
+            ("deprecated_html_tags", pa.bool_()),
+            ("duplicate_title_tag", pa.bool_()),
+            ("no_image_alt", pa.bool_()),
+            ("no_image_title", pa.bool_()),
+            ("no_favicon", pa.bool_()),
+            ("seo_friendly_url", pa.bool_()),
+            ("flash", pa.bool_()),
+            ("frame", pa.bool_()),
+            ("lorem_ipsum", pa.bool_()),
+            ("has_micromarkup", pa.bool_()),
+            ("has_micromarkup_errors", pa.bool_()),
+            ("from_sitemap", pa.bool_()),
             ("plain_text_word_count", pa.float64()),
             ("plain_text_rate", pa.float64()),
             ("flesch_kincaid_readability_index", pa.float64()),
@@ -714,6 +789,40 @@ CURATED_VALIDATION_RULES = {
             "has_meta_title": pl.Boolean,
             "irrelevant_description": pl.Boolean,
             "low_readability_rate": pl.Boolean,
+            "is_4xx_code": pl.Boolean,
+            "is_5xx_code": pl.Boolean,
+            "is_broken": pl.Boolean,
+            "is_redirect": pl.Boolean,
+            "is_www": pl.Boolean,
+            "no_content_encoding": pl.Boolean,
+            "high_loading_time": pl.Boolean,
+            "high_waiting_time": pl.Boolean,
+            "no_doctype": pl.Boolean,
+            "has_html_doctype": pl.Boolean,
+            "no_encoding_meta_tag": pl.Boolean,
+            "https_to_http_links": pl.Boolean,
+            "size_greater_than_3mb": pl.Boolean,
+            "meta_charset_consistency": pl.Boolean,
+            "has_meta_refresh_redirect": pl.Boolean,
+            "low_content_rate": pl.Boolean,
+            "high_content_rate": pl.Boolean,
+            "high_character_count": pl.Boolean,
+            "small_page_size": pl.Boolean,
+            "large_page_size": pl.Boolean,
+            "irrelevant_title": pl.Boolean,
+            "irrelevant_meta_keywords": pl.Boolean,
+            "deprecated_html_tags": pl.Boolean,
+            "duplicate_title_tag": pl.Boolean,
+            "no_image_alt": pl.Boolean,
+            "no_image_title": pl.Boolean,
+            "no_favicon": pl.Boolean,
+            "seo_friendly_url": pl.Boolean,
+            "flash": pl.Boolean,
+            "frame": pl.Boolean,
+            "lorem_ipsum": pl.Boolean,
+            "has_micromarkup": pl.Boolean,
+            "has_micromarkup_errors": pl.Boolean,
+            "from_sitemap": pl.Boolean,
             "plain_text_word_count": pl.Float64,
             "plain_text_rate": pl.Float64,
             "flesch_kincaid_readability_index": pl.Float64,
@@ -1632,6 +1741,18 @@ def _optional_mapping_bool(mapping: object, key: str) -> bool | None:
     return value if isinstance(value, bool) else None
 
 
+def _optional_onpage_check_bool(
+    item: Mapping[str, object],
+    checks: object,
+    field: str,
+) -> bool | None:
+    value = _optional_mapping_bool(checks, field)
+    if value is not None or field not in ONPAGE_ITEM_LEVEL_CHECK_FALLBACK_FIELDS:
+        return value
+    item_value = item.get(field)
+    return item_value if isinstance(item_value, bool) else None
+
+
 def _optional_mapping_number(mapping: object, key: str) -> float | None:
     if not isinstance(mapping, Mapping):
         return None
@@ -1648,9 +1769,12 @@ def _optional_mapping_int(mapping: object, key: str) -> int | None:
     return int(number)
 
 
-def _derive_has_valid_structured_data(item: Mapping[str, object]) -> bool | None:
-    has_micromarkup = item.get("has_micromarkup")
-    has_errors = item.get("has_micromarkup_errors")
+def _derive_has_valid_structured_data(
+    item: Mapping[str, object],
+    checks: object,
+) -> bool | None:
+    has_micromarkup = _optional_onpage_check_bool(item, checks, "has_micromarkup")
+    has_errors = _optional_onpage_check_bool(item, checks, "has_micromarkup_errors")
     if has_micromarkup is None and has_errors is None:
         return None
     if has_micromarkup is True:
@@ -1733,11 +1857,11 @@ def _onpage_signals_row(
         "micromarkup_items_count": items_count,
         "micromarkup_errors_count": errors_count,
         "micromarkup_warnings_count": warnings_count,
-        "has_valid_structured_data": _derive_has_valid_structured_data(item),
+        "has_valid_structured_data": _derive_has_valid_structured_data(item, checks),
         "schema_version": CURATED_SCHEMA_VERSION,
     }
     for field in ONPAGE_CURATED_CHECK_FIELDS:
-        row[field] = _optional_mapping_bool(checks, field)
+        row[field] = _optional_onpage_check_bool(item, checks, field)
     return row
 
 
