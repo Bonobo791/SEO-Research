@@ -1536,7 +1536,7 @@ or task id needed, and no `task_post` crawl/poll flow.
 
 ##### Dev slices
 
-**Progress:** 12 of 18 shipped.
+**Progress:** 13 of 18 shipped.
 
 1. **[x] Slice 1 — Request/schema/fixture** — `build_onpage_instant_pages_request()`,
    `DATAFORSEO_RESPONSE_SCHEMAS["onpage_instant_pages"]`,
@@ -1640,7 +1640,7 @@ or task id needed, and no `task_post` crawl/poll flow.
     `_optional_mapping_len` for array-length counts (`duplicate_meta_tags`,
     `htags.h1/h2/h3`, reused by Slice 13). Tests in
     `tests/unit/test_run_normalize.py`.
-13. **[ ] Slice 13 — `htags` counts + `social_media_tags` presence flags.**
+13. **[x] Slice 13 — `htags` counts + `social_media_tags` presence flags.**
     Add `h1_count`/`h2_count`/`h3_count` (derived from `meta.htags` array
     lengths; heading text itself stays out of scope) and
     `has_og_tags`/`has_twitter_tags` (boolean presence of any `og:*`/
@@ -1693,7 +1693,7 @@ or task id needed, and no `task_post` crawl/poll flow.
 | Fix `meta.content`/CLS nesting bug + fixture correction | 10 | Shipped |
 | Full `checks` coverage (46 booleans) | 11 | Shipped |
 | `meta` block metrics (links/images/scripts/stylesheets/consistency) | 12 | Open |
-| `htags` counts + `social_media_tags` presence flags | 13 | Open |
+| `htags` counts + `social_media_tags` presence flags | 13 | Shipped |
 | Resource/cache/DOM/size metrics | 14 | Open |
 | Full `page_timing` expansion | 15 | Open |
 | Feature mart + bounded validation for new columns | 16 | Open |
@@ -2208,6 +2208,14 @@ with 8.3 and is a lower-priority cross-check.
   unchanged; `ensure_feature_marts_for_analysis` requires `backlinks_analysis`
   and `onpage_features`; `run_phase5_stats` invokes the same guard before loading
   family source frames.
+- **Phase 7.1 slice 13 shipped (2026-07-07):** OnPage `htags` counts
+  (`h1_count`/`h2_count`/`h3_count` from `meta.htags` array lengths via the
+  Slice 12 `_optional_mapping_len` helper) and `social_media_tags` presence
+  flags (`has_og_tags`/`has_twitter_tags` via new `_has_prefix_key` helper).
+  5 new columns on `onpage_signals`; `onpage_features` bounded columns added
+  for the three count fields. Fixture updated with representative
+  `htags` + `social_media_tags`. Tests in `tests/unit/test_run_normalize.py`.
+  Stats family wiring remains Slice 17.
 - **Phase 7.1 slices 1–12 shipped (2026-07-06):** OnPage `instant_pages` live
   path from request/fixture through raw `endpoint=onpage_instant_pages`,
   curated `onpage_signals` (46 `checks` booleans via Slice 11; 18 `meta` metrics
