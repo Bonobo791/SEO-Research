@@ -1,0 +1,1 @@
+../../ponytail/.opencode/plugins/ponytail.mjs

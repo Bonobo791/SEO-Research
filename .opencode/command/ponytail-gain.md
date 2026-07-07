@@ -1,0 +1,1 @@
+../../ponytail/.opencode/command/ponytail-gain.md
