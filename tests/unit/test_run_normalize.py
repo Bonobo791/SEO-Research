@@ -1082,6 +1082,65 @@ def test_onpage_signals_row_resource_metrics_missing_key_stays_null() -> None:
     assert row["resource_warnings_count"] == 1
 
 
+def test_onpage_signals_row_maps_page_timing_expansion() -> None:
+    row = _onpage_signals_row(
+        run_id="run",
+        target_keyword="kw",
+        response_id="resp",
+        url="https://example.com/timing",
+        item={
+            "onpage_score": 90.0,
+            "page_timing": {
+                "waiting_time": 120,
+                "largest_contentful_paint": 2500.0,
+                "cumulative_layout_shift": 0.05,
+                "connection_time": 50,
+                "time_to_secure_connection": 80,
+                "request_sent_time": 10,
+                "download_time": 200,
+                "duration_time": 350,
+                "fetch_end": 150,
+                "dom_complete": 400,
+                "time_to_interactive": 500,
+                "first_input_delay": 12.5,
+            },
+        },
+    )
+    assert row["time_to_first_byte_ms"] == 120
+    assert row["largest_contentful_paint_ms"] == 2500.0
+    assert row["cumulative_layout_shift"] == 0.05
+    assert row["connection_time_ms"] == 50
+    assert row["time_to_secure_connection_ms"] == 80
+    assert row["request_sent_time_ms"] == 10
+    assert row["download_time_ms"] == 200
+    assert row["duration_time_ms"] == 350
+    assert row["fetch_end_ms"] == 150
+    assert row["dom_complete_ms"] == 400
+    assert row["time_to_interactive_ms"] == 500
+    assert row["first_input_delay_ms"] == 12.5
+
+
+def test_onpage_signals_row_page_timing_null_when_absent() -> None:
+    row = _onpage_signals_row(
+        run_id="run",
+        target_keyword="kw",
+        response_id="resp",
+        url="https://example.com/no-timing",
+        item={
+            "onpage_score": 70.0,
+        },
+    )
+    assert row["connection_time_ms"] is None
+    assert row["time_to_secure_connection_ms"] is None
+    assert row["request_sent_time_ms"] is None
+    assert row["download_time_ms"] is None
+    assert row["duration_time_ms"] is None
+    assert row["fetch_end_ms"] is None
+    assert row["dom_complete_ms"] is None
+    assert row["time_to_interactive_ms"] is None
+    assert row["first_input_delay_ms"] is None
+
+
 ONPAGE_NEW_CHECK_FIELDS = (
     "deprecated_html_tags",
     "duplicate_title_tag",

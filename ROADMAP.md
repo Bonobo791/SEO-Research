@@ -1536,7 +1536,7 @@ or task id needed, and no `task_post` crawl/poll flow.
 
 ##### Dev slices
 
-**Progress:** 14 of 18 shipped.
+**Progress:** 16 of 18 shipped.
 
 1. **[x] Slice 1 — Request/schema/fixture** — `build_onpage_instant_pages_request()`,
    `DATAFORSEO_RESPONSE_SCHEMAS["onpage_instant_pages"]`,
@@ -1647,20 +1647,20 @@ or task id needed, and no `task_post` crawl/poll flow.
     `twitter:*` key in `meta.social_media_tags`; tag values are not stored,
     since title/description/canonical are already captured elsewhere).
     Tests in `tests/unit/test_run_normalize.py`.
-14. **[ ] Slice 14 — Resource/cache/DOM/size metrics.** Add columns for
+14. **[x] Slice 14 — Resource/cache/DOM/size metrics.** Add columns for
     `cache_control.cachable`, `cache_control.ttl`, `resource_errors_count`
     and `resource_warnings_count` (lengths of the `errors`/`warnings`
     arrays), `broken_links`, `broken_resources`, `duplicate_content`,
     `duplicate_description`, `duplicate_title`, `click_depth`,
     `encoded_size`, `total_dom_size`. Tests in
     `tests/unit/test_run_normalize.py`.
-15. **[ ] Slice 15 — Full `page_timing` expansion.** Add the remaining
+15. **[x] Slice 15 — Full `page_timing` expansion.** Add the remaining
     timing columns beyond the existing TTFB/LCP/CLS:
     `connection_time`, `time_to_secure_connection`, `request_sent_time`,
     `download_time`, `duration_time`, `fetch_end`, `dom_complete`,
     `time_to_interactive`, `first_input_delay`. Tests in
     `tests/unit/test_run_normalize.py`.
-16. **[ ] Slice 16 — Feature mart + bounded validation.** Extend
+16. **[x] Slice 16 — Feature mart + bounded validation.** Extend
     `ONPAGE_FEATURES_EXTRA_COLUMNS`/`ONPAGE_FEATURES_EXPECTED_SCHEMA`/
     `ONPAGE_FEATURES_BOUNDED_COLUMNS` (`features.py:444-487`) to carry all
     new columns (Slices 11-15) into `onpage_features` (non-negative bounds
@@ -1692,11 +1692,11 @@ or task id needed, and no `task_post` crawl/poll flow.
 | Full family stats + legacy `onpage_features` rebuild on analyze | 9 | Shipped |
 | Fix `meta.content`/CLS nesting bug + fixture correction | 10 | Shipped |
 | Full `checks` coverage (46 booleans) | 11 | Shipped |
-| `meta` block metrics (links/images/scripts/stylesheets/consistency) | 12 | Open |
+| `meta` block metrics (links/images/scripts/stylesheets/consistency) | 12 | Shipped |
 | `htags` counts + `social_media_tags` presence flags | 13 | Shipped |
-| Resource/cache/DOM/size metrics | 14 | Open |
-| Full `page_timing` expansion | 15 | Open |
-| Feature mart + bounded validation for new columns | 16 | Open |
+| Resource/cache/DOM/size metrics | 14 | Shipped |
+| Full `page_timing` expansion | 15 | Shipped |
+| Feature mart + bounded validation for new columns | 16 | Shipped |
 | Analysis family wiring for new fields | 17 | Open |
 | Stored-run regression + full-layer CLI tests | 18 | Open |
 

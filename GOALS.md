@@ -633,7 +633,7 @@ and join into stats via `SOURCE_MART_BY_KIND["backlinks_metric"]`. The similarit
 
 ## Phase 7.1 acceptance criteria (OnPage instant_pages)
 
-**Status:** 13 of 18 slices shipped.
+**Status:** 16 of 18 slices shipped.
 
 | Acceptance item | Slice(s) | Status |
 | --------------- | -------- | ------ |
@@ -650,6 +650,9 @@ and join into stats via `SOURCE_MART_BY_KIND["backlinks_metric"]`. The similarit
 | Full `checks` coverage (46 booleans on `onpage_signals`) | 11 | Shipped |
 | `meta` block metrics (18 columns on `onpage_signals`) | 12 | Shipped |
 | `htags` counts + `social_media_tags` presence flags (5 columns) | 13 | Shipped |
+| Resource/cache/DOM/size metrics | 14 | Shipped |
+| Feature mart + bounded validation for new columns | 16 | Shipped |
+| Full `page_timing` expansion | 15 | Shipped |
 
 OnPage signals are additive: they live on `parquet/onpage_features/` and join
 into stats via `SOURCE_MART_BY_KIND["onpage_metric"]`. The similarity

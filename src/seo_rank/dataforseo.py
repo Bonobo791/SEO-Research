@@ -1187,6 +1187,15 @@ def fixture_onpage_instant_pages_response(
                                 "page_timing": {
                                     "waiting_time": 120,
                                     "largest_contentful_paint": 2500.0,
+                                    "connection_time": 50,
+                                    "time_to_secure_connection": 80,
+                                    "request_sent_time": 10,
+                                    "download_time": 200,
+                                    "duration_time": 350,
+                                    "fetch_end": 150,
+                                    "dom_complete": 400,
+                                    "time_to_interactive": 500,
+                                    "first_input_delay": 12.5,
                                 },
                                 "meta": {
                                     "cumulative_layout_shift": 0.05,

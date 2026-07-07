@@ -11,14 +11,18 @@ from seo_rank.cli import main
 from seo_rank.cli import RAW_RESPONSE_SCHEMA
 from seo_rank.cli import build_raw_response_record
 from seo_rank.data.features import BACKLINKS_ANALYSIS_REQUIRED_COLUMNS
+from seo_rank.data.features import ONPAGE_FEATURES_BOUNDED_COLUMNS
+from seo_rank.data.features import ONPAGE_FEATURES_EXTRA_COLUMNS
 from seo_rank.data.features import ONPAGE_FEATURES_REQUIRED_COLUMNS
 from seo_rank.data.features import build_feature_marts, write_feature_dataset
+from seo_rank.data.normalize import CURATED_VALIDATION_RULES
 from seo_rank.data.normalize import normalize_run
 from seo_rank.dataforseo import BACKLINKS_QUERY_SUMMARY
 from seo_rank.dataforseo import fixture_backlinks_response
 from seo_rank.dataforseo import fixture_onpage_instant_pages_response
 
 LEGACY_ONPAGE_META_COLUMNS = (
+    # Slice 12: meta block metrics
     "description_length",
     "title_length",
     "external_links_count",
@@ -37,6 +41,41 @@ LEGACY_ONPAGE_META_COLUMNS = (
     "description_to_content_consistency",
     "title_to_content_consistency",
     "meta_keywords_to_content_consistency",
+    # Slice 13: htag counts, social tags, readability
+    "h1_count",
+    "h2_count",
+    "h3_count",
+    "has_og_tags",
+    "has_twitter_tags",
+    "plain_text_word_count",
+    "plain_text_rate",
+    "flesch_kincaid_readability_index",
+    "coleman_liau_readability_index",
+    "smog_readability_index",
+    "dale_chall_readability_index",
+    # Slice 14: resource/cache/DOM/size
+    "cache_control_cachable",
+    "cache_control_ttl",
+    "resource_errors_count",
+    "resource_warnings_count",
+    "broken_links",
+    "broken_resources",
+    "duplicate_content",
+    "duplicate_description",
+    "duplicate_title",
+    "click_depth",
+    "encoded_size",
+    "total_dom_size",
+    # Slice 15: page_timing expansion
+    "connection_time_ms",
+    "time_to_secure_connection_ms",
+    "request_sent_time_ms",
+    "download_time_ms",
+    "duration_time_ms",
+    "fetch_end_ms",
+    "dom_complete_ms",
+    "time_to_interactive_ms",
+    "first_input_delay_ms",
 )
 
 
@@ -142,6 +181,33 @@ def test_build_feature_marts_materializes_lazy_joins_from_curated_tables(
     assert any(row["is_https"] is True for row in onpage_features)
     assert any(row["time_to_first_byte_ms"] == 120 for row in onpage_features)
     assert any(row["has_valid_structured_data"] is True for row in onpage_features)
+    assert any(row["description_length"] == 128 for row in onpage_features)
+    assert any(row["title_length"] == 49 for row in onpage_features)
+    assert any(row["internal_links_count"] == 98 for row in onpage_features)
+    assert any(row["external_links_count"] == 7 for row in onpage_features)
+    assert any(row["h1_count"] == 1 for row in onpage_features)
+    assert any(row["h2_count"] == 1 for row in onpage_features)
+    assert any(row["h3_count"] == 0 for row in onpage_features)
+    assert any(row["has_og_tags"] is True for row in onpage_features)
+    assert any(row["has_twitter_tags"] is True for row in onpage_features)
+    assert any(row["cache_control_cachable"] is False for row in onpage_features)
+    assert any(row["cache_control_ttl"] == 3600 for row in onpage_features)
+    assert any(row["click_depth"] == 2 for row in onpage_features)
+    assert any(row["encoded_size"] == 25_070 for row in onpage_features)
+    assert any(row["total_dom_size"] == 5_632_490 for row in onpage_features)
+    assert any(row["resource_errors_count"] == 0 for row in onpage_features)
+    assert any(row["resource_warnings_count"] == 1 for row in onpage_features)
+    assert any(row["description_to_content_consistency"] == pytest.approx(0.4737, abs=0.001) for row in onpage_features)
+    assert any(row["title_to_content_consistency"] == pytest.approx(0.7143, abs=0.001) for row in onpage_features)
+    assert any(row["connection_time_ms"] == 50 for row in onpage_features)
+    assert any(row["time_to_secure_connection_ms"] == 80 for row in onpage_features)
+    assert any(row["request_sent_time_ms"] == 10 for row in onpage_features)
+    assert any(row["download_time_ms"] == 200 for row in onpage_features)
+    assert any(row["duration_time_ms"] == 350 for row in onpage_features)
+    assert any(row["fetch_end_ms"] == 150 for row in onpage_features)
+    assert any(row["dom_complete_ms"] == 400 for row in onpage_features)
+    assert any(row["time_to_interactive_ms"] == 500 for row in onpage_features)
+    assert any(row["first_input_delay_ms"] == pytest.approx(12.5) for row in onpage_features)
 
     run_json = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
     assert run_json["catalog"]["datasets"]["keyword_serp"]["row_count"] == 1
@@ -254,6 +320,39 @@ def test_build_feature_marts_legacy_onpage_signals_backfills_missing_meta_column
     assert row["title_length"] is None
     assert row["follow"] is None
     assert row["description_to_content_consistency"] is None
+    assert row["h1_count"] is None
+    assert row["has_og_tags"] is None
+    assert row["cache_control_ttl"] is None
+    assert row["click_depth"] is None
+    assert row["connection_time_ms"] is None
+    assert row["first_input_delay_ms"] is None
+
+
+def test_onpage_features_bounded_columns_cover_all_numeric_non_key_columns() -> None:
+    """Drift guard: every non-boolean, non-key numeric column must have bounds."""
+    key_columns = {
+        "run_id", "target_keyword_id", "target_keyword", "response_id",
+        "canonical_url_hash", "url", "schema_version", "onpage_signal_id",
+    }
+    unbounded_whitelist = {
+        # Readability indices have no natural non-negative bound
+        "flesch_kincaid_readability_index",
+        "coleman_liau_readability_index",
+        "smog_readability_index",
+        "dale_chall_readability_index",
+    }
+    for column in ONPAGE_FEATURES_EXTRA_COLUMNS:
+        if column in key_columns or column in unbounded_whitelist:
+            continue
+        dtype = CURATED_VALIDATION_RULES["onpage_signals"]["expected_schema"].get(column)
+        if dtype is None:
+            continue
+        if dtype == pl.Boolean:
+            continue
+        assert column in ONPAGE_FEATURES_BOUNDED_COLUMNS, (
+            f"Numeric column {column!r} missing from ONPAGE_FEATURES_BOUNDED_COLUMNS; "
+            "add a (lower, upper) bound to prevent silent data drift"
+        )
 
 
 def test_build_feature_marts_validates_each_feature_frame_before_sinking(
