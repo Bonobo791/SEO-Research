@@ -35,8 +35,8 @@ Use these commands in order. Each step reads or extends the same run tree under
 | **Inspect one keyword row** | `seo-rank analyze --run runs/RUN_ID --keyword "technical seo"` |
 | **Resume stored run in place** | `seo-rank run --seed "technical seo" --stored-run runs/RUN_ID` |
 | **Backfill live TextRazor on stored run** | `seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-textrazor-only` |
-| **Backfill DataForSEO backlinks on stored run** | `seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-providers` |
-| **Backfill DataForSEO OnPage on stored run** | Same as backlinks backfill (`--live-providers` fetches missing `onpage_instant_pages` rows) |
+| **Backfill DataForSEO backlinks on stored run** | `seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-providers --live-backlinks` |
+| **Backfill DataForSEO OnPage on stored run** | Same as backlinks backfill (`--live-providers --live-backlinks` fetches missing `onpage_instant_pages` rows) |
 | **Brand-new run with live TextRazor only** | `seo-rank run --seed "technical seo" --live-textrazor-only --output-dir runs/demo` |
 | **Expand existing run in place** | `seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --keyword-limit 25` |
 | **Audit one raw HTTP response** | `seo-rank replay --run runs/RUN_ID --response-id RESPONSE_ID` |
@@ -83,10 +83,10 @@ for that invocation.
 `SEO_RANK_ENABLE_LIVE_PROVIDERS=1` and DataForSEO credentials in `.env`):
 
 ```bash
-seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-providers
+seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-providers --live-backlinks
 ```
 
-Pass `--live-providers` on replay even when the stored run was created offline:
+Pass `--live-providers --live-backlinks` on replay even when the stored run was created offline:
 the CLI overlays live-provider flags onto the saved config for this invocation
 (`merge_stored_run_cli_overlay`); `--skip-textrazor` stays sticky and suppresses
 TextRazor even when the stored run had it enabled. Only missing SERP URL
@@ -106,7 +106,7 @@ backlinks count columns) for the `backlinks_counts` signal family in analyze.
 and credentials as backlinks):
 
 ```bash
-seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-providers
+seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-providers --live-backlinks
 ```
 
 OnPage uses the same missing-URL overlay as backlinks: only SERP URLs without a
@@ -168,8 +168,8 @@ scores alongside the three similarity backends.
 On every `run` (offline or live), per expanded cluster keyword:
 
 1. SERP normalization (top *N* organic rows, default 20)
-2. DataForSEO `backlinks/summary/live` — **two calls per SERP URL** when live
-   providers are on (unfiltered summary plus dofollow-filtered summary; ~$0.04
+2. DataForSEO `backlinks/summary/live` — **two calls per SERP URL** when `--live-providers --live-backlinks`
+   are on (unfiltered summary plus dofollow-filtered summary; ~$0.04
    per target for both calls combined); incremental raw-lake persistence to
    `endpoint=backlinks_summary` and `endpoint=backlinks_dofollow_summary`;
    curated `backlinks` on normalize
@@ -212,9 +212,10 @@ for pipeline shape and tests, not production-grade retrieval.
 | Gemini Doc Retrieval | `gemini_doc_retrieval` | Fixture cosine | `--live-providers --live-gemini` (`gemini-embedding-2`, asymmetric query/doc) |
 | Gemini Semantic Similarity | `gemini_semantic_similarity` | Fixture cosine | same `--live-gemini` flag (symmetric sentence-similarity task) |
 
-With `--live-providers` only, DataForSEO is live but similarity stays on fixtures
-until `--live-bge` and/or `--live-gemini` are set. Live BGE **merges** real rerank
-scores over the base page-similarity rows; it does not replace Gemini columns.
+With `--live-providers` only, DataForSEO stays live for keyword expansion, SERP,
+page text, and OnPage; backlinks stay off until `--live-backlinks` is set. Live
+BGE **merges** real rerank scores over the base page-similarity rows; it does
+not replace Gemini columns.
 
 Retrieve-then-rerank (BM25 + bi-encoder recall, then BGE) is **not** implemented;
 see `ROADMAP.md` (BGE hybrid / retrieve-then-rerank backlog).
@@ -405,6 +406,7 @@ Fetch or fixture provider data, score pages, write `run.json`, `report.md`, and
 | `--skip-textrazor` | off | Skip TextRazor entities (offline and live); on stored-run replay, this stays sticky and suppresses TextRazor even if the saved run had it enabled |
 | `--stored-run` | — | Resume or expand the chain on an existing run tree in place |
 | `--live-providers` | off | Live DataForSEO (requires env gate) |
+| `--live-backlinks` | off | Live DataForSEO backlinks (requires `--live-providers`) |
 | `--live-bge` | off | Live BGE reranking (requires `--live-providers`) |
 | `--live-gemini` | off | Live Gemini embeddings (requires `--live-providers`) |
 | `--live-textrazor` | off | Live TextRazor (requires `--live-providers`) |

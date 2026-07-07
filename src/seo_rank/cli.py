@@ -128,6 +128,7 @@ class RunConfig:
     refresh_textrazor: bool = False
     keyword_limit: int = DEFAULT_KEYWORD_LIMIT
     live_providers: bool = False
+    live_backlinks: bool = False
     live_bge: bool = False
     live_gemini: bool = False
     live_textrazor: bool = False
@@ -290,6 +291,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run the env-gated live provider smoke path",
     )
+    run.add_argument(
+        "--live-backlinks",
+        action="store_true",
+        help="Fetch DataForSEO backlinks during live runs",
+    )
     run.add_argument("--live-bge", action="store_true")
     run.add_argument("--live-gemini", action="store_true")
     run.add_argument("--live-textrazor", action="store_true")
@@ -339,6 +345,8 @@ def config_from_args(args: argparse.Namespace) -> RunConfig:
         raise LiveProviderGateError(
             "--live-textrazor-only cannot be combined with --skip-textrazor"
         )
+    if args.live_backlinks and not args.live_providers:
+        raise LiveProviderGateError("--live-backlinks requires --live-providers")
     if args.live_bge and not args.live_providers:
         raise LiveProviderGateError("--live-bge requires --live-providers")
     if args.live_gemini and not args.live_providers:
@@ -362,6 +370,7 @@ def config_from_args(args: argparse.Namespace) -> RunConfig:
         live_textrazor_only=args.live_textrazor_only,
         refresh_textrazor=args.refresh_textrazor,
         live_providers=args.live_providers,
+        live_backlinks=args.live_backlinks,
         live_bge=args.live_bge,
         live_gemini=args.live_gemini,
         live_textrazor=args.live_textrazor and not args.skip_textrazor,
@@ -398,6 +407,8 @@ def serialized_run_config_from_args(args: argparse.Namespace) -> dict[str, objec
     if args.keyword_limit != DEFAULT_KEYWORD_LIMIT:
         serialized["keyword_limit"] = args.keyword_limit
     serialized["live_providers"] = args.live_providers
+    if args.live_backlinks:
+        serialized["live_backlinks"] = True
     serialized["live_bge"] = args.live_bge
     serialized["live_gemini"] = args.live_gemini
     serialized["live_textrazor"] = args.live_textrazor and not args.skip_textrazor
@@ -805,6 +816,7 @@ def run_config_from_payload(
         refresh_textrazor=bool(config.get("refresh_textrazor", False)),
         keyword_limit=keyword_limit,
         live_providers=bool(config.get("live_providers", False)),
+        live_backlinks=bool(config.get("live_backlinks", False)),
         live_bge=bool(config.get("live_bge", False)),
         live_gemini=bool(config.get("live_gemini", False)),
         live_textrazor=bool(config.get("live_textrazor", False)),
@@ -826,6 +838,7 @@ def merge_stored_run_cli_overlay(stored_config: RunConfig, cli_config: RunConfig
     return replace(
         stored_config,
         live_providers=cli_config.live_providers or stored_config.live_providers,
+        live_backlinks=cli_config.live_backlinks or stored_config.live_backlinks,
         live_bge=cli_config.live_bge or stored_config.live_bge,
         live_gemini=cli_config.live_gemini or stored_config.live_gemini,
         live_textrazor=live_textrazor,
@@ -1221,7 +1234,7 @@ def build_resumed_keyword_result(
         ]
         for variant in BACKLINKS_VARIANT_ENDPOINTS
     }
-    if config.live_providers and live_context is not None:
+    if config.live_providers and config.live_backlinks and live_context is not None:
         for variant, missing_urls_for_variant in missing_backlink_urls_by_variant.items():
             if not missing_urls_for_variant:
                 continue
@@ -2069,17 +2082,18 @@ def build_live_payload(
                 keyword_result["raw_provider_data"]["dataforseo"]["serp"]
                 for keyword_result in keyword_results
             ],
-            "backlinks_summary": collect_backlinks_variant_responses(
-                keyword_results, variant_key="backlinks_summary"
-            ),
-            "backlinks_dofollow_summary": collect_backlinks_variant_responses(
-                keyword_results, variant_key="backlinks_dofollow_summary"
-            ),
             ONPAGE_INSTANT_PAGES_ENDPOINT: collect_onpage_instant_pages_responses(
                 keyword_results
             ),
         },
     }
+    if config.live_backlinks:
+        raw_provider_data["dataforseo"]["backlinks_summary"] = collect_backlinks_variant_responses(
+            keyword_results, variant_key="backlinks_summary"
+        )
+        raw_provider_data["dataforseo"]["backlinks_dofollow_summary"] = collect_backlinks_variant_responses(
+            keyword_results, variant_key="backlinks_dofollow_summary"
+        )
     textrazor_responses = [
         response
         for keyword_result in keyword_results
@@ -2143,26 +2157,28 @@ def build_live_keyword_result(
         str(result["url"]): str(result["title"]) for result in serp_results
     }
 
-    if progress is not None:
-        progress.keyword_log(
+    backlinks_responses: list[dict[str, object]] = []
+    if config.live_backlinks:
+        if progress is not None:
+            progress.keyword_log(
+                target_keyword,
+                f"dataforseo backlinks ({len(serp_results)} urls)",
+            )
+        backlinks_responses = fetch_dataforseo_backlinks_for_urls(
             target_keyword,
-            f"dataforseo backlinks ({len(serp_results)} urls)",
+            [str(result["url"]) for result in serp_results],
+            credentials=credentials.dataforseo,
+            transport=dataforseo_transport,
+            progress=None,
+            run_dir=config.output_dir,
         )
-    backlinks_responses = fetch_dataforseo_backlinks_for_urls(
-        target_keyword,
-        [str(result["url"]) for result in serp_results],
-        credentials=credentials.dataforseo,
-        transport=dataforseo_transport,
-        progress=None,
-        run_dir=config.output_dir,
-    )
-    if backlinks_responses:
-        partitioned = partition_backlinks_responses_by_variant(backlinks_responses)
-        for variant, responses_for_variant in partitioned.items():
-            if responses_for_variant:
-                network_calls.append(
-                    f"dataforseo.{BACKLINKS_VARIANT_ENDPOINTS[variant]}"
-                )
+        if backlinks_responses:
+            partitioned = partition_backlinks_responses_by_variant(backlinks_responses)
+            for variant, responses_for_variant in partitioned.items():
+                if responses_for_variant:
+                    network_calls.append(
+                        f"dataforseo.{BACKLINKS_VARIANT_ENDPOINTS[variant]}"
+                    )
 
     serp_urls = list(dict.fromkeys(str(result["url"]) for result in serp_results))
     if progress is not None:

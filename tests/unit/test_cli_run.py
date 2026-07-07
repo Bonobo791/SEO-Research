@@ -137,6 +137,7 @@ def test_run_writes_offline_json_and_markdown_artifacts(
         "skip_textrazor": True,
         "live_textrazor_only": False,
         "live_providers": False,
+        "live_backlinks": False,
         "live_bge": False,
         "live_gemini": False,
         "live_textrazor": False,
@@ -594,6 +595,7 @@ def test_run_live_providers_writes_backlink_raw_responses(
             "--depth",
             "1",
             "--live-providers",
+            "--live-backlinks",
             "--skip-textrazor",
         ]
     )
@@ -638,6 +640,66 @@ def test_run_live_providers_writes_backlink_raw_responses(
         bytes(summary_rows[0]["response_body_bytes"]).decode("utf-8")
     )
     assert summary_response["url"] == "https://example.com/technical-seo/1"
+
+
+def test_run_live_providers_does_not_fetch_backlinks_without_explicit_flag(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.setenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", "1")
+    monkeypatch.setenv("DATAFORSEO_LOGIN", "analyst@example.com")
+    monkeypatch.setenv("DATAFORSEO_PASSWORD", "dataforseo-secret")
+
+    backlinks_targets: list[str] = []
+
+    def dataforseo_transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        del method, headers, timeout
+        request_body = json.loads(body.decode("utf-8"))
+        if url.endswith("/keywords_data/google_ads/keywords_for_keywords/live"):
+            return fixture_keyword_expansion_response("technical seo")
+        if url.endswith("/serp/google/organic/live/advanced"):
+            return fixture_serp_response("technical seo")
+        if url.endswith("/on_page/content_parsing/live"):
+            return fixture_page_text_response(request_body[0]["url"], "technical seo")
+        if url.endswith("/on_page/instant_pages"):
+            return fixture_onpage_instant_pages_response(request_body[0]["url"])
+        if url.endswith("/backlinks/summary/live"):
+            backlinks_targets.append(request_body[0]["target"])
+            raise AssertionError("backlinks should not be fetched without --live-backlinks")
+        raise AssertionError(f"unexpected DataForSEO URL: {url}")
+
+    monkeypatch.setattr("seo_rank.cli.DEFAULT_DATAFORSEO_TRANSPORT", dataforseo_transport)
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--output-dir",
+            str(output_dir),
+            "--keyword-limit",
+            "1",
+            "--depth",
+            "1",
+            "--live-providers",
+            "--skip-textrazor",
+        ]
+    )
+
+    assert exit_code == 0
+    assert backlinks_targets == []
+    payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
+    assert "dataforseo.backlinks_summary" not in payload["network_calls"]
+    assert "dataforseo.backlinks_dofollow_summary" not in payload["network_calls"]
+    assert payload["config"]["live_backlinks"] is False
 
 
 def test_run_live_providers_persists_backlinks_before_later_provider_failure(
@@ -685,6 +747,7 @@ def test_run_live_providers_persists_backlinks_before_later_provider_failure(
             "--depth",
             "1",
             "--live-providers",
+            "--live-backlinks",
             "--skip-textrazor",
         ]
     )
@@ -1055,6 +1118,7 @@ def test_build_live_payload_includes_backlinks_in_raw_provider_data(
             live_textrazor_only=False,
             refresh_textrazor=False,
             live_providers=True,
+            live_backlinks=True,
             live_bge=False,
             live_gemini=False,
             live_textrazor=False,
@@ -1143,6 +1207,7 @@ def test_run_stored_run_cli_live_providers_fetches_onpage_when_missing(
             "--stored-run",
             str(output_dir),
             "--live-providers",
+            "--live-backlinks",
             "--keyword-limit",
             "1",
         ]
@@ -1699,6 +1764,7 @@ def test_run_stored_run_backfills_only_missing_backlinks_in_place(
                 "--output-dir",
                 str(output_dir),
                 "--live-providers",
+                "--live-backlinks",
                 "--keyword-limit",
                 "1",
                 "--depth",
@@ -1745,6 +1811,7 @@ def test_run_stored_run_backfills_only_missing_backlinks_in_place(
             "--stored-run",
             str(output_dir),
             "--live-providers",
+            "--live-backlinks",
             "--keyword-limit",
             "1",
         ]
@@ -1830,6 +1897,7 @@ def test_run_stored_run_backfills_only_missing_onpage_in_place(
                 "--output-dir",
                 str(output_dir),
                 "--live-providers",
+                "--live-backlinks",
                 "--keyword-limit",
                 "1",
                 "--depth",
@@ -1876,6 +1944,7 @@ def test_run_stored_run_backfills_only_missing_onpage_in_place(
             "--stored-run",
             str(output_dir),
             "--live-providers",
+            "--live-backlinks",
             "--keyword-limit",
             "1",
         ]
@@ -1944,6 +2013,7 @@ def test_run_stored_run_does_not_refetch_onpage_when_partition_complete(
                 "--output-dir",
                 str(output_dir),
                 "--live-providers",
+                "--live-backlinks",
                 "--keyword-limit",
                 "1",
                 "--depth",
@@ -1971,6 +2041,7 @@ def test_run_stored_run_does_not_refetch_onpage_when_partition_complete(
             "--stored-run",
             str(output_dir),
             "--live-providers",
+            "--live-backlinks",
             "--keyword-limit",
             "1",
         ]
@@ -2024,18 +2095,19 @@ def test_run_stored_run_refetches_empty_onpage_partition_row(
 
     assert (
         main(
-            [
-                "run",
-                "--seed",
-                "technical seo",
-                "--output-dir",
-                str(output_dir),
-                "--live-providers",
-                "--keyword-limit",
-                "1",
-                "--depth",
-                "2",
-                "--skip-textrazor",
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--output-dir",
+            str(output_dir),
+            "--live-providers",
+            "--live-backlinks",
+            "--keyword-limit",
+            "1",
+            "--depth",
+            "2",
+            "--skip-textrazor",
             ]
         )
         == 0
@@ -2094,6 +2166,7 @@ def test_run_stored_run_refetches_empty_onpage_partition_row(
             "--stored-run",
             str(output_dir),
             "--live-providers",
+            "--live-backlinks",
             "--keyword-limit",
             "1",
         ]
@@ -2161,6 +2234,7 @@ def test_run_stored_run_cli_live_providers_backfills_backlinks_when_stored_confi
 
     payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
     assert payload["config"]["live_providers"] is False
+    assert payload["config"]["live_backlinks"] is False
     assert not (
         output_dir / "parquet" / "raw_responses" / "endpoint=backlinks_summary"
     ).exists()
@@ -2173,6 +2247,7 @@ def test_run_stored_run_cli_live_providers_backfills_backlinks_when_stored_confi
             "--stored-run",
             str(output_dir),
             "--live-providers",
+            "--live-backlinks",
             "--keyword-limit",
             "1",
         ]
@@ -2182,6 +2257,7 @@ def test_run_stored_run_cli_live_providers_backfills_backlinks_when_stored_confi
     assert len(live_backlink_targets) == 4
     payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
     assert payload["config"]["live_providers"] is True
+    assert payload["config"]["live_backlinks"] is True
     assert "dataforseo.backlinks_summary" in payload["network_calls"]
     assert "dataforseo.backlinks_dofollow_summary" in payload["network_calls"]
     summary_path = (
@@ -2249,6 +2325,7 @@ def test_run_stored_run_live_providers_refetches_legacy_shaped_backlinks(
                 "--output-dir",
                 str(output_dir),
                 "--live-providers",
+                "--live-backlinks",
                 "--keyword-limit",
                 "1",
                 "--depth",
@@ -2322,6 +2399,7 @@ def test_run_stored_run_live_providers_refetches_legacy_shaped_backlinks(
             "--stored-run",
             str(output_dir),
             "--live-providers",
+            "--live-backlinks",
             "--keyword-limit",
             "1",
         ]
@@ -2391,12 +2469,13 @@ def test_run_stored_run_reuses_successful_empty_backlink_summaries(
                 "run",
                 "--seed",
                 "technical seo",
-                "--output-dir",
-                str(output_dir),
-                "--live-providers",
-                "--keyword-limit",
-                "1",
-                "--depth",
+            "--output-dir",
+            str(output_dir),
+            "--live-providers",
+            "--live-backlinks",
+            "--keyword-limit",
+            "1",
+            "--depth",
                 "2",
                 "--skip-textrazor",
             ]
@@ -2454,6 +2533,7 @@ def test_run_stored_run_reuses_successful_empty_backlink_summaries(
             "--stored-run",
             str(output_dir),
             "--live-providers",
+            "--live-backlinks",
             "--keyword-limit",
             "1",
         ]
@@ -2950,12 +3030,13 @@ def test_run_stored_run_refreshes_only_stale_serps_in_place(
                 "run",
                 "--seed",
                 "technical seo",
-                "--output-dir",
-                str(output_dir),
-                "--live-providers",
-                "--keyword-limit",
-                "2",
-                "--skip-textrazor",
+            "--output-dir",
+            str(output_dir),
+            "--live-providers",
+            "--live-backlinks",
+            "--keyword-limit",
+            "2",
+            "--skip-textrazor",
             ]
         )
         == 0
@@ -3168,12 +3249,38 @@ def test_run_rejects_live_providers_without_explicit_env_gate(
             "--output-dir",
             str(output_dir),
             "--live-providers",
+            "--live-backlinks",
         ]
     )
 
     captured = capsys.readouterr()
     assert exit_code == 2
     assert "SEO_RANK_ENABLE_LIVE_PROVIDERS" in captured.err
+    assert not (output_dir / "run.json").exists()
+
+
+def test_run_rejects_live_backlinks_without_live_providers(
+    tmp_path: Path,
+    capsys,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--output-dir",
+            str(output_dir),
+            "--live-backlinks",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "--live-backlinks requires --live-providers" in captured.err
     assert not (output_dir / "run.json").exists()
 
 
@@ -3487,6 +3594,7 @@ def test_run_rejects_live_gemini_without_env_gate_or_key(
             "--output-dir",
             str(output_dir),
             "--live-providers",
+            "--live-backlinks",
             "--live-gemini",
         ]
     )
@@ -3516,6 +3624,7 @@ def test_run_rejects_live_bge_without_env_gate(
             "--output-dir",
             str(output_dir),
             "--live-providers",
+            "--live-backlinks",
             "--live-bge",
         ]
     )
@@ -3646,6 +3755,7 @@ def test_run_live_gemini_uses_live_gemini_page_scores(
             "--output-dir",
             str(output_dir),
             "--live-providers",
+            "--live-backlinks",
             "--live-gemini",
         ]
     )
@@ -3807,6 +3917,7 @@ def test_run_live_bge_replaces_only_bge_page_scores(
             "--output-dir",
             str(output_dir),
             "--live-providers",
+            "--live-backlinks",
             "--live-bge",
         ]
     )
@@ -3873,6 +3984,7 @@ def test_run_rejects_live_textrazor_without_env_gate(
             "--output-dir",
             str(output_dir),
             "--live-providers",
+            "--live-backlinks",
             "--live-textrazor",
         ]
     )
@@ -3969,6 +4081,7 @@ def test_run_live_providers_skips_textrazor_when_not_requested(
             "--output-dir",
             str(output_dir),
             "--live-providers",
+            "--live-backlinks",
         ]
     )
 
@@ -4101,6 +4214,7 @@ def test_run_live_providers_writes_artifacts_with_injected_transports(
             "--output-dir",
             str(output_dir),
             "--live-providers",
+            "--live-backlinks",
             "--live-textrazor",
         ]
     )
