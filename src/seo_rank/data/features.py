@@ -478,6 +478,9 @@ ONPAGE_FEATURES_BOUNDED_COLUMNS = {
     "micromarkup_items_count": (0, None),
     "micromarkup_errors_count": (0, None),
     "micromarkup_warnings_count": (0, None),
+    "h1_count": (0, None),
+    "h2_count": (0, None),
+    "h3_count": (0, None),
 }
 FEATURE_REQUIRED_COLUMNS["onpage_features"] = ONPAGE_FEATURES_REQUIRED_COLUMNS
 FEATURE_VALIDATION_RULES["onpage_features"] = {

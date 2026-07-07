@@ -25,6 +25,7 @@ from seo_rank.data.normalize import (
     CURATED_SCHEMAS,
     CURATED_VALIDATION_RULES,
     ONPAGE_CURATED_CHECK_FIELDS,
+    _has_prefix_key,
     _onpage_signals_row,
     _optional_mapping_len,
     build_entities_frame,
@@ -776,8 +777,11 @@ ONPAGE_META_INT_FIELDS = (
     "render_blocking_stylesheets_count",
     "inbound_links_count",
     "duplicate_meta_tags_count",
+    "h1_count",
+    "h2_count",
+    "h3_count",
 )
-ONPAGE_META_BOOL_FIELDS = ("follow",)
+ONPAGE_META_BOOL_FIELDS = ("follow", "has_og_tags", "has_twitter_tags")
 ONPAGE_META_FLOAT_FIELDS = (
     "description_to_content_consistency",
     "title_to_content_consistency",
@@ -791,7 +795,7 @@ ONPAGE_META_FIELDS = (
 
 
 def test_onpage_meta_columns_match_onpage_signals_schema() -> None:
-    assert len(ONPAGE_META_FIELDS) == 18
+    assert len(ONPAGE_META_FIELDS) == 23
     arrow_schema = {
         field.name: field.type for field in CURATED_SCHEMAS["onpage_signals"]
     }
@@ -877,6 +881,124 @@ def test_onpage_signals_row_meta_metrics_null_when_meta_absent() -> None:
     )
     for field in ONPAGE_META_FIELDS:
         assert row[field] is None
+
+
+def test_has_prefix_key_returns_true_or_false() -> None:
+    assert _has_prefix_key({"og:title": "t", "og:description": "d"}, "og:") is True
+    assert _has_prefix_key({"twitter:card": "summary"}, "twitter:") is True
+    assert _has_prefix_key({"og:title": "t"}, "twitter:") is False
+    assert _has_prefix_key({}, "og:") is False
+
+
+def test_has_prefix_key_returns_none_for_non_mapping() -> None:
+    assert _has_prefix_key(None, "og:") is None
+    assert _has_prefix_key("not-a-mapping", "og:") is None
+
+
+def test_onpage_signals_row_maps_htags_counts() -> None:
+    row = _onpage_signals_row(
+        run_id="run",
+        target_keyword="kw",
+        response_id="resp",
+        url="https://example.com/htags",
+        item={
+            "onpage_score": 85.0,
+            "meta": {
+                "htags": {
+                    "h1": ["Main Title"],
+                    "h2": ["Section A", "Section B"],
+                    "h3": [],
+                },
+            },
+        },
+    )
+    assert row["h1_count"] == 1
+    assert row["h2_count"] == 2
+    assert row["h3_count"] == 0
+
+
+def test_onpage_signals_row_maps_social_media_tags_presence() -> None:
+    row = _onpage_signals_row(
+        run_id="run",
+        target_keyword="kw",
+        response_id="resp",
+        url="https://example.com/social",
+        item={
+            "onpage_score": 85.0,
+            "meta": {
+                "social_media_tags": {
+                    "og:title": "My Page",
+                    "og:description": "Desc",
+                    "twitter:card": "summary",
+                },
+            },
+        },
+    )
+    assert row["has_og_tags"] is True
+    assert row["has_twitter_tags"] is True
+
+
+def test_onpage_signals_row_social_media_tags_only_og() -> None:
+    row = _onpage_signals_row(
+        run_id="run",
+        target_keyword="kw",
+        response_id="resp",
+        url="https://example.com/og-only",
+        item={
+            "onpage_score": 85.0,
+            "meta": {
+                "social_media_tags": {"og:title": "My Page"},
+            },
+        },
+    )
+    assert row["has_og_tags"] is True
+    assert row["has_twitter_tags"] is False
+
+
+def test_onpage_signals_row_htags_and_social_null_when_meta_absent() -> None:
+    row = _onpage_signals_row(
+        run_id="run",
+        target_keyword="kw",
+        response_id="resp",
+        url="https://example.com/no-meta-htags",
+        item={"onpage_score": 75.0},
+    )
+    assert row["h1_count"] is None
+    assert row["h2_count"] is None
+    assert row["h3_count"] is None
+    assert row["has_og_tags"] is None
+    assert row["has_twitter_tags"] is None
+
+
+def test_onpage_signals_row_htags_null_when_htags_missing() -> None:
+    row = _onpage_signals_row(
+        run_id="run",
+        target_keyword="kw",
+        response_id="resp",
+        url="https://example.com/no-htags",
+        item={
+            "onpage_score": 85.0,
+            "meta": {"title_length": 10},
+        },
+    )
+    assert row["h1_count"] is None
+    assert row["h2_count"] is None
+    assert row["h3_count"] is None
+
+
+def test_onpage_signals_row_social_null_when_social_media_tags_missing() -> None:
+    row = _onpage_signals_row(
+        run_id="run",
+        target_keyword="kw",
+        response_id="resp",
+        url="https://example.com/no-social",
+        item={
+            "onpage_score": 85.0,
+            "meta": {"title_length": 10},
+        },
+    )
+    assert row["has_og_tags"] is None
+    assert row["has_twitter_tags"] is None
 
 
 ONPAGE_NEW_CHECK_FIELDS = (

@@ -1196,6 +1196,16 @@ def fixture_onpage_instant_pages_response(
                                     "external_links_count": 7,
                                     "follow": True,
                                     "duplicate_meta_tags": ["generator"],
+                                    "htags": {
+                                        "h1": ["Example Domain"],
+                                        "h2": ["More Information"],
+                                        "h3": [],
+                                    },
+                                    "social_media_tags": {
+                                        "og:title": "Example Domain",
+                                        "og:description": "Example description",
+                                        "twitter:card": "summary",
+                                    },
                                     "content": {
                                         "plain_text_word_count": 432.0,
                                         "plain_text_rate": 0.02,

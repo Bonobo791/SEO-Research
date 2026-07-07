@@ -387,6 +387,11 @@ CURATED_SCHEMAS = {
             ("description_to_content_consistency", pa.float64()),
             ("title_to_content_consistency", pa.float64()),
             ("meta_keywords_to_content_consistency", pa.float64()),
+            ("h1_count", pa.int64()),
+            ("h2_count", pa.int64()),
+            ("h3_count", pa.int64()),
+            ("has_og_tags", pa.bool_()),
+            ("has_twitter_tags", pa.bool_()),
             ("plain_text_word_count", pa.float64()),
             ("plain_text_rate", pa.float64()),
             ("flesch_kincaid_readability_index", pa.float64()),
@@ -859,6 +864,11 @@ CURATED_VALIDATION_RULES = {
             "description_to_content_consistency": pl.Float64,
             "title_to_content_consistency": pl.Float64,
             "meta_keywords_to_content_consistency": pl.Float64,
+            "h1_count": pl.Int64,
+            "h2_count": pl.Int64,
+            "h3_count": pl.Int64,
+            "has_og_tags": pl.Boolean,
+            "has_twitter_tags": pl.Boolean,
             "plain_text_word_count": pl.Float64,
             "plain_text_rate": pl.Float64,
             "flesch_kincaid_readability_index": pl.Float64,
@@ -1814,6 +1824,12 @@ def _optional_mapping_len(mapping: object, key: str) -> int | None:
     return None
 
 
+def _has_prefix_key(mapping: object, prefix: str) -> bool | None:
+    if not isinstance(mapping, Mapping):
+        return None
+    return any(isinstance(k, str) and k.startswith(prefix) for k in mapping)
+
+
 def _derive_has_valid_structured_data(
     item: Mapping[str, object],
     checks: object,
@@ -1856,6 +1872,8 @@ def _onpage_signals_row(
     # Real DataForSEO nests content + CLS under meta; keep flat fallback for
     # any raw rows persisted before slice 10.
     content = (meta.get("content") if meta else None) or item.get("content")
+    htags = meta.get("htags") if meta else None
+    social_media_tags = meta.get("social_media_tags") if meta else None
     page_timing = item.get("page_timing")
     score = item.get("onpage_score")
     assert isinstance(score, (int, float))
@@ -1925,6 +1943,11 @@ def _onpage_signals_row(
             content,
             "meta_keywords_to_content_consistency",
         ),
+        "h1_count": _optional_mapping_len(htags, "h1"),
+        "h2_count": _optional_mapping_len(htags, "h2"),
+        "h3_count": _optional_mapping_len(htags, "h3"),
+        "has_og_tags": _has_prefix_key(social_media_tags, "og:"),
+        "has_twitter_tags": _has_prefix_key(social_media_tags, "twitter:"),
         "time_to_first_byte_ms": _optional_mapping_int(page_timing, "waiting_time"),
         "largest_contentful_paint_ms": _optional_mapping_number(
             page_timing,
