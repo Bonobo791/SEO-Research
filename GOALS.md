@@ -92,7 +92,7 @@ slices 21–26 shipped; shared raw-response schema contract (slice 26) is shippe
 TextRazor signal expansion: slices 27–30 and 32–33 shipped; slice 31 (golden fixtures) open.
 Backlinks count analysis: **Phase 6.2** shipped (`backlinks_analysis` mart +
 `backlinks_counts` family in `stats_*`).
-OnPage page signals: **Phase 7.1** slices **1–12 shipped** (`onpage_instant_pages`
+OnPage page signals: **Phase 7.1** slices **1–14 shipped** (`onpage_instant_pages`
 → `onpage_signals` (46 `checks` booleans; 18 `meta` metrics) → `onpage_features` → three
 `onpage_metric` families with
 full Spearman / OLS / diagnostics / Plackett-Luce in `stats_*`; Slice 18 stored-run
@@ -242,7 +242,7 @@ schema drift).
       (`relative_similarity_sensitivity` block); not used for actionable flag
       or BH.
 
-14. **[ ] Slice 14 — Relative ranks in CLI & fixtures**
+14. **[x] Slice 14 — Relative ranks in CLI & fixtures**
     - `emit_keyword_analysis` / `report.md`: show `rank/pct` (and optional `z`)
       alongside absolute scores; sort Page Similarity by
       `{primary_backend}_similarity_rank`.
@@ -530,7 +530,7 @@ schema drift).
   (slices 35–42). Full gap analysis and slices: `ROADMAP.md` § Phase 5.7.
 - Backlinks count signals on `backlinks_analysis` — **Phase 6.2** shipped
   (`backlinks_counts` family in `stats_*`; `analysis_mart.v1` unchanged).
-- OnPage instant_pages pipeline — **Phase 7.1** slices 1–12 shipped: raw
+- OnPage instant_pages pipeline — **Phase 7.1** slices 1–14 shipped: raw
   `endpoint=onpage_instant_pages`, curated `onpage_signals` (46 `checks`
   booleans; 18 `meta` metrics), feature mart `onpage_features`, three `onpage_metric` families
   (`onpage_content_quality`, `onpage_core_web_vitals`, `onpage_technical_checks`)

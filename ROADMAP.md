@@ -225,7 +225,7 @@ Plackett-Luce analysis.
       (`relative_similarity_sensitivity` block); not used for actionable flag
       or BH.
 
-14. **[ ] Slice 14 — Relative ranks in CLI & fixtures** → **Phase 6.1 Slice 6**
+14. **[x] Slice 14 — Relative ranks in CLI & fixtures** → **Phase 6.1 Slice 6**
     - `emit_keyword_analysis` / `report.md`: show `rank/pct` (and optional `z`)
       alongside absolute scores; sort Page Similarity by
       `{primary_backend}_similarity_rank`.
@@ -1384,7 +1384,7 @@ source control (layout ships in Phase 4.5).
    - Not used for `actionable_association` or BH.
    - Tests: `test_stats_relative_similarity.py`.
 
-6. **[ ] Slice 6 — Relative ranks in CLI and fixtures (Phase 5 Slice 14)**
+6. **[x] Slice 6 — Relative ranks in CLI and fixtures (Phase 5 Slice 14)**
    - `emit_keyword_analysis` / `report.md`: show rank/pct (optional z) alongside
      absolute scores; sort Page Similarity by `{primary_backend}_similarity_rank`.
    - Extend golden `analysis_mart` with relative columns and known rank invariants.
@@ -1536,7 +1536,7 @@ or task id needed, and no `task_post` crawl/poll flow.
 
 ##### Dev slices
 
-**Progress:** 13 of 18 shipped.
+**Progress:** 14 of 18 shipped.
 
 1. **[x] Slice 1 — Request/schema/fixture** — `build_onpage_instant_pages_request()`,
    `DATAFORSEO_RESPONSE_SCHEMAS["onpage_instant_pages"]`,
@@ -2216,7 +2216,13 @@ with 8.3 and is a lower-priority cross-check.
   for the three count fields. Fixture updated with representative
   `htags` + `social_media_tags`. Tests in `tests/unit/test_run_normalize.py`.
   Stats family wiring remains Slice 17.
-- **Phase 7.1 slices 1–12 shipped (2026-07-06):** OnPage `instant_pages` live
+- **Phase 7.1 slice 14 shipped (2026-07-07):** Within-keyword rank, percentile,
+  and z-score columns added to `analysis_mart` (schema `v2`) for all three
+  similarity backends (`bge`, `gemini_doc_retrieval`, `gemini_semantic_similarity`).
+  `emit_keyword_analysis` JSON output includes rank/pct/z; `report.md` Page
+  Similarity sorted by BGE rank with `[rank X/N, pct 0.00]` annotation.
+  Tests in `test_data_marts.py`, `test_analysis_mart.py`, `test_cli_keyword_analysis.py`.
+- **Phase 7.1 slices 1–14 shipped (2026-07-06):** OnPage `instant_pages` live
   path from request/fixture through raw `endpoint=onpage_instant_pages`,
   curated `onpage_signals` (46 `checks` booleans via Slice 11; 18 `meta` metrics
   via Slice 12),

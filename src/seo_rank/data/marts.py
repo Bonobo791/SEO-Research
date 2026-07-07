@@ -4,7 +4,35 @@ from collections.abc import Mapping
 
 import polars as pl
 
-ANALYSIS_SCHEMA_VERSION = "analysis_mart.v1"
+ANALYSIS_SCHEMA_VERSION = "analysis_mart.v2"
+
+_BACKENDS = ("bge", "gemini_doc_retrieval", "gemini_semantic_similarity")
+
+
+def _rank_columns() -> list[pl.Expr]:
+    """Within-keyword rank, percentile, and z-score for each similarity backend."""
+    columns: list[pl.Expr] = []
+    for backend in _BACKENDS:
+        score_col = f"{backend}_normalized_score"
+        rank_col = f"{backend}_rank"
+        pct_col = f"{backend}_pct"
+        z_col = f"{backend}_z"
+
+        rank = pl.col(score_col).rank(method="ordinal", descending=True).over("target_keyword_id").cast(pl.Int64)
+        n = pl.col(score_col).count().over("target_keyword_id")
+
+        columns.extend([
+            rank.alias(rank_col),
+            pl.when(n == 1).then(0.0).otherwise(((rank - 1) / (n - 1)).cast(pl.Float64)).alias(pct_col),
+            pl.when(
+                (pl.col(score_col).std(ddof=1).over("target_keyword_id") == 0)
+                | (n < 2)
+            ).then(None).otherwise(
+                (pl.col(score_col) - pl.col(score_col).mean().over("target_keyword_id"))
+                / pl.col(score_col).std(ddof=1).over("target_keyword_id")
+            ).alias(z_col),
+        ])
+    return columns
 
 
 def build_analysis_lazyframe(feature_frames: Mapping[str, pl.LazyFrame]) -> pl.LazyFrame:
@@ -40,6 +68,7 @@ def build_analysis_lazyframe(feature_frames: Mapping[str, pl.LazyFrame]) -> pl.L
                 "gemini_semantic_similarity_normalized_score",
             ]
         )
-        .with_columns(pl.lit(ANALYSIS_SCHEMA_VERSION).alias("schema_version"))
         .sort(["target_keyword_id", "serp_rank", "canonical_url_hash"])
+        .with_columns(*_rank_columns())
+        .with_columns(pl.lit(ANALYSIS_SCHEMA_VERSION).alias("schema_version"))
     )

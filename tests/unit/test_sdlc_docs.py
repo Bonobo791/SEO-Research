@@ -480,13 +480,13 @@ def test_phase_7_1_onpage_slices_1_12_shipped() -> None:
     assert "onpage_features" in goals
     assert "ensure_feature_marts_for_analysis()" in goals
     assert "#### 7.1 — OnPage page signals" in roadmap
-    assert "**Progress:** 13 of 18 shipped." in roadmap
+    assert "**Progress:** 14 of 18 shipped." in roadmap
     assert "**[x] Slice 12 — `meta` block metrics.**" in roadmap
-    assert "Phase 7.1 slices 1–12 shipped (2026-07-06)" in roadmap
+    assert "Phase 7.1 slices 1–14 shipped (2026-07-06)" in roadmap
     assert "onpage_signals" in architecture
     assert "onpage_features" in architecture
     assert "ensure_feature_marts_for_analysis()" in architecture
-    assert "Phase 7.1 slices 1–12" in testing
+    assert "Phase 7.1 slices 1–14" in testing
     assert "test_onpage_meta_columns_match_onpage_signals_schema" in testing
     assert "test_onpage_stats_golden_contract_with_combined_feature_marts" in testing
     assert "endpoint=onpage_instant_pages" in readme

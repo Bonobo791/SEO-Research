@@ -28,11 +28,20 @@ def _analysis_mart_frame() -> pl.DataFrame:
                 "page_text_length": 123,
                 "bge_raw_score": 0.9,
                 "bge_normalized_score": 0.9,
+                "bge_rank": 1,
+                "bge_pct": 0.0,
+                "bge_z": None,
                 "gemini_doc_retrieval_raw_score": 0.8,
                 "gemini_doc_retrieval_normalized_score": 0.8,
+                "gemini_doc_retrieval_rank": 1,
+                "gemini_doc_retrieval_pct": 0.0,
+                "gemini_doc_retrieval_z": None,
                 "gemini_semantic_similarity_raw_score": 0.7,
                 "gemini_semantic_similarity_normalized_score": 0.7,
-                "schema_version": "analysis_mart.v1",
+                "gemini_semantic_similarity_rank": 1,
+                "gemini_semantic_similarity_pct": 0.0,
+                "gemini_semantic_similarity_z": None,
+                "schema_version": "analysis_mart.v2",
             }
         ]
     )
@@ -96,3 +105,16 @@ def test_emit_keyword_analysis_merges_textrazor_metrics_next_to_similarity_colum
     assert key_order.index("gemini_semantic_similarity_normalized_score") < key_order.index(
         "textrazor_relation_count"
     )
+
+
+def test_emit_keyword_analysis_includes_rank_columns(tmp_path: Path, capsys) -> None:
+    run_dir = tmp_path / "runs" / "run-1"
+    (run_dir / "parquet" / "analysis_mart").mkdir(parents=True)
+    _analysis_mart_frame().write_parquet(run_dir / "parquet" / "analysis_mart" / "part-0.parquet")
+
+    emit_keyword_analysis(run_dir, "keyword 1")
+
+    row = json.loads(capsys.readouterr().out)[0]
+    assert row["bge_rank"] == 1
+    assert row["bge_pct"] == 0.0
+    assert row["bge_z"] is None

@@ -3007,15 +3007,23 @@ def render_markdown_report(payload: dict[str, object]) -> str:
         lines.append("")
         page_similarity = keyword_result["page_similarity"]
         assert isinstance(page_similarity, list)
-        for score in page_similarity:
+        ranked = sorted(
+            page_similarity,
+            key=lambda s: s["page_similarity"]["bge"]["normalized_score"],
+            reverse=True,
+        )
+        n = len(ranked)
+        for rank, score in enumerate(ranked, start=1):
             page_scores = score["page_similarity"]
             bge_scores = page_scores["bge"]
             doc_retrieval_scores = page_scores["gemini_doc_retrieval"]
             semantic_scores = page_scores["gemini_semantic_similarity"]
+            pct = (rank - 1) / (n - 1) if n > 1 else 0.0
             lines.append(f"- {score['url']}")
             lines.append(
                 "  - BGE: "
                 f"{bge_scores['raw_score']} (normalized {bge_scores['normalized_score']})"
+                f" [rank {rank}/{n}, pct {pct:.2f}]"
             )
             lines.append(
                 "  - Gemini Doc Retrieval: "

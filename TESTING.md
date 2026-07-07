@@ -265,7 +265,7 @@ exist.
   legacy `endpoint=backlinks` read-compat, hard-fail on malformed summary
   aggregates,   and distribution maps as JSON-string columns.
 
-## Shipped tests — OnPage instant_pages (Phase 7.1 slices 1–12, Jul 2026)
+## Shipped tests — OnPage instant_pages (Phase 7.1 slices 1–14, Jul 2026)
 
 - **OnPage instant_pages endpoint (offline contract)** —
   `tests/unit/test_dataforseo_requests.py` covers
@@ -387,6 +387,17 @@ exist.
   (`test_has_prefix_key_returns_true_or_false`,
   `test_has_prefix_key_returns_none_for_non_mapping`). Fixture integration
   auto-verifies via `test_normalize_run_materializes_onpage_signals_from_fixture`.
+- **Relative ranks in CLI & fixtures (Phase 7.1 slice 14)** —
+  `tests/unit/test_data_marts.py` covers `build_analysis_lazyframe` producing
+  `{backend}_rank`, `{backend}_pct`, `{backend}_z` columns for all three
+  similarity backends (`test_build_analysis_lazyframe_lives_in_marts_module`),
+  within-keyword rank ordering and z-score mean ≈ 0
+  (`test_build_analysis_lazyframe_ranks_within_keyword`), and schema version `v2`
+  (`test_build_analysis_lazyframe_schema_version_is_v2`).
+  `tests/unit/test_analysis_mart.py` asserts the 30-column required list passes
+  validation before sinking.
+  `tests/unit/test_cli_keyword_analysis.py` asserts `bge_rank`, `bge_pct`,
+  `bge_z` appear in `emit_keyword_analysis` JSON output.
 - **OnPage legacy `onpage_signals` schema backfill (Slice 12 fix)** —
   `tests/unit/test_data_scans_validate.py` covers `align_lazyframe_schema`
   (`test_align_lazyframe_schema_backfills_missing_columns_with_nulls`).
