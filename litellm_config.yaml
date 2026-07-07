@@ -1,0 +1,15 @@
+model_list:
+  - model_name: gpt-4o
+    litellm_params:
+      model: gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: gpt-4o-mini
+    litellm_params:
+      model: gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+
+general_settings:
+  master_key: "sk-awwgBwU35nuKfxXx3MgXC1L-vUY31N-ySdhkbQNlff8"
+
+environment_variables:
+  OPENAI_API_KEY: "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"

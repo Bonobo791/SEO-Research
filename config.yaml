@@ -1,0 +1,63 @@
+model_list:
+  - model_name: glm-5.2
+    litellm_params:
+      model: cloudflare/@cf/zai-org/glm-5.2
+      api_key: os.environ/CLOUDFLARE_API_KEY
+      # Cloudflare also needs your account ID:
+      api_base: https://api.cloudflare.com/client/v4/accounts/<ACCOUNT_ID>/ai/run
+    model_info:
+      input_cost_per_token: 0.0000014
+      adaptive_router_preferences:
+        quality_tier: 2        # 1=budget, 2=mid, 3=frontier
+        strengths: ["code_generation", "analytical_reasoning", "code_understanding", "technical_design"]
+
+  - model_name: gpt-5.1-codex
+    litellm_params:
+      model: gpt-5.1-codex
+      api_key: os.environ/OPENAI_API_KEY
+    model_info:
+      input_cost_per_token: 0.00000125
+      adaptive_router_preferences:
+        quality_tier: 2        # 1=budget, 2=mid, 3=frontier
+        strengths: ["code_generation", "analytical_reasoning", "code_understanding", "technical_design"]
+
+  - model_name: claude-sonnet-5
+    litellm_params:
+      model: claude-sonnet-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+    model_info:
+      input_cost_per_token: 0.000002
+      adaptive_router_preferences:
+        quality_tier: 3        # 1=budget, 2=mid, 3=frontier
+        strengths: ["code_generation", "analytical_reasoning", "code_understanding", "technical_design"]
+
+  - model_name: mimo-v2.5
+    litellm_params:
+      model: openrouter/xiaomi/mimo-v2.5
+      api_key: os.environ/OPENROUTER_API_KEY
+    model_info:
+      input_cost_per_token: 0.0000004
+      adaptive_router_preferences:
+        quality_tier: 1
+        strengths: ["factual_lookup", "writing", "general"]
+
+  - model_name: my-router
+    litellm_params:
+      model: auto_router/adaptive_router
+      adaptive_router_config:
+        available_models: ["mimo-v2.5", "claude-sonnet-5", "gpt-5.1-codex", "glm-5.2"]
+        weights:
+          quality: 0.5   # raise this if quality complaints; lower if bill too high
+          cost: 0.5      # must sum to 1.0 with quality
+
+guardrails:
+  - guardrail_name: headroom-compression
+    litellm_params:
+      guardrail: headroom
+      mode: pre_call
+      api_base: http://127.0.0.1:8787/dashboard
+#     api_key: os.environ/HEADROOM_API_KEY  [OPTIONAL]
+      default_on: true
+
+general_settings:
+  master_key: sk-sdapgnlkwaeh827386213iuhjn
