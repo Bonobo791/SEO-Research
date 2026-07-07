@@ -370,6 +370,23 @@ exist.
   `_optional_mapping_len` for array-length counts
   (`test_optional_mapping_len_counts_array_or_null`). Fixture integration asserts
   representative meta fields in `test_normalize_run_materializes_onpage_signals_from_fixture`.
+- **OnPage htags counts + social_media_tags flags (Phase 7.1 slice 13)** —
+  `tests/unit/test_run_normalize.py` covers 5 new `meta` columns
+  (`h1_count`/`h2_count`/`h3_count`, `has_og_tags`/`has_twitter_tags`)
+  aligned with PyArrow/Polars schemas (meta field count asserted at 23),
+  populated htags array-length counts via `_optional_mapping_len`
+  (`test_onpage_signals_row_maps_htags_counts`), social_media_tags
+  prefix-key presence via `_has_prefix_key`
+  (`test_onpage_signals_row_maps_social_media_tags_presence`,
+  `test_onpage_signals_row_social_media_tags_only_og`), sparse-null
+  semantics when meta/htags/social_media_tags absent
+  (`test_onpage_signals_row_htags_and_social_null_when_meta_absent`,
+  `test_onpage_signals_row_htags_null_when_htags_missing`,
+  `test_onpage_signals_row_social_null_when_social_media_tags_missing`),
+  and `_has_prefix_key` helper unit coverage
+  (`test_has_prefix_key_returns_true_or_false`,
+  `test_has_prefix_key_returns_none_for_non_mapping`). Fixture integration
+  auto-verifies via `test_normalize_run_materializes_onpage_signals_from_fixture`.
 - **OnPage legacy `onpage_signals` schema backfill (Slice 12 fix)** —
   `tests/unit/test_data_scans_validate.py` covers `align_lazyframe_schema`
   (`test_align_lazyframe_schema_backfills_missing_columns_with_nulls`).
