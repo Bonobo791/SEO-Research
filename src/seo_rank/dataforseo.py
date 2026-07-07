@@ -1234,6 +1234,26 @@ def fixture_onpage_instant_pages_response(
                                     "is_broken": False,
                                     "deprecated_html_tags": False,
                                 },
+                                "cache_control": {"cachable": False, "ttl": 3600},
+                                "resource_errors": {
+                                    "errors": None,
+                                    "warnings": [
+                                        {
+                                            "column": 32,
+                                            "line": 1,
+                                            "message": "Has node with >60 childs.",
+                                            "status_code": 1,
+                                        }
+                                    ],
+                                },
+                                "broken_links": False,
+                                "broken_resources": False,
+                                "duplicate_content": False,
+                                "duplicate_description": False,
+                                "duplicate_title": False,
+                                "click_depth": 2,
+                                "encoded_size": 25_070,
+                                "total_dom_size": 5_632_490,
                             }
                         ],
                     }

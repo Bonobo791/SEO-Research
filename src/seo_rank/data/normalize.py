@@ -406,6 +406,18 @@ CURATED_SCHEMAS = {
             ("micromarkup_errors_count", pa.int64()),
             ("micromarkup_warnings_count", pa.int64()),
             ("has_valid_structured_data", pa.bool_()),
+            ("cache_control_cachable", pa.bool_()),
+            ("cache_control_ttl", pa.int64()),
+            ("resource_errors_count", pa.int64()),
+            ("resource_warnings_count", pa.int64()),
+            ("broken_links", pa.bool_()),
+            ("broken_resources", pa.bool_()),
+            ("duplicate_content", pa.bool_()),
+            ("duplicate_description", pa.bool_()),
+            ("duplicate_title", pa.bool_()),
+            ("click_depth", pa.int64()),
+            ("encoded_size", pa.int64()),
+            ("total_dom_size", pa.int64()),
             ("schema_version", pa.string()),
         ]
     ),
@@ -883,6 +895,18 @@ CURATED_VALIDATION_RULES = {
             "micromarkup_errors_count": pl.Int64,
             "micromarkup_warnings_count": pl.Int64,
             "has_valid_structured_data": pl.Boolean,
+            "cache_control_cachable": pl.Boolean,
+            "cache_control_ttl": pl.Int64,
+            "resource_errors_count": pl.Int64,
+            "resource_warnings_count": pl.Int64,
+            "broken_links": pl.Boolean,
+            "broken_resources": pl.Boolean,
+            "duplicate_content": pl.Boolean,
+            "duplicate_description": pl.Boolean,
+            "duplicate_title": pl.Boolean,
+            "click_depth": pl.Int64,
+            "encoded_size": pl.Int64,
+            "total_dom_size": pl.Int64,
             "schema_version": pl.Utf8,
         },
         "unique_columns": ("onpage_signal_id",),
@@ -1824,6 +1848,23 @@ def _optional_mapping_len(mapping: object, key: str) -> int | None:
     return None
 
 
+def _optional_resource_array_len(item: object, key: str) -> int | None:
+    """Length of ``item["resource_errors"][key]`` if present, else *None*.
+
+    When the ``resource_errors`` dict exists but the inner value is *None*
+    (DataForSEO returns ``null`` for empty lists), return 0.
+    """
+    re = item.get("resource_errors") if isinstance(item, Mapping) else None
+    if not isinstance(re, Mapping):
+        return None
+    if key not in re:
+        return None
+    val = re.get(key)
+    if val is None:
+        return 0
+    return len(val) if isinstance(val, list) else None
+
+
 def _has_prefix_key(mapping: object, prefix: str) -> bool | None:
     if not isinstance(mapping, Mapping):
         return None
@@ -1959,6 +2000,20 @@ def _onpage_signals_row(
         "micromarkup_errors_count": errors_count,
         "micromarkup_warnings_count": warnings_count,
         "has_valid_structured_data": _derive_has_valid_structured_data(item, checks),
+        "cache_control_cachable": _optional_mapping_bool(
+            item.get("cache_control"), "cachable"
+        ),
+        "cache_control_ttl": _optional_mapping_int(item.get("cache_control"), "ttl"),
+        "resource_errors_count": _optional_resource_array_len(item, "errors"),
+        "resource_warnings_count": _optional_resource_array_len(item, "warnings"),
+        "broken_links": _optional_mapping_bool(item, "broken_links"),
+        "broken_resources": _optional_mapping_bool(item, "broken_resources"),
+        "duplicate_content": _optional_mapping_bool(item, "duplicate_content"),
+        "duplicate_description": _optional_mapping_bool(item, "duplicate_description"),
+        "duplicate_title": _optional_mapping_bool(item, "duplicate_title"),
+        "click_depth": _optional_mapping_int(item, "click_depth"),
+        "encoded_size": _optional_mapping_int(item, "encoded_size"),
+        "total_dom_size": _optional_mapping_int(item, "total_dom_size"),
         "schema_version": CURATED_SCHEMA_VERSION,
     }
     for field in ONPAGE_CURATED_CHECK_FIELDS:

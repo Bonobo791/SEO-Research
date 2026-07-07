@@ -481,6 +481,11 @@ ONPAGE_FEATURES_BOUNDED_COLUMNS = {
     "h1_count": (0, None),
     "h2_count": (0, None),
     "h3_count": (0, None),
+    "resource_errors_count": (0, None),
+    "resource_warnings_count": (0, None),
+    "click_depth": (0, None),
+    "encoded_size": (0, None),
+    "total_dom_size": (0, None),
 }
 FEATURE_REQUIRED_COLUMNS["onpage_features"] = ONPAGE_FEATURES_REQUIRED_COLUMNS
 FEATURE_VALIDATION_RULES["onpage_features"] = {

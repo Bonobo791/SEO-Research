@@ -1001,6 +1001,87 @@ def test_onpage_signals_row_social_null_when_social_media_tags_missing() -> None
     assert row["has_twitter_tags"] is None
 
 
+def test_onpage_signals_row_maps_resource_cache_dom_metrics() -> None:
+    row = _onpage_signals_row(
+        run_id="run",
+        target_keyword="kw",
+        response_id="resp",
+        url="https://example.com/resource-metrics",
+        item={
+            "onpage_score": 85.5,
+            "cache_control": {"cachable": False, "ttl": 3600},
+            "resource_errors": {
+                "errors": None,
+                "warnings": [
+                    {
+                        "column": 32,
+                        "line": 1,
+                        "message": "Has node with >60 childs.",
+                        "status_code": 1,
+                    }
+                ],
+            },
+            "broken_links": False,
+            "broken_resources": False,
+            "duplicate_content": False,
+            "duplicate_description": False,
+            "duplicate_title": False,
+            "click_depth": 2,
+            "encoded_size": 25_070,
+            "total_dom_size": 5_632_490,
+        },
+    )
+    assert row["cache_control_cachable"] is False
+    assert row["cache_control_ttl"] == 3600
+    assert row["resource_errors_count"] == 0
+    assert row["resource_warnings_count"] == 1
+    assert row["broken_links"] is False
+    assert row["broken_resources"] is False
+    assert row["duplicate_content"] is False
+    assert row["duplicate_description"] is False
+    assert row["duplicate_title"] is False
+    assert row["click_depth"] == 2
+    assert row["encoded_size"] == 25_070
+    assert row["total_dom_size"] == 5_632_490
+
+
+def test_onpage_signals_row_resource_metrics_null_when_absent() -> None:
+    row = _onpage_signals_row(
+        run_id="run",
+        target_keyword="kw",
+        response_id="resp",
+        url="https://example.com/no-resource",
+        item={"onpage_score": 75.0},
+    )
+    assert row["cache_control_cachable"] is None
+    assert row["cache_control_ttl"] is None
+    assert row["resource_errors_count"] is None
+    assert row["resource_warnings_count"] is None
+    assert row["broken_links"] is None
+    assert row["broken_resources"] is None
+    assert row["duplicate_content"] is None
+    assert row["duplicate_description"] is None
+    assert row["duplicate_title"] is None
+    assert row["click_depth"] is None
+    assert row["encoded_size"] is None
+    assert row["total_dom_size"] is None
+
+
+def test_onpage_signals_row_resource_metrics_missing_key_stays_null() -> None:
+    row = _onpage_signals_row(
+        run_id="run",
+        target_keyword="kw",
+        response_id="resp",
+        url="https://example.com/partial-resource",
+        item={
+            "onpage_score": 75.0,
+            "resource_errors": {"warnings": [{"code": "W1"}]},
+        },
+    )
+    assert row["resource_errors_count"] is None
+    assert row["resource_warnings_count"] == 1
+
+
 ONPAGE_NEW_CHECK_FIELDS = (
     "deprecated_html_tags",
     "duplicate_title_tag",
