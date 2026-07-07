@@ -9,7 +9,7 @@
     "test_framework": "pytest",
     "lint_command": null,
     "typecheck_command": null,
-    "test_command": "PYTHONPATH=/var/home/user/PycharmProjects/SEO-Research/src:/var/home/user/PycharmProjects/SEO-Research/.venv/lib64/python3.14/site-packages /usr/bin/python3 -m pytest",
+    "test_command": "PYTHONPATH=/var/home/user/PycharmProjects/SEO-Research/src:/var/home/user/PycharmProjects/SEO-Research/.venv/lib64/python3.14/site-packages /usr/bin/python3 -m pytest tests/unit",
     "single_test_file_command": "PYTHONPATH=/var/home/user/PycharmProjects/SEO-Research/src:/var/home/user/PycharmProjects/SEO-Research/.venv/lib64/python3.14/site-packages /usr/bin/python3 -m pytest tests/unit/test_cli_run.py",
     "build_command": null,
     "deployment_setup": null,
@@ -24,13 +24,13 @@
     "source_directory": "src/seo_rank/",
     "test_directory": "tests/",
     "test_framework": "pytest",
-    "test_command": "PYTHONPATH=/var/home/user/PycharmProjects/SEO-Research/src:/var/home/user/PycharmProjects/SEO-Research/.venv/lib64/python3.14/site-packages /usr/bin/python3 -m pytest",
+    "test_command": "PYTHONPATH=/var/home/user/PycharmProjects/SEO-Research/src:/var/home/user/PycharmProjects/SEO-Research/.venv/lib64/python3.14/site-packages /usr/bin/python3 -m pytest tests/unit",
     "single_test_file_command": "PYTHONPATH=/var/home/user/PycharmProjects/SEO-Research/src:/var/home/user/PycharmProjects/SEO-Research/.venv/lib64/python3.14/site-packages /usr/bin/python3 -m pytest tests/unit/test_cli_run.py",
     "test_duration_expectation": "fast",
     "test_types_present": ["unit"]
   },
   "planned_commands": {
-    "test_command": "PYTHONPATH=/var/home/user/PycharmProjects/SEO-Research/src:/var/home/user/PycharmProjects/SEO-Research/.venv/lib64/python3.14/site-packages /usr/bin/python3 -m pytest"
+    "test_command": "PYTHONPATH=/var/home/user/PycharmProjects/SEO-Research/src:/var/home/user/PycharmProjects/SEO-Research/.venv/lib64/python3.14/site-packages /usr/bin/python3 -m pytest tests/unit"
   },
   "preferences": {
     "response_detail": "concise by default, with proof details when results matter",

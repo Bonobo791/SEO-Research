@@ -305,7 +305,11 @@ seo-rank run --seed "technical seo" --dry-run --keyword-limit 25 --output-dir ar
 For live provider smoke tests, copy `.env.example` to `.env` in the project root
 and fill in real credentials. The CLI and pytest **load `.env` automatically**
 (project root is detected via `pyproject.toml`); you do not need to `source` it in
-the shell. Values in `.env` override conflicting shell exports.
+the shell. Values in `.env` override conflicting shell exports. Live pytest
+smoke is **not** part of the default suite; run
+`python -m pytest tests/integration -m integration` only when
+`SEO_RANK_RUN_LIVE_INTEGRATION=1` and provider credentials are configured (see
+`TESTING.md`).
 
 Live-provider contract:
 
@@ -476,4 +480,4 @@ response.
 - Testing: `TESTING.md`
 - Process: `AGENTS.md`, `SDLC.md`
 
-Verification: `python -m pytest`
+Verification: `python -m pytest` (unit tests; live integration is opt-in — see `TESTING.md`)

@@ -37,7 +37,8 @@ Do not treat `/sdlc` as a real Codex command for this repo.
 
 ## Current Commands
 
-Primary verification command:
+Primary verification command (unit tests only; see `TESTING.md` for opt-in live
+integration):
 
 ```bash
 python -m pytest
@@ -62,7 +63,8 @@ Lint, type-check, build, and CI commands are not configured yet.
 Use `PROVE-IT.md` before committing. The manifest records a host-pinned pytest
 command (`/usr/bin/python3` with explicit `PYTHONPATH`) so the Node git-guard
 hook can run tests without invoking the repo venv interpreter directly. Day-to-day
-verification still uses `python -m pytest` from an activated environment:
+verification still uses `python -m pytest` from an activated environment (unit
+tests only; live smoke is not collected by default):
 
 ```bash
 python -m pytest

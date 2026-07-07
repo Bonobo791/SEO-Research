@@ -7,14 +7,14 @@ Pytest configuration and verification contract for SEO-Research.
 - Source directory: `src/seo_rank/`
 - Test directories: `tests/unit/`, `tests/integration/`
 - Test framework: `pytest`
-- Run-all-tests command: `python -m pytest`
+- Run-all-tests command: `python -m pytest` (unit tests only; `testpaths` in `pyproject.toml` is `tests/unit`)
 - Single-test-file command: `python -m pytest tests/unit/test_cli_run.py`
 - Git-guard proof command: pinned in `.codex-sdlc/manifest.json` (`/usr/bin/python3`
   plus explicit `PYTHONPATH`) so the Node hook can run pytest without the venv
   interpreter
 - Lint / type-check / build / coverage: not configured
 - Expected test duration: fast (< 1s)
-- **Current verification status:** 400 unit tests under `tests/unit/` (`python -m pytest tests/unit`); full suite collects 401 tests including 1 opt-in integration test
+- **Current verification status:** unit tests under `tests/unit/` only; default `python -m pytest` does not collect live integration tests in `tests/integration/`
 
 ## Active Verification Command
 
@@ -22,8 +22,17 @@ Pytest configuration and verification contract for SEO-Research.
 python -m pytest
 ```
 
-Live provider smoke tests are marked `integration` and skipped unless `.env`
-sets the gates explicitly:
+Equivalent explicit path:
+
+```bash
+python -m pytest tests/unit
+```
+
+## Live integration (opt-in)
+
+Live provider smoke tests live in `tests/integration/`, are marked
+`integration`, and are **not** part of the default suite. Run them only with an
+explicit path plus `.env` gates:
 
 ```bash
 # In .env (loaded automatically):
@@ -37,7 +46,7 @@ sets the gates explicitly:
 # TEXTRAZOR_API_KEY=...
 # GEMINI_API_KEY=...
 
-python -m pytest -m integration
+python -m pytest tests/integration -m integration
 ```
 
 Use `.env.example` as the local template. Copy it to `.env` at the project root
@@ -89,10 +98,12 @@ placeholders only.
 | `test_live_provider_smoke.py` | Env-gated DataForSEO smoke path with optional live TextRazor, Gemini, and BGE opt-ins |
 | `test_live_provider_smoke_config.py` | Optional live similarity flags are included in smoke runs when their env gates are enabled |
 
-Unit tests use fixtures/mocks only. Live provider smoke tests are opt-in and
-must never run without the explicit environment gates above. DataForSEO is
-always required for a live run; Gemini, BGE, and TextRazor are optional and
-require their own CLI flags plus env gates when requested.
+Unit tests use fixtures/mocks only. Live provider smoke tests are opt-in: they
+are not collected by default (`testpaths = ["tests/unit"]` in `pyproject.toml`).
+Run them only with `python -m pytest tests/integration -m integration` and the
+explicit environment gates above. DataForSEO is always required for a live run;
+Gemini, BGE, and TextRazor are optional and require their own CLI flags plus env
+gates when requested.
 
 ## Required Workflow
 

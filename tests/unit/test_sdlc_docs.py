@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PINNED_PROOF_TEST_COMMAND = (
     "PYTHONPATH=/var/home/user/PycharmProjects/SEO-Research/src:"
     "/var/home/user/PycharmProjects/SEO-Research/.venv/lib64/python3.14/site-packages "
-    "/usr/bin/python3 -m pytest"
+    "/usr/bin/python3 -m pytest tests/unit"
 )
 PINNED_PROOF_SINGLE_TEST_COMMAND = (
     "PYTHONPATH=/var/home/user/PycharmProjects/SEO-Research/src:"
@@ -73,7 +73,8 @@ def test_stored_run_docs_describe_partial_resume_and_current_suite_status() -> N
     assert "reuses existing raw responses" in readme
     assert "`--stored-run` resumes partial runs in place" in architecture
     assert "refreshes only missing work" in architecture
-    assert "400 unit tests" in testing or "400 unit tests pass" in testing
+    assert "tests/unit" in testing
+    assert "does not collect live integration" in testing
     assert "resumes from the saved raw lake" in roadmap
 
 
@@ -125,6 +126,13 @@ def test_pyproject_declares_runtime_parquet_and_polars_dependencies() -> None:
     assert "polars>=1.0" in dependencies
 
 
+def test_pyproject_default_testpaths_exclude_integration() -> None:
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    ini = pyproject["tool"]["pytest"]["ini_options"]
+
+    assert ini["testpaths"] == ["tests/unit"]
+
+
 def test_phase_45_slice_7_regression_sweep_marks_round_trip_docs_as_shipped() -> None:
     testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
     architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
@@ -145,8 +153,10 @@ def test_phase_45_slice_9_regression_sweep_marks_mart_sink_docs_as_shipped() -> 
     assert "Phase 4.5 Slice 9 shipped" in roadmap
     assert "Phase 4.5 Slice 10 shipped" in roadmap
     assert "Phase 4.5 signed off" in roadmap
-    assert "400 unit tests" in architecture or "400 tests" in architecture or "400 unit tests pass" in architecture
-    assert "400 unit tests" in testing or "400 unit tests pass" in testing
+    assert "tests/unit" in architecture
+    assert "does not collect live integration" in architecture or "tests/integration" in architecture
+    assert "tests/unit" in testing
+    assert "does not collect live integration" in testing
     assert "sink feature marts lazily with Parquet statistics" in testing
 
 

@@ -93,8 +93,9 @@ sign-off unless marked **required**.
 
 Follow-ups from senior QA release-readiness review (Phase 4.76 slices 3–5).
 **Required** rows are TDD gates or sign-off blockers; write failing tests before
-implementing sinks. Unit baseline: `pytest tests/unit` (**125** tests, all pass as of
-Phase 4.77 Slice 3 diff; bare `pytest` may run integration when live gates are on).
+implementing sinks. Unit baseline: `pytest tests/unit` or bare `pytest` (same scope
+via `testpaths = ["tests/unit"]` in `pyproject.toml`); live integration is not
+collected unless `pytest tests/integration` is run explicitly).
 
 | ID | Fix | Phase | Priority | Status |
 | --- | --- | --- | --- | --- |
@@ -103,8 +104,8 @@ Phase 4.77 Slice 3 diff; bare `pytest` may run integration when live gates are o
 | S476-10 | Write failing `test_build_pages_and_passages_frame_preserves_aggregate_text_with_field_decode`: merged `pages.text` matches Phase 4.75 aggregate path when decoder is wired | 4.76 Slice 5 | required | done |
 | S476-11 | ~~Write failing `test_normalize_run_skips_empty_crawl_with_field_decode`~~ — **superseded by S476-17:** structured-only crawls intentionally emit `page_content_fields` (and `page_html` when present) while omitting `pages` / `passages` when aggregate text is empty. True no-URL crawls are already skipped by all three sinks | 4.76 Slice 5 | required | done |
 | S476-12 | Add stored-run re-normalize smoke fixture (multi-field `items[]` + HTML) and assert curated lake row counts; extend `test_round_trip.py` or `test_run_normalize.py`. **Partial:** `test_normalize_run_materializes_structured_fields_and_html_from_stored_run` + `test_cli_round_trip_materializes_structured_only_page_text_payload` cover normalize and CLI `normalize` paths; close when S476-46 + S476-51 + S476-56 land | 4.76 Slice 5 | required | open |
-| S476-13 | Gate or fix live integration smoke: `test_live_provider_smoke_writes_artifacts` fails with Gemini `404 Not Found` when `SEO_RANK_ENABLE_GEMINI=1` (reproduced Jul 2026: bare `pytest` → unit pass + 1 integration fail) — validate API key/model/endpoint or skip when embed health check fails | QA / integration | required | open |
-| S476-14 | Document default Phase 4.76 sign-off gate as `pytest tests/unit`; full suite (`pytest`) runs integration when `SEO_RANK_RUN_LIVE_INTEGRATION=1` in `.env` and needs healthy provider credentials | QA / docs | required | open |
+| S476-13 | Gate or fix live integration smoke: `test_live_provider_smoke_writes_artifacts` fails with Gemini `404 Not Found` when `SEO_RANK_ENABLE_GEMINI=1` — validate API key/model/endpoint or skip when embed health check fails (default suite no longer collects integration; run only via `pytest tests/integration -m integration`) | QA / integration | required | open |
+| S476-14 | Document default Phase 4.76 sign-off gate as `pytest tests/unit`; live integration requires explicit `pytest tests/integration -m integration` plus env gates | QA / docs | required | done |
 | S476-15 | Add Phase 4.76 manual sign-off checklist to `TESTING.md` only (no separate QA doc): live crawl contract, `normalize --run` per-field + HTML, re-normalize on pre-4.76 run, locale note (`--language` does not change page crawl pool), rollback criterion (S476-16) | 4.76 docs | nice-to-have | open |
 | S476-16 | Rollback criterion for slices 3–4: if per-field or HTML wiring changes `pages` / `passages` row counts or breaks existing normalize fixtures, revert and re-run `test_run_normalize.py` + `test_round_trip.py` before merge | 4.76 Slice 5 | nice-to-have | open |
 
@@ -112,18 +113,18 @@ Phase 4.77 Slice 3 diff; bare `pytest` may run integration when live gates are o
 
 ## Senior QA — release infrastructure (Jul 2026)
 
-Follow-ups from the Jul 2026 senior QA pass. Priority order: S476-14 + S476-23
-(default gate), then S476-13 (live smoke health), then Slice 5 TDD rows
-(S476-09–S476-12).
+Follow-ups from the Jul 2026 senior QA pass. Priority order: S476-13 (live smoke
+health), then Slice 5 TDD rows (S476-09–S476-12). S476-14 and S476-23 closed
+Jul 2026 (testpaths + manifest pin).
 
 | ID | Fix | Phase | Priority | Status |
 | --- | --- | --- | --- | --- |
-| S476-23 | Pin `.codex-sdlc/manifest.json` `test_command` (and git-hook proof) to `pytest tests/unit` or `pytest -m "not integration"` so SDLC hooks do not invoke live smoke when `.env` sets `SEO_RANK_RUN_LIVE_INTEGRATION=1` | QA / SDLC | required | open |
-| S476-24 | Add `addopts = "-m 'not integration'"` to `[tool.pytest.ini_options]` in `pyproject.toml` so bare `pytest` matches unit-only sign-off; live smoke runs only with `pytest -m integration` | QA / pytest | nice-to-have | open |
+| S476-23 | Pin `.codex-sdlc/manifest.json` `test_command` (and git-hook proof) to `pytest tests/unit` so SDLC hooks do not invoke live smoke when `.env` sets `SEO_RANK_RUN_LIVE_INTEGRATION=1` | QA / SDLC | required | done |
+| S476-24 | ~~Add `addopts = "-m 'not integration'"`~~ — **superseded:** `testpaths = ["tests/unit"]` in `pyproject.toml` excludes integration from default collection; live smoke runs only with `pytest tests/integration -m integration` | QA / pytest | nice-to-have | done |
 | S476-25 | ~~Scaffold `docs/qa/release-phase-4.76.md`~~ — **superseded:** sign-off checklist and must-pass commands live in `TESTING.md` (S476-15) and this file's Slice 5 / release-infrastructure sections; do not add a separate QA doc | 4.76 docs | nice-to-have | cancelled |
 | S476-26 | Fix `TESTING.md` verification status: state unit baseline (`pytest tests/unit` → **125 pass**) separately from full `pytest` when live gates are on (integration runs and may fail) | QA / docs | nice-to-have | done |
 | S476-27 | TDD gate for Slice 4–5: S476-46 → S476-54 → close S476-12 (S476-09, S476-10, S476-44 **done** in Jul 2026 diff). S476-11 and S476-17 closed as superseded. **Partial:** Slice 4 `page_html` sink shipped; S476-42 / S476-43 done; orphan `normalize_run` test (S476-46), raw-HTML `normalize_run` test (S476-54), and test hardening (S476-49–S476-57) still open | 4.76 Slices 4–5 | required | open |
-| S476-28 | Slice 4–5 merge sign-off must-pass: `pytest tests/unit -q` plus targeted `test_run_normalize.py` + `test_round_trip.py`; do not treat bare `pytest` as green until S476-13 and S476-23/24 are closed | 4.76 Slice 5 | required | open |
+| S476-28 | Slice 4–5 merge sign-off must-pass: `pytest tests/unit -q` plus targeted `test_run_normalize.py` + `test_round_trip.py`; bare `pytest` is unit-only (S476-23/24 closed); live integration health still tracked in S476-13 | 4.76 Slice 5 | required | open |
 
 ---
 
@@ -133,7 +134,7 @@ Follow-ups from the Jul 2026 release-readiness review and Jul 2026 senior QA
 follow-up. **Verdict:** Phase 4.76 Slice 5 is **not** release-ready; Slices 1–4
 code is largely shipped, unit baseline is green (`pytest tests/unit` → 125 pass),
 but required TDD gates (S476-12 remainder, **S476-46** orphan invariant) and
-integration gate policy (S476-13, S476-23) remain open. S476-09, S476-10, and
+integration gate policy (S476-13) remains open. S476-23 closed Jul 2026. S476-09, S476-10, and
 S476-44 closed in Jul 2026 diff. Fields-vs-pages policy resolved in code (S476-17, S476-11 superseded; docs
 close-out tracked in S476-38 / S476-47).
 
@@ -145,8 +146,7 @@ close-out tracked in S476-38 / S476-47).
 | S476-32 | After Slice 5 required tests green, check off `GOALS.md` Slice 5 dev slice, acceptance row 5, and progress table (5 of 5 shipped) | 4.76 docs | required | open |
 | S476-33 | Treat flakiness as product bug: root-cause Gemini `404` in live smoke (model name, API version, or pre-flight skip) before re-enabling full `pytest` as a hook gate — do not paper over with unconditional `skip` without documenting why | QA / integration | required | open |
 
-**Recommended work order:** S476-23 + S476-26 (default gate docs) → S476-13 +
-S476-33 (live smoke health) → **code:** S476-46 → S476-49–S476-53 → S476-48 /
+**Recommended work order:** S476-13 + S476-33 (live smoke health) → **code:** S476-46 → S476-49–S476-53 → S476-48 /
 S476-35 / S476-04 → **docs:** S476-47 + S476-38 (policy matrix) → close S476-12 →
 S476-34 (GOALS progress line) → S476-32 (GOALS sign-off).
 
@@ -165,7 +165,9 @@ pytest tests/unit -q
 pytest tests/unit/test_run_normalize.py tests/unit/test_dataforseo_requests.py tests/unit/test_round_trip.py -q
 ```
 
-Do not treat bare `pytest` as green until S476-13 and S476-23/24 close.
+Bare `pytest` and `pytest tests/unit` are equivalent unit-only gates (S476-23/24
+closed). Live integration: `pytest tests/integration -m integration` when S476-13
+is healthy.
 
 ### Risky journeys (confidence per effort)
 
@@ -250,8 +252,9 @@ pytest tests/unit/test_run_normalize.py tests/unit/test_dataforseo_requests.py t
 S476-51 / S476-53 / S476-49 (test clarity) → S476-57 → S476-50 / S476-52 →
 S476-56. **Docs (not code):** S476-47 / S476-38 (policy matrix) → close S476-12.
 
-**Integration (when live gates on):** bare `pytest` → unit pass + 1 integration fail until
-S476-13 closes; do not use as hook gate until S476-23 / S476-24.
+**Integration (opt-in):** `pytest tests/integration -m integration` with env gates;
+may fail on Gemini 404 until S476-13 closes. Default hook gate uses unit tests only
+(S476-23 done).
 
 **Approve implementation direction** for Slice 5 fields-vs-pages policy; **do
 not** treat Phase 4.76 signed off until S476-38, S476-46, and S476-13 close

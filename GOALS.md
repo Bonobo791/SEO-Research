@@ -663,7 +663,9 @@ raw data is absent) via `ensure_feature_marts_for_analysis()` in
 
 - Follow `AGENTS.md` and the `$sdlc` skill for every implementation slice.
 - Write the failing test first for code-shaped changes.
-- Run the narrowest relevant check, then `python -m pytest`, before finishing.
+- Run the narrowest relevant check, then `python -m pytest` (unit tests only;
+  live integration requires `python -m pytest tests/integration -m integration`),
+  before finishing.
 - Delete stale scaffolding when replacing it; no compatibility layers for
   unshipped code.
 - Keep slices small enough to review and verify.
