@@ -1734,12 +1734,17 @@ API source.
    `test_run_live_backlinks_without_detail_flag_skips_detail`,
    `test_run_live_backlinks_detail_requires_live_backlinks`.
 5. **[x] Slice 5 — Stored-run backfill** for `backlinks_detail`. New
-   `_backlinks_variants_for_replay()` only replays `detail` when a
-   `backlinks_detail` raw partition or `raw_provider_data` key already
-   exists for that stored run — older runs backfill it via live fetch without
-   refetching `summary`/`dofollow`. Regression:
+   `_backlinks_variants_for_replay()` replays `detail` when the
+   `--live-backlinks-detail` opt-in is set (`config.live_backlinks_detail`)
+   OR when a `backlinks_detail` raw partition / `raw_provider_data` key already
+   exists for that stored run. The opt-in path is what enables true legacy
+   backfill: an older run that only ever fetched `summary`/`dofollow` gets
+   `detail` fetched for all missing URLs on resume, without refetching the
+   complete `summary`/`dofollow` variants. Regressions:
+   `test_run_stored_run_backfills_legacy_backlinks_detail_via_opt_in` (legacy
+   opt-in path) and
    `test_run_stored_run_backfills_only_missing_backlinks_detail_in_place`
-   in `test_cli_run.py`.
+   (in-place completion of an existing partition) in `test_cli_run.py`.
 6. **[ ] Slice 6 — Curated builder** — `build_backlink_details_frame`: one row
    per `(run_id, target_keyword_id, canonical_url_hash, backlink_id)` with
    `domain_from_rank`, `page_from_rank`, `backlink_spam_score`, `anchor`,

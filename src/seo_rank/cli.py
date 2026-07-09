@@ -1166,6 +1166,7 @@ def _backlinks_variants_for_replay(
     raw_keyword_records: Mapping[str, Sequence[Mapping[str, object]]],
     *,
     stored_keyword_result: Mapping[str, object] | None,
+    live_backlinks_detail: bool = False,
 ) -> tuple[str, ...]:
     variants = [BACKLINKS_QUERY_SUMMARY, BACKLINKS_QUERY_DOFOLLOW]
     has_detail_partition = bool(raw_keyword_records.get("backlinks_detail"))
@@ -1176,7 +1177,7 @@ def _backlinks_variants_for_replay(
             dataforseo_data = raw_provider_data.get("dataforseo")
             if isinstance(dataforseo_data, Mapping):
                 has_detail_provider_data = "backlinks_detail" in dataforseo_data
-    if has_detail_partition or has_detail_provider_data:
+    if live_backlinks_detail or has_detail_partition or has_detail_provider_data:
         variants.append(BACKLINKS_QUERY_DETAIL)
     return tuple(variants)
 
@@ -1230,6 +1231,7 @@ def build_resumed_keyword_result(
     replay_backlinks_variants = _backlinks_variants_for_replay(
         raw_keyword_records,
         stored_keyword_result=stored_keyword_result,
+        live_backlinks_detail=config.live_backlinks_detail,
     )
     existing_backlinks_by_url_variant: dict[tuple[str, str], dict[str, object]] = {}
     for variant in replay_backlinks_variants:
