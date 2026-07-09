@@ -1710,15 +1710,36 @@ API source.
 
 ##### Dev slices
 
-**Progress:** 0 of 9 shipped.
+**Progress:** 5 of 9 shipped.
 
-1. **[ ] Slice 1 — Request/schema/fixture** — `build_backlinks_detail_request()`
-   in `dataforseo.py`.
-2. **[ ] Slice 2 — Offline tests.**
-3. **[ ] Slice 3 — Fetch + persistence** — `fetch_backlinks_detail_for_urls`,
-   `raw_responses/endpoint=backlinks_detail`.
-4. **[ ] Slice 4 — Live-run wiring.**
-5. **[ ] Slice 5 — Stored-run backfill** for `backlinks_detail`.
+1. **[x] Slice 1 — Request/schema/fixture** — `build_backlinks_detail_request()`,
+   `BACKLINKS_QUERY_DETAIL` variant, `DATAFORSEO_RESPONSE_SCHEMAS["backlinks_detail"]`,
+   `fixture_backlinks_detail_response()` in `dataforseo.py`. Offline request/schema
+   tests in `tests/unit/test_dataforseo_requests.py`.
+2. **[x] Slice 2 — Offline tests.** Covered alongside Slice 1
+   (`test_dataforseo_requests.py`) and Slices 4/5 (`test_cli_run.py`).
+3. **[x] Slice 3 — Fetch + persistence.** Folded into the existing
+   `fetch_dataforseo_backlinks_for_urls` variant loop rather than a standalone
+   function — `BACKLINKS_QUERY_DETAIL` added to `BACKLINKS_VARIANT_ENDPOINTS` /
+   `BACKLINKS_VARIANT_PROVIDER_DATA_KEYS`, persisted to
+   `raw_responses/endpoint=backlinks_detail` alongside the summary/dofollow
+   variants. `backlinks_detail_response_is_usable()` gates persistence
+   (accepts `backlinks_response_is_successful_empty`).
+4. **[x] Slice 4 — Live-run wiring.** `detail` variant fetched live in the same
+   pass as `summary`/`dofollow`, gated behind the opt-in `--live-backlinks-detail`
+   flag (requires `--live-backlinks`) so the extra per-URL API call stays
+   explicit; `build_live_payload` iterates `BACKLINKS_VARIANT_PROVIDER_DATA_KEYS`
+   generically. Regressions:
+   `test_run_live_backlinks_detail_flag_fetches_and_persists_detail`,
+   `test_run_live_backlinks_without_detail_flag_skips_detail`,
+   `test_run_live_backlinks_detail_requires_live_backlinks`.
+5. **[x] Slice 5 — Stored-run backfill** for `backlinks_detail`. New
+   `_backlinks_variants_for_replay()` only replays `detail` when a
+   `backlinks_detail` raw partition or `raw_provider_data` key already
+   exists for that stored run — older runs backfill it via live fetch without
+   refetching `summary`/`dofollow`. Regression:
+   `test_run_stored_run_backfills_only_missing_backlinks_detail_in_place`
+   in `test_cli_run.py`.
 6. **[ ] Slice 6 — Curated builder** — `build_backlink_details_frame`: one row
    per `(run_id, target_keyword_id, canonical_url_hash, backlink_id)` with
    `domain_from_rank`, `page_from_rank`, `backlink_spam_score`, `anchor`,

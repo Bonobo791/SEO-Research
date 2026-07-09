@@ -30,6 +30,7 @@ DATAFORSEO_BACKLINKS_PATH = "/v3/backlinks/summary/live"
 DATAFORSEO_BACKLINKS_DETAIL_PATH = "/v3/backlinks/backlinks/live"
 BACKLINKS_QUERY_SUMMARY = "summary"
 BACKLINKS_QUERY_DOFOLLOW = "dofollow"
+BACKLINKS_QUERY_DETAIL = "detail"
 REQUIRED_BACKLINKS_QUERIES = frozenset(
     {BACKLINKS_QUERY_SUMMARY, BACKLINKS_QUERY_DOFOLLOW}
 )
@@ -570,6 +571,16 @@ def backlinks_response_has_variant_aggregates(
             result.get("referring_domains")
         )
     return False
+
+
+def backlinks_detail_response_is_usable(response: Mapping[str, object]) -> bool:
+    if backlinks_response_is_successful_empty(response):
+        return True
+    try:
+        validate_dataforseo_response("backlinks_detail", dict(response))
+    except DataForSeoParseError:
+        return False
+    return True
 
 
 def onpage_instant_pages_response_is_usable(response: Mapping[str, object]) -> bool:

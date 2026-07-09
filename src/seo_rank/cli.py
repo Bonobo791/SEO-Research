@@ -28,14 +28,17 @@ from seo_rank.data.scans import scan_curated_table, scan_raw_responses
 from seo_rank.progress import RunProgress
 from seo_rank.stats.artifacts import merge_keyword_analysis_frame, run_phase5_stats
 from seo_rank.dataforseo import (
+    BACKLINKS_QUERY_DETAIL,
     DataForSeoClientError,
     DataForSeoCredentialError,
     DataForSeoParseError,
     DataForSeoCredentials,
     DEFAULT_KEYWORD_LIMIT,
+    backlinks_detail_response_is_usable,
     BACKLINKS_QUERY_DOFOLLOW,
     BACKLINKS_QUERY_SUMMARY,
     backlinks_response_has_variant_aggregates,
+    build_backlinks_detail_request,
     build_backlinks_dofollow_summary_request,
     build_backlinks_summary_request,
     build_keyword_expansion_request,
@@ -129,6 +132,7 @@ class RunConfig:
     keyword_limit: int = DEFAULT_KEYWORD_LIMIT
     live_providers: bool = False
     live_backlinks: bool = False
+    live_backlinks_detail: bool = False
     live_bge: bool = False
     live_gemini: bool = False
     live_textrazor: bool = False
@@ -296,6 +300,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Fetch DataForSEO backlinks during live runs",
     )
+    run.add_argument(
+        "--live-backlinks-detail",
+        action="store_true",
+        help="Also fetch the DataForSEO backlinks detail endpoint (requires --live-backlinks)",
+    )
     run.add_argument("--live-bge", action="store_true")
     run.add_argument("--live-gemini", action="store_true")
     run.add_argument("--live-textrazor", action="store_true")
@@ -347,6 +356,10 @@ def config_from_args(args: argparse.Namespace) -> RunConfig:
         )
     if args.live_backlinks and not args.live_providers:
         raise LiveProviderGateError("--live-backlinks requires --live-providers")
+    if args.live_backlinks_detail and not args.live_backlinks:
+        raise LiveProviderGateError(
+            "--live-backlinks-detail requires --live-backlinks"
+        )
     if args.live_bge and not args.live_providers:
         raise LiveProviderGateError("--live-bge requires --live-providers")
     if args.live_gemini and not args.live_providers:
@@ -371,6 +384,7 @@ def config_from_args(args: argparse.Namespace) -> RunConfig:
         refresh_textrazor=args.refresh_textrazor,
         live_providers=args.live_providers,
         live_backlinks=args.live_backlinks,
+        live_backlinks_detail=args.live_backlinks_detail,
         live_bge=args.live_bge,
         live_gemini=args.live_gemini,
         live_textrazor=args.live_textrazor and not args.skip_textrazor,
@@ -409,6 +423,8 @@ def serialized_run_config_from_args(args: argparse.Namespace) -> dict[str, objec
     serialized["live_providers"] = args.live_providers
     if args.live_backlinks:
         serialized["live_backlinks"] = True
+    if args.live_backlinks_detail:
+        serialized["live_backlinks_detail"] = True
     serialized["live_bge"] = args.live_bge
     serialized["live_gemini"] = args.live_gemini
     serialized["live_textrazor"] = args.live_textrazor and not args.skip_textrazor
@@ -766,12 +782,11 @@ def expand_stored_run(
         for keyword_result in merged_payload.get("keyword_results", [])
         if isinstance(keyword_result, Mapping)
     ]
-    merged_dataforseo["backlinks_summary"] = collect_backlinks_variant_responses(
-        merged_keyword_results, variant_key="backlinks_summary"
-    )
-    merged_dataforseo["backlinks_dofollow_summary"] = collect_backlinks_variant_responses(
-        merged_keyword_results, variant_key="backlinks_dofollow_summary"
-    )
+    for provider_data_key in BACKLINKS_VARIANT_PROVIDER_DATA_KEYS.values():
+        merged_dataforseo[provider_data_key] = collect_backlinks_variant_responses(
+            merged_keyword_results,
+            variant_key=provider_data_key,
+        )
     merged_dataforseo[ONPAGE_INSTANT_PAGES_ENDPOINT] = collect_onpage_instant_pages_responses(
         merged_keyword_results
     )
@@ -817,6 +832,7 @@ def run_config_from_payload(
         keyword_limit=keyword_limit,
         live_providers=bool(config.get("live_providers", False)),
         live_backlinks=bool(config.get("live_backlinks", False)),
+        live_backlinks_detail=bool(config.get("live_backlinks_detail", False)),
         live_bge=bool(config.get("live_bge", False)),
         live_gemini=bool(config.get("live_gemini", False)),
         live_textrazor=bool(config.get("live_textrazor", False)),
@@ -839,6 +855,9 @@ def merge_stored_run_cli_overlay(stored_config: RunConfig, cli_config: RunConfig
         stored_config,
         live_providers=cli_config.live_providers or stored_config.live_providers,
         live_backlinks=cli_config.live_backlinks or stored_config.live_backlinks,
+        live_backlinks_detail=(
+            cli_config.live_backlinks_detail or stored_config.live_backlinks_detail
+        ),
         live_bge=cli_config.live_bge or stored_config.live_bge,
         live_gemini=cli_config.live_gemini or stored_config.live_gemini,
         live_textrazor=live_textrazor,
@@ -1090,7 +1109,11 @@ def _register_usable_backlink_response(
     url: str,
     variant: str,
 ) -> bool:
-    if not backlinks_response_has_variant_aggregates(response, variant=variant):
+    if variant == BACKLINKS_QUERY_DETAIL:
+        usable = backlinks_detail_response_is_usable(response)
+    else:
+        usable = backlinks_response_has_variant_aggregates(response, variant=variant)
+    if not usable:
         return False
     existing_backlinks_by_url_variant[(url, variant)] = {
         **dict(response),
@@ -1139,6 +1162,25 @@ def _missing_serp_urls(
     return [url for url in serp_urls if url not in existing_by_url]
 
 
+def _backlinks_variants_for_replay(
+    raw_keyword_records: Mapping[str, Sequence[Mapping[str, object]]],
+    *,
+    stored_keyword_result: Mapping[str, object] | None,
+) -> tuple[str, ...]:
+    variants = [BACKLINKS_QUERY_SUMMARY, BACKLINKS_QUERY_DOFOLLOW]
+    has_detail_partition = bool(raw_keyword_records.get("backlinks_detail"))
+    has_detail_provider_data = False
+    if isinstance(stored_keyword_result, Mapping):
+        raw_provider_data = stored_keyword_result.get("raw_provider_data")
+        if isinstance(raw_provider_data, Mapping):
+            dataforseo_data = raw_provider_data.get("dataforseo")
+            if isinstance(dataforseo_data, Mapping):
+                has_detail_provider_data = "backlinks_detail" in dataforseo_data
+    if has_detail_partition or has_detail_provider_data:
+        variants.append(BACKLINKS_QUERY_DETAIL)
+    return tuple(variants)
+
+
 def build_resumed_keyword_result(
     config: RunConfig,
     *,
@@ -1185,8 +1227,13 @@ def build_resumed_keyword_result(
         keyword=target_keyword,
         depth=config.depth,
     )
+    replay_backlinks_variants = _backlinks_variants_for_replay(
+        raw_keyword_records,
+        stored_keyword_result=stored_keyword_result,
+    )
     existing_backlinks_by_url_variant: dict[tuple[str, str], dict[str, object]] = {}
-    for variant, endpoint in BACKLINKS_VARIANT_ENDPOINTS.items():
+    for variant in replay_backlinks_variants:
+        endpoint = BACKLINKS_VARIANT_ENDPOINTS[variant]
         for record in raw_keyword_records.get(endpoint, []):
             response_body_bytes = record.get("response_body_bytes")
             if not isinstance(response_body_bytes, (bytes, bytearray)):
@@ -1213,6 +1260,8 @@ def build_resumed_keyword_result(
         variant = metadata.get("variant") or metadata.get("backlinks_query")
         if variant == BACKLINKS_QUERY_DOFOLLOW:
             resolved_variant = BACKLINKS_QUERY_DOFOLLOW
+        elif variant == BACKLINKS_QUERY_DETAIL:
+            resolved_variant = BACKLINKS_QUERY_DETAIL
         else:
             resolved_variant = BACKLINKS_QUERY_SUMMARY
         key = (url, resolved_variant)
@@ -1232,7 +1281,7 @@ def build_resumed_keyword_result(
             for url in serp_urls
             if (url, variant) not in existing_backlinks_by_url_variant
         ]
-        for variant in BACKLINKS_VARIANT_ENDPOINTS
+        for variant in replay_backlinks_variants
     }
     if config.live_providers and config.live_backlinks and live_context is not None:
         for variant, missing_urls_for_variant in missing_backlink_urls_by_variant.items():
@@ -1262,7 +1311,7 @@ def build_resumed_keyword_result(
     backlinks_responses = [
         existing_backlinks_by_url_variant[(str(result["url"]), variant)]
         for result in serp_results
-        for variant in BACKLINKS_VARIANT_ENDPOINTS
+        for variant in replay_backlinks_variants
         if (str(result["url"]), variant) in existing_backlinks_by_url_variant
     ]
     existing_onpage_by_url = _usable_onpage_by_url_from_records(raw_keyword_records)
@@ -2088,12 +2137,13 @@ def build_live_payload(
         },
     }
     if config.live_backlinks:
-        raw_provider_data["dataforseo"]["backlinks_summary"] = collect_backlinks_variant_responses(
-            keyword_results, variant_key="backlinks_summary"
-        )
-        raw_provider_data["dataforseo"]["backlinks_dofollow_summary"] = collect_backlinks_variant_responses(
-            keyword_results, variant_key="backlinks_dofollow_summary"
-        )
+        for provider_data_key in BACKLINKS_VARIANT_PROVIDER_DATA_KEYS.values():
+            raw_provider_data["dataforseo"][provider_data_key] = (
+                collect_backlinks_variant_responses(
+                    keyword_results,
+                    variant_key=provider_data_key,
+                )
+            )
     textrazor_responses = [
         response
         for keyword_result in keyword_results
@@ -2164,11 +2214,18 @@ def build_live_keyword_result(
                 target_keyword,
                 f"dataforseo backlinks ({len(serp_results)} urls)",
             )
+        live_backlinks_variants = [
+            BACKLINKS_QUERY_SUMMARY,
+            BACKLINKS_QUERY_DOFOLLOW,
+        ]
+        if config.live_backlinks_detail:
+            live_backlinks_variants.append(BACKLINKS_QUERY_DETAIL)
         backlinks_responses = fetch_dataforseo_backlinks_for_urls(
             target_keyword,
             [str(result["url"]) for result in serp_results],
             credentials=credentials.dataforseo,
             transport=dataforseo_transport,
+            variants=tuple(live_backlinks_variants),
             progress=None,
             run_dir=config.output_dir,
         )
@@ -2432,11 +2489,13 @@ def execute_validated_dataforseo_request(
 BACKLINKS_VARIANT_REQUEST_BUILDERS = {
     BACKLINKS_QUERY_SUMMARY: build_backlinks_summary_request,
     BACKLINKS_QUERY_DOFOLLOW: build_backlinks_dofollow_summary_request,
+    BACKLINKS_QUERY_DETAIL: build_backlinks_detail_request,
 }
 
 BACKLINKS_VARIANT_PROVIDER_DATA_KEYS = {
     BACKLINKS_QUERY_SUMMARY: "backlinks_summary",
     BACKLINKS_QUERY_DOFOLLOW: "backlinks_dofollow_summary",
+    BACKLINKS_QUERY_DETAIL: "backlinks_detail",
 }
 
 
@@ -2444,8 +2503,7 @@ def partition_backlinks_responses_by_variant(
     responses: Sequence[Mapping[str, object]],
 ) -> dict[str, list[dict[str, object]]]:
     partitioned: dict[str, list[dict[str, object]]] = {
-        BACKLINKS_QUERY_SUMMARY: [],
-        BACKLINKS_QUERY_DOFOLLOW: [],
+        variant: [] for variant in BACKLINKS_VARIANT_PROVIDER_DATA_KEYS
     }
     for response in responses:
         if not isinstance(response, Mapping):
@@ -2520,21 +2578,24 @@ def fetch_dataforseo_backlinks_for_urls(
                 response_with_url = {**response, "url": url, "variant": variant}
                 responses.append(response_with_url)
                 if run_dir is not None:
+                    request_body = request.body[0]
                     request_metadata: dict[str, object] = {
                         "target_keyword": target_keyword,
                         "url": url,
-                        "target": request.body[0]["target"],
+                        "target": request_body["target"],
                         "variant": variant,
-                        "include_subdomains": request.body[0]["include_subdomains"],
-                        "backlinks_status_type": request.body[0][
-                            "backlinks_status_type"
-                        ],
-                        "internal_list_limit": request.body[0]["internal_list_limit"],
                     }
-                    if "backlinks_filters" in request.body[0]:
-                        request_metadata["backlinks_filters"] = request.body[0][
-                            "backlinks_filters"
-                        ]
+                    for key in (
+                        "include_subdomains",
+                        "backlinks_status_type",
+                        "internal_list_limit",
+                        "backlinks_filters",
+                        "mode",
+                        "limit",
+                        "order_by",
+                    ):
+                        if key in request_body:
+                            request_metadata[key] = request_body[key]
                     new_records.append(
                         build_raw_response_record(
                             run_dir.name,
@@ -3368,6 +3429,7 @@ def refresh_run_json_raw_response_catalog(run_dir: Path) -> None:
 BACKLINKS_VARIANT_ENDPOINTS: dict[str, str] = {
     BACKLINKS_QUERY_SUMMARY: "backlinks_summary",
     BACKLINKS_QUERY_DOFOLLOW: "backlinks_dofollow_summary",
+    BACKLINKS_QUERY_DETAIL: "backlinks_detail",
 }
 
 ONPAGE_INSTANT_PAGES_ENDPOINT = "onpage_instant_pages"
