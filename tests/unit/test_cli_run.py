@@ -776,6 +776,179 @@ def test_run_live_providers_persists_backlinks_before_later_provider_failure(
     assert not (output_dir / "run.json").exists()
 
 
+def test_run_live_backlinks_detail_flag_fetches_and_persists_detail(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.setenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", "1")
+    monkeypatch.setenv("DATAFORSEO_LOGIN", "analyst@example.com")
+    monkeypatch.setenv("DATAFORSEO_PASSWORD", "dataforseo-secret")
+
+    detail_targets: list[str] = []
+
+    def dataforseo_transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        del method, headers, timeout
+        request_body = json.loads(body.decode("utf-8"))
+        if url.endswith("/keywords_data/google_ads/keywords_for_keywords/live"):
+            return fixture_keyword_expansion_response("technical seo")
+        if url.endswith("/serp/google/organic/live/advanced"):
+            return fixture_serp_response("technical seo")
+        if url.endswith("/on_page/content_parsing/live"):
+            return fixture_page_text_response(request_body[0]["url"], "technical seo")
+        if url.endswith("/on_page/instant_pages"):
+            return fixture_onpage_instant_pages_response(request_body[0]["url"])
+        if url.endswith("/backlinks/summary/live"):
+            return fixture_backlinks_response_for_request_body(request_body)
+        if url.endswith("/backlinks/backlinks/live"):
+            target = request_body[0]["target"]
+            detail_targets.append(target)
+            return fixture_backlinks_detail_response(target)
+        raise AssertionError(f"unexpected DataForSEO URL: {url}")
+
+    monkeypatch.setattr("seo_rank.cli.DEFAULT_DATAFORSEO_TRANSPORT", dataforseo_transport)
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--output-dir",
+            str(output_dir),
+            "--keyword-limit",
+            "1",
+            "--depth",
+            "1",
+            "--live-providers",
+            "--live-backlinks",
+            "--live-backlinks-detail",
+            "--skip-textrazor",
+        ]
+    )
+
+    assert exit_code == 0
+    assert detail_targets
+    assert set(detail_targets) == {"https://example.com/technical-seo/1"}
+
+    detail_path = (
+        output_dir
+        / "parquet"
+        / "raw_responses"
+        / "endpoint=backlinks_detail"
+        / "part-0.parquet"
+    )
+    assert detail_path.exists()
+    detail_rows = pq.ParquetFile(detail_path).read().to_pylist()
+    assert {
+        json.loads(bytes(row["response_body_bytes"]).decode("utf-8"))["url"]
+        for row in detail_rows
+    } == {"https://example.com/technical-seo/1"}
+
+    payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
+    assert payload["config"]["live_backlinks_detail"] is True
+
+
+def test_run_live_backlinks_without_detail_flag_skips_detail(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.setenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", "1")
+    monkeypatch.setenv("DATAFORSEO_LOGIN", "analyst@example.com")
+    monkeypatch.setenv("DATAFORSEO_PASSWORD", "dataforseo-secret")
+
+    def dataforseo_transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        del method, headers, timeout
+        request_body = json.loads(body.decode("utf-8"))
+        if url.endswith("/keywords_data/google_ads/keywords_for_keywords/live"):
+            return fixture_keyword_expansion_response("technical seo")
+        if url.endswith("/serp/google/organic/live/advanced"):
+            return fixture_serp_response("technical seo")
+        if url.endswith("/on_page/content_parsing/live"):
+            return fixture_page_text_response(request_body[0]["url"], "technical seo")
+        if url.endswith("/on_page/instant_pages"):
+            return fixture_onpage_instant_pages_response(request_body[0]["url"])
+        if url.endswith("/backlinks/summary/live"):
+            return fixture_backlinks_response_for_request_body(request_body)
+        if url.endswith("/backlinks/backlinks/live"):
+            raise AssertionError(
+                "backlinks detail should not be fetched without --live-backlinks-detail"
+            )
+        raise AssertionError(f"unexpected DataForSEO URL: {url}")
+
+    monkeypatch.setattr("seo_rank.cli.DEFAULT_DATAFORSEO_TRANSPORT", dataforseo_transport)
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--output-dir",
+            str(output_dir),
+            "--keyword-limit",
+            "1",
+            "--depth",
+            "1",
+            "--live-providers",
+            "--live-backlinks",
+            "--skip-textrazor",
+        ]
+    )
+
+    assert exit_code == 0
+    detail_path = (
+        output_dir
+        / "parquet"
+        / "raw_responses"
+        / "endpoint=backlinks_detail"
+        / "part-0.parquet"
+    )
+    assert not detail_path.exists()
+
+    payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
+    assert payload["config"]["live_backlinks_detail"] is False
+
+
+def test_run_live_backlinks_detail_requires_live_backlinks(
+    tmp_path: Path,
+    capsys,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.setenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", "1")
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--output-dir",
+            str(output_dir),
+            "--live-providers",
+            "--live-backlinks-detail",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "--live-backlinks-detail requires --live-backlinks" in captured.err
+    assert not (output_dir / "run.json").exists()
+
+
 def test_fetch_dataforseo_backlinks_for_urls_persists_partition_once_per_batch(
     tmp_path: Path,
     monkeypatch,
@@ -1954,6 +2127,141 @@ def test_run_stored_run_backfills_legacy_backlinks_detail_via_opt_in(
         "https://example.com/technical-seo/1",
         "https://example.com/technical-seo/2",
     }
+
+
+def test_run_stored_run_backfills_only_missing_backlinks_detail_in_place(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.setenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", "1")
+    monkeypatch.setenv("DATAFORSEO_LOGIN", "analyst@example.com")
+    monkeypatch.setenv("DATAFORSEO_PASSWORD", "dataforseo-secret")
+
+    live_summary_targets: list[str] = []
+    live_detail_targets: list[str] = []
+
+    def dataforseo_transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        del method, headers, timeout
+        request_body = json.loads(body.decode("utf-8"))
+        if url.endswith("/keywords_data/google_ads/keywords_for_keywords/live"):
+            return fixture_keyword_expansion_response("technical seo")
+        if url.endswith("/serp/google/organic/live/advanced"):
+            return fixture_serp_response("technical seo")
+        if url.endswith("/on_page/content_parsing/live"):
+            return fixture_page_text_response(request_body[0]["url"], "technical seo")
+        if url.endswith("/on_page/instant_pages"):
+            return fixture_onpage_instant_pages_response(request_body[0]["url"])
+        if url.endswith("/backlinks/summary/live"):
+            target = request_body[0]["target"]
+            live_summary_targets.append(target)
+            return fixture_backlinks_response_for_request_body(request_body)
+        if url.endswith("/backlinks/backlinks/live"):
+            target = request_body[0]["target"]
+            live_detail_targets.append(target)
+            return fixture_backlinks_detail_response(target)
+        raise AssertionError(f"unexpected DataForSEO URL: {url}")
+
+    monkeypatch.setattr("seo_rank.cli.DEFAULT_DATAFORSEO_TRANSPORT", dataforseo_transport)
+
+    assert (
+        main(
+            [
+                "run",
+                "--seed",
+                "technical seo",
+                "--output-dir",
+                str(output_dir),
+                "--live-providers",
+                "--live-backlinks",
+                "--live-backlinks-detail",
+                "--keyword-limit",
+                "1",
+                "--depth",
+                "2",
+                "--skip-textrazor",
+            ]
+        )
+        == 0
+    )
+
+    run_json_path = output_dir / "run.json"
+    payload = json.loads(run_json_path.read_text(encoding="utf-8"))
+    payload["config"]["live_backlinks_detail"] = False
+    run_json_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    missing_url = "https://example.com/technical-seo/2"
+    detail_partition_path = (
+        output_dir
+        / "parquet"
+        / "raw_responses"
+        / "endpoint=backlinks_detail"
+        / "part-0.parquet"
+    )
+    partition_table = pq.ParquetFile(detail_partition_path).read()
+    kept_rows = [
+        row
+        for row in partition_table.to_pylist()
+        if json.loads(row["request_metadata_json"])["url"] != missing_url
+    ]
+    pq.write_table(
+        pa.Table.from_pylist(kept_rows, schema=partition_table.schema),
+        detail_partition_path,
+    )
+
+    live_summary_targets.clear()
+    live_detail_targets.clear()
+
+    def fail_if_rebuilt(*args, **kwargs) -> None:
+        raise AssertionError("stored-run should not rebuild the whole keyword result")
+
+    monkeypatch.setattr("seo_rank.cli.build_offline_keyword_result", fail_if_rebuilt)
+    monkeypatch.setattr("seo_rank.cli.build_live_keyword_result", fail_if_rebuilt)
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--stored-run",
+            str(output_dir),
+            "--live-providers",
+            "--live-backlinks",
+            "--keyword-limit",
+            "1",
+        ]
+    )
+
+    assert exit_code == 0
+    assert live_summary_targets == []
+    assert live_detail_targets == [missing_url]
+
+    detail_rows = pq.ParquetFile(detail_partition_path).read().to_pylist()
+    assert len(detail_rows) == 2
+    assert {
+        json.loads(bytes(row["response_body_bytes"]).decode("utf-8"))["url"]
+        for row in detail_rows
+    } == {
+        "https://example.com/technical-seo/1",
+        "https://example.com/technical-seo/2",
+    }
+
+    for endpoint in ("backlinks_summary", "backlinks_dofollow_summary"):
+        partition_rows = pq.ParquetFile(
+            output_dir
+            / "parquet"
+            / "raw_responses"
+            / f"endpoint={endpoint}"
+            / "part-0.parquet"
+        ).read().to_pylist()
+        assert len(partition_rows) == 2
 
 
 def test_run_stored_run_backfills_only_missing_onpage_in_place(
