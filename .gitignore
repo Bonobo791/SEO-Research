@@ -225,3 +225,5 @@ node_modules
 .venv_probe
 graphify-out
 .venv_uv
+ponytail/
+.ponytail
