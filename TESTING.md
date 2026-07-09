@@ -345,7 +345,8 @@ exist.
   `run_phase5_stats` (`test_run_phase5_stats_rebuilds_onpage_features_for_legacy_run_directories`).
   `tests/unit/test_stats_golden_fixtures.py` pins OnPage contract fields with
   combined feature marts (`test_onpage_stats_golden_contract_with_combined_feature_marts`).
-  Combined family-artifacts integration completes in ≤60s with full OnPage PL enabled.
+  Combined family-artifacts integration with full OnPage PL enabled is slower after
+  Slice 17 family wiring (~5 minutes locally for the combined mart path).
 - **OnPage nested meta.content / CLS (Phase 7.1 slice 10)** —
   `tests/unit/test_run_normalize.py` covers `_onpage_signals_row` preferring
   `item["meta"]["content"]` and `item["meta"]["cumulative_layout_shift"]` with
@@ -359,8 +360,6 @@ exist.
   semantics (`test_onpage_signals_row_sparse_checks_leave_absent_fields_null`),
   and item-level fallback for `has_micromarkup` / `has_micromarkup_errors`
   (`test_onpage_signals_row_micromarkup_checks_fallback_to_item_level`).
-  `tests/unit/test_stats_families.py` allows mart columns ahead of Slice 17
-  family wiring (`test_onpage_signal_columns_cover_onpage_features_mart`).
 - **OnPage meta block metrics (Phase 7.1 slice 12)** —
   `tests/unit/test_run_normalize.py` covers 18 `meta` columns aligned with
   PyArrow/Polars schemas (`test_onpage_meta_columns_match_onpage_signals_schema`),
@@ -405,6 +404,21 @@ exist.
   missing meta columns and asserts `build_feature_marts()` backfills nulls instead
   of raising `ColumnNotFoundError`
   (`test_build_feature_marts_legacy_onpage_signals_backfills_missing_meta_columns`).
+
+## Shipped tests — Phase 7.1 slice 17 (Jul 2026)
+
+- **Analysis family wiring** — `analysis_spec.v1.yaml` registers all 105
+  `onpage_features` signal columns (excluding `onpage_signal_id`) across three
+  extended `onpage_metric` families: `onpage_content_quality` (10),
+  `onpage_core_web_vitals` (13), `onpage_technical_checks` (82). No
+  `analysis_mart` schema bump.
+- **Registry contract** — `tests/unit/test_stats_families.py` pins full
+  `signal_columns` tuples and exact mart coverage
+  (`test_onpage_signal_columns_cover_onpage_features_mart`).
+  `tests/unit/test_stats_spec.py` unchanged family keys.
+- **Artifact fixtures** — `tests/unit/test_stats_family_artifacts.py`
+  `_combined_onpage_features_frame()` backfills every `ONPAGE_FEATURES_EXTRA_COLUMNS`
+  column so combined stats paths exercise the full registry.
 
 ## Planned tests (not yet in suite) — Phase 7.1 slice 18
 

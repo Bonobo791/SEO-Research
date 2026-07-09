@@ -5,6 +5,7 @@ from pathlib import Path
 
 import polars as pl
 
+from seo_rank.data.features import ONPAGE_FEATURES_EXPECTED_SCHEMA, ONPAGE_FEATURES_EXTRA_COLUMNS
 from seo_rank.stats.artifacts import build_family_source_frames
 from seo_rank.stats.artifacts import run_phase5_stats
 from seo_rank.stats.spec import load_analysis_spec
@@ -131,14 +132,40 @@ def _combined_backlinks_analysis_frame() -> pl.DataFrame:
     return pl.DataFrame(rows)
 
 
+def _onpage_column_default(
+    column: str,
+    *,
+    keyword_index: int,
+    serp_rank: int,
+    signal: float,
+) -> object:
+    dtype = ONPAGE_FEATURES_EXPECTED_SCHEMA[column]
+    if dtype == pl.Boolean:
+        return (keyword_index + serp_rank) % 2 == 0
+    if dtype == pl.Int64:
+        return serp_rank + keyword_index
+    if dtype == pl.Float64:
+        if column in {
+            "description_to_content_consistency",
+            "title_to_content_consistency",
+            "meta_keywords_to_content_consistency",
+            "plain_text_rate",
+            "cumulative_layout_shift",
+        }:
+            return 0.1 + serp_rank * 0.05
+        return float(signal)
+    if dtype == pl.Utf8:
+        return f"{column}-{keyword_index}-{serp_rank}"
+    raise TypeError(f"unsupported onpage_features dtype for {column}: {dtype}")
+
+
 def _combined_onpage_features_frame() -> pl.DataFrame:
     rows: list[dict[str, object]] = []
     for row in _combined_analysis_mart_frame().to_dicts():
         keyword_index = int(str(row["target_keyword_id"]).split("-")[-1])
         serp_rank = int(row["serp_rank"])
         signal = float(4 - serp_rank) + keyword_index * 0.01
-        rows.append(
-            {
+        row = {
                 **row,
                 "onpage_signal_id": f"onpage-{keyword_index}-{serp_rank}",
                 "onpage_score": 60.0 + signal * 10.0,
@@ -170,7 +197,15 @@ def _combined_onpage_features_frame() -> pl.DataFrame:
                 "has_valid_structured_data": serp_rank != 3,
                 "schema_version": "feature_marts.v1",
             }
-        )
+        for column in ONPAGE_FEATURES_EXTRA_COLUMNS:
+            if column not in row:
+                row[column] = _onpage_column_default(
+                    column,
+                    keyword_index=keyword_index,
+                    serp_rank=serp_rank,
+                    signal=signal,
+                )
+        rows.append(row)
     return pl.DataFrame(rows)
 
 

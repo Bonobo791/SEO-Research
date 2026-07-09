@@ -20,6 +20,117 @@ ONPAGE_FAMILY_KEYS = (
     "onpage_technical_checks",
 )
 ONPAGE_SIGNAL_COLUMNS = frozenset(ONPAGE_FEATURES_EXTRA_COLUMNS) - {"onpage_signal_id"}
+ONPAGE_CONTENT_QUALITY_COLUMNS = (
+    "onpage_score",
+    "plain_text_word_count",
+    "plain_text_rate",
+    "flesch_kincaid_readability_index",
+    "coleman_liau_readability_index",
+    "smog_readability_index",
+    "dale_chall_readability_index",
+    "description_to_content_consistency",
+    "title_to_content_consistency",
+    "meta_keywords_to_content_consistency",
+)
+ONPAGE_CORE_WEB_VITALS_COLUMNS = (
+    "time_to_first_byte_ms",
+    "largest_contentful_paint_ms",
+    "cumulative_layout_shift",
+    "connection_time_ms",
+    "time_to_secure_connection_ms",
+    "request_sent_time_ms",
+    "download_time_ms",
+    "duration_time_ms",
+    "fetch_end_ms",
+    "dom_complete_ms",
+    "time_to_interactive_ms",
+    "first_input_delay_ms",
+    "total_transfer_size",
+)
+ONPAGE_TECHNICAL_CHECKS_COLUMNS = (
+    "title_too_long",
+    "title_too_short",
+    "no_title",
+    "no_description",
+    "no_h1_tag",
+    "canonical",
+    "is_https",
+    "has_render_blocking_resources",
+    "duplicate_meta_tags",
+    "has_meta_title",
+    "irrelevant_description",
+    "low_readability_rate",
+    "has_valid_structured_data",
+    "micromarkup_items_count",
+    "micromarkup_errors_count",
+    "micromarkup_warnings_count",
+    "is_4xx_code",
+    "is_5xx_code",
+    "is_broken",
+    "is_redirect",
+    "is_www",
+    "no_content_encoding",
+    "high_loading_time",
+    "high_waiting_time",
+    "no_doctype",
+    "has_html_doctype",
+    "no_encoding_meta_tag",
+    "https_to_http_links",
+    "size_greater_than_3mb",
+    "meta_charset_consistency",
+    "has_meta_refresh_redirect",
+    "low_content_rate",
+    "high_content_rate",
+    "high_character_count",
+    "small_page_size",
+    "large_page_size",
+    "irrelevant_title",
+    "irrelevant_meta_keywords",
+    "deprecated_html_tags",
+    "duplicate_title_tag",
+    "no_image_alt",
+    "no_image_title",
+    "no_favicon",
+    "seo_friendly_url",
+    "flash",
+    "frame",
+    "lorem_ipsum",
+    "has_micromarkup",
+    "has_micromarkup_errors",
+    "from_sitemap",
+    "description_length",
+    "title_length",
+    "external_links_count",
+    "internal_links_count",
+    "images_count",
+    "images_size",
+    "scripts_count",
+    "scripts_size",
+    "stylesheets_count",
+    "stylesheets_size",
+    "render_blocking_scripts_count",
+    "render_blocking_stylesheets_count",
+    "follow",
+    "inbound_links_count",
+    "duplicate_meta_tags_count",
+    "h1_count",
+    "h2_count",
+    "h3_count",
+    "has_og_tags",
+    "has_twitter_tags",
+    "cache_control_cachable",
+    "cache_control_ttl",
+    "resource_errors_count",
+    "resource_warnings_count",
+    "broken_links",
+    "broken_resources",
+    "duplicate_content",
+    "duplicate_description",
+    "duplicate_title",
+    "click_depth",
+    "encoded_size",
+    "total_dom_size",
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -61,39 +172,9 @@ def test_signal_family_registry_preserves_order_and_panel_grain() -> None:
         "dofollow_backlinks_count",
     )
     assert registry.family("onpage_content_quality").kind == "onpage_metric"
-    assert registry.family("onpage_content_quality").signal_columns == (
-        "onpage_score",
-        "plain_text_word_count",
-        "plain_text_rate",
-        "flesch_kincaid_readability_index",
-        "coleman_liau_readability_index",
-        "smog_readability_index",
-        "dale_chall_readability_index",
-    )
-    assert registry.family("onpage_core_web_vitals").signal_columns == (
-        "time_to_first_byte_ms",
-        "largest_contentful_paint_ms",
-        "cumulative_layout_shift",
-        "total_transfer_size",
-    )
-    assert registry.family("onpage_technical_checks").signal_columns == (
-        "title_too_long",
-        "title_too_short",
-        "no_title",
-        "no_description",
-        "no_h1_tag",
-        "canonical",
-        "is_https",
-        "has_render_blocking_resources",
-        "duplicate_meta_tags",
-        "has_meta_title",
-        "irrelevant_description",
-        "low_readability_rate",
-        "has_valid_structured_data",
-        "micromarkup_items_count",
-        "micromarkup_errors_count",
-        "micromarkup_warnings_count",
-    )
+    assert registry.family("onpage_content_quality").signal_columns == ONPAGE_CONTENT_QUALITY_COLUMNS
+    assert registry.family("onpage_core_web_vitals").signal_columns == ONPAGE_CORE_WEB_VITALS_COLUMNS
+    assert registry.family("onpage_technical_checks").signal_columns == ONPAGE_TECHNICAL_CHECKS_COLUMNS
     assert registry.source_mart_for_family("onpage_content_quality") == "onpage_features"
     assert registry.families_by_kind("onpage_metric") == tuple(
         registry.family(key) for key in ONPAGE_FAMILY_KEYS
@@ -125,9 +206,7 @@ def test_onpage_signal_columns_cover_onpage_features_mart() -> None:
     for key in ONPAGE_FAMILY_KEYS:
         registered_columns.update(registry.family(key).signal_columns)
 
-    # Slice 11+ adds curated check columns to onpage_features before Slice 17
-    # wires them into analysis_spec families.
-    assert registered_columns <= set(ONPAGE_SIGNAL_COLUMNS)
+    assert registered_columns == set(ONPAGE_SIGNAL_COLUMNS)
 
 
 @pytest.mark.parametrize(

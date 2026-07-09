@@ -1666,7 +1666,7 @@ or task id needed, and no `task_post` crawl/poll flow.
     new columns (Slices 11-15) into `onpage_features` (non-negative bounds
     on new numeric/count/size/timing columns; new booleans unbounded).
     Tests in `tests/unit/test_feature_marts.py`.
-17. **[ ] Slice 17 — Analysis family wiring for new fields.** Extend the
+17. **[x] Slice 17 — Analysis family wiring for new fields.** Extend the
     three existing `onpage_metric` families in `analysis_spec.v1.yaml` (or
     add a 4th, e.g. `onpage_resource_profile`, if the existing three don't
     fit thematically): link/image/script/DOM/size metrics and new technical
@@ -1697,7 +1697,7 @@ or task id needed, and no `task_post` crawl/poll flow.
 | Resource/cache/DOM/size metrics | 14 | Shipped |
 | Full `page_timing` expansion | 15 | Shipped |
 | Feature mart + bounded validation for new columns | 16 | Shipped |
-| Analysis family wiring for new fields | 17 | Open |
+| Analysis family wiring for new fields | 17 | Shipped |
 | Stored-run regression + full-layer CLI tests | 18 | Open |
 
 #### 7.2 — Backlink quality & anchor relevance (`backlinks/backlinks/live`)

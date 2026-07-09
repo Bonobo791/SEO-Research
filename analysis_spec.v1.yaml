@@ -109,12 +109,24 @@ signal_families:
         - coleman_liau_readability_index
         - smog_readability_index
         - dale_chall_readability_index
+        - description_to_content_consistency
+        - title_to_content_consistency
+        - meta_keywords_to_content_consistency
     - key: onpage_core_web_vitals
       kind: onpage_metric
       signal_columns:
         - time_to_first_byte_ms
         - largest_contentful_paint_ms
         - cumulative_layout_shift
+        - connection_time_ms
+        - time_to_secure_connection_ms
+        - request_sent_time_ms
+        - download_time_ms
+        - duration_time_ms
+        - fetch_end_ms
+        - dom_complete_ms
+        - time_to_interactive_ms
+        - first_input_delay_ms
         - total_transfer_size
     - key: onpage_technical_checks
       kind: onpage_metric
@@ -135,6 +147,72 @@ signal_families:
         - micromarkup_items_count
         - micromarkup_errors_count
         - micromarkup_warnings_count
+        - is_4xx_code
+        - is_5xx_code
+        - is_broken
+        - is_redirect
+        - is_www
+        - no_content_encoding
+        - high_loading_time
+        - high_waiting_time
+        - no_doctype
+        - has_html_doctype
+        - no_encoding_meta_tag
+        - https_to_http_links
+        - size_greater_than_3mb
+        - meta_charset_consistency
+        - has_meta_refresh_redirect
+        - low_content_rate
+        - high_content_rate
+        - high_character_count
+        - small_page_size
+        - large_page_size
+        - irrelevant_title
+        - irrelevant_meta_keywords
+        - deprecated_html_tags
+        - duplicate_title_tag
+        - no_image_alt
+        - no_image_title
+        - no_favicon
+        - seo_friendly_url
+        - flash
+        - frame
+        - lorem_ipsum
+        - has_micromarkup
+        - has_micromarkup_errors
+        - from_sitemap
+        - description_length
+        - title_length
+        - external_links_count
+        - internal_links_count
+        - images_count
+        - images_size
+        - scripts_count
+        - scripts_size
+        - stylesheets_count
+        - stylesheets_size
+        - render_blocking_scripts_count
+        - render_blocking_stylesheets_count
+        - follow
+        - inbound_links_count
+        - duplicate_meta_tags_count
+        - h1_count
+        - h2_count
+        - h3_count
+        - has_og_tags
+        - has_twitter_tags
+        - cache_control_cachable
+        - cache_control_ttl
+        - resource_errors_count
+        - resource_warnings_count
+        - broken_links
+        - broken_resources
+        - duplicate_content
+        - duplicate_description
+        - duplicate_title
+        - click_depth
+        - encoded_size
+        - total_dom_size
 
 estimand:
   outcome: -log(serp_rank)
