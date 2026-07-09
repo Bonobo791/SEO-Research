@@ -7,6 +7,7 @@ from seo_rank.dataforseo import (
     DataForSeoParseError,
     BACKLINKS_DOFOLLOW_FILTERS,
     BACKLINKS_QUERY_SUMMARY,
+    build_backlinks_detail_request,
     decode_content_parsing_items,
     build_backlinks_dofollow_summary_request,
     build_backlinks_summary_request,
@@ -16,6 +17,7 @@ from seo_rank.dataforseo import (
     build_page_text_request,
     build_serp_request,
     execute_dataforseo_request,
+    fixture_backlinks_detail_response,
     fixture_backlinks_response,
     fixture_keyword_expansion_response,
     fixture_onpage_instant_pages_response,
@@ -140,6 +142,22 @@ def test_build_backlinks_dofollow_summary_request_uses_dofollow_filter() -> None
     ]
 
 
+def test_build_backlinks_detail_request_uses_backlinks_detail_endpoint() -> None:
+    request = build_backlinks_detail_request("https://example.com/technical-seo/1")
+
+    assert request.method == "POST"
+    assert request.path == "/v3/backlinks/backlinks/live"
+    assert request.body == [
+        {
+            "target": "https://example.com/technical-seo/1",
+            "mode": "one_per_domain",
+            "limit": 100,
+            "order_by": ["rank,desc"],
+            "backlinks_status_type": "live",
+        }
+    ]
+
+
 @pytest.mark.parametrize(
     ("target", "expected"),
     [
@@ -239,6 +257,12 @@ def test_validate_dataforseo_response_accepts_backlinks_dofollow_summary_shape()
     }
 
     assert validate_dataforseo_response("backlinks_dofollow_summary", response) is response
+
+
+def test_validate_dataforseo_response_accepts_backlinks_detail_shape() -> None:
+    response = fixture_backlinks_detail_response("https://example.com/technical-seo/1")
+
+    assert validate_dataforseo_response("backlinks_detail", response) is response
 
 
 def test_validate_dataforseo_response_rejects_backlinks_summary_missing_backlinks() -> None:
@@ -473,6 +497,7 @@ def test_execute_dataforseo_request_posts_json_with_basic_auth() -> None:
         ("keyword_expansion", fixture_keyword_expansion_response("technical seo")),
         ("serp", fixture_serp_response("technical seo")),
         ("backlinks_summary", fixture_backlinks_response("https://example.com/technical-seo/1")),
+        ("backlinks_detail", fixture_backlinks_detail_response("https://example.com/technical-seo/1")),
         (
             "page_text",
             fixture_page_text_response(
@@ -676,6 +701,20 @@ def test_validate_dataforseo_response_rejects_backlinks_target_type_drift() -> N
     assert error.endpoint == "backlinks_summary"
     assert error.path == "tasks[0].result[0].target"
     assert error.expected == "str"
+    assert "got bool" in str(error)
+
+
+def test_validate_dataforseo_response_rejects_backlinks_detail_rank_drift() -> None:
+    response = fixture_backlinks_detail_response("https://example.com/technical-seo/1")
+    response["tasks"][0]["result"][0]["items"][0]["domain_from_rank"] = True
+
+    with pytest.raises(DataForSeoParseError) as exc_info:
+        validate_dataforseo_response("backlinks_detail", response)
+
+    error = exc_info.value
+    assert error.endpoint == "backlinks_detail"
+    assert error.path == "tasks[0].result[0].items[0].domain_from_rank"
+    assert error.expected == "int"
     assert "got bool" in str(error)
 
 

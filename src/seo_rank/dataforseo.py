@@ -27,6 +27,7 @@ DATAFORSEO_SERP_PATH = "/v3/serp/google/organic/live/advanced"
 DATAFORSEO_PAGE_TEXT_PATH = "/v3/on_page/content_parsing/live"
 DATAFORSEO_ONPAGE_INSTANT_PAGES_PATH = "/v3/on_page/instant_pages"
 DATAFORSEO_BACKLINKS_PATH = "/v3/backlinks/summary/live"
+DATAFORSEO_BACKLINKS_DETAIL_PATH = "/v3/backlinks/backlinks/live"
 BACKLINKS_QUERY_SUMMARY = "summary"
 BACKLINKS_QUERY_DOFOLLOW = "dofollow"
 REQUIRED_BACKLINKS_QUERIES = frozenset(
@@ -180,6 +181,47 @@ DATAFORSEO_RESPONSE_SCHEMAS: dict[str, tuple[DataForSeoFieldSchema, ...]] = {
         DataForSeoFieldSchema(
             ("tasks", "[]", "result", "[]", "backlinks"),
             int,
+        ),
+    ),
+    "backlinks_detail": (
+        DataForSeoFieldSchema(("tasks",), list),
+        DataForSeoFieldSchema(("tasks", "[]", "result"), (list, type(None))),
+        DataForSeoFieldSchema(("tasks", "[]", "result", "[]", "target"), str),
+        DataForSeoFieldSchema(
+            ("tasks", "[]", "result", "[]", "items"),
+            (list, type(None)),
+        ),
+        DataForSeoFieldSchema(
+            ("tasks", "[]", "result", "[]", "items", "[]", "domain_from_rank"),
+            int,
+        ),
+        DataForSeoFieldSchema(
+            ("tasks", "[]", "result", "[]", "items", "[]", "page_from_rank"),
+            int,
+        ),
+        DataForSeoFieldSchema(
+            ("tasks", "[]", "result", "[]", "items", "[]", "backlink_spam_score"),
+            int,
+        ),
+        DataForSeoFieldSchema(
+            ("tasks", "[]", "result", "[]", "items", "[]", "anchor"),
+            (str, type(None)),
+        ),
+        DataForSeoFieldSchema(
+            ("tasks", "[]", "result", "[]", "items", "[]", "dofollow"),
+            bool,
+        ),
+        DataForSeoFieldSchema(
+            ("tasks", "[]", "result", "[]", "items", "[]", "tld_from"),
+            (str, type(None)),
+        ),
+        DataForSeoFieldSchema(
+            ("tasks", "[]", "result", "[]", "items", "[]", "domain_from_country"),
+            (str, type(None)),
+        ),
+        DataForSeoFieldSchema(
+            ("tasks", "[]", "result", "[]", "items", "[]", "first_seen"),
+            (str, type(None)),
         ),
     ),
 }
@@ -340,6 +382,25 @@ def build_backlinks_dofollow_summary_request(url: str) -> ProviderRequest:
     return build_backlinks_summary_request(
         url,
         backlinks_filters=BACKLINKS_DOFOLLOW_FILTERS,
+    )
+
+
+def build_backlinks_detail_request(url: str) -> ProviderRequest:
+    """Build a DataForSEO backlinks detail request at URL grain."""
+
+    return ProviderRequest(
+        method="POST",
+        path=DATAFORSEO_BACKLINKS_DETAIL_PATH,
+        headers={"Content-Type": "application/json"},
+        body=[
+            {
+                "target": format_backlinks_target(url),
+                "mode": "one_per_domain",
+                "limit": 100,
+                "order_by": ["rank,desc"],
+                "backlinks_status_type": "live",
+            }
+        ],
     )
 
 
@@ -1061,6 +1122,51 @@ def fixture_backlinks_response_for_request_body(
     assert isinstance(target, str)
     dofollow_only = bool(task.get("backlinks_filters"))
     return fixture_backlinks_response(target, dofollow_only=dofollow_only)
+
+
+def fixture_backlinks_detail_response(url: str) -> dict[str, object]:
+    """Return a deterministic DataForSEO-shaped backlinks detail fixture."""
+
+    return {
+        "status_code": 20000,
+        "provider": "dataforseo",
+        "endpoint": "backlinks/backlinks/live",
+        "url": url,
+        "tasks": [
+            {
+                "status_code": 20000,
+                "cost": 0.02,
+                "result": [
+                    {
+                        "target": url,
+                        "items_count": 2,
+                        "items": [
+                            {
+                                "domain_from_rank": 716,
+                                "page_from_rank": 1000,
+                                "backlink_spam_score": 0,
+                                "anchor": "technical seo guide",
+                                "dofollow": True,
+                                "tld_from": "com",
+                                "domain_from_country": "US",
+                                "first_seen": "2024-01-21 18:17:01 +00:00",
+                            },
+                            {
+                                "domain_from_rank": 688,
+                                "page_from_rank": 879,
+                                "backlink_spam_score": 2,
+                                "anchor": None,
+                                "dofollow": False,
+                                "tld_from": "org",
+                                "domain_from_country": None,
+                                "first_seen": "2023-11-19 06:12:44 +00:00",
+                            },
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
 
 
 def normalize_serp_results(
