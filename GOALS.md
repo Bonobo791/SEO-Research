@@ -92,11 +92,11 @@ slices 21–26 shipped; shared raw-response schema contract (slice 26) is shippe
 TextRazor signal expansion: slices 27–30 and 32–33 shipped; slice 31 (golden fixtures) open.
 Backlinks count analysis: **Phase 6.2** shipped (`backlinks_analysis` mart +
 `backlinks_counts` family in `stats_*`).
-OnPage page signals: **Phase 7.1** slices **1–14 shipped** (`onpage_instant_pages`
+OnPage page signals: **Phase 7.1** slices **1–18 shipped** (`onpage_instant_pages`
 → `onpage_signals` (46 `checks` booleans; 18 `meta` metrics) → `onpage_features` → three
 `onpage_metric` families with
 full Spearman / OLS / diagnostics / Plackett-Luce in `stats_*`; Slice 18 stored-run
-regression open). See `ROADMAP.md` § 7.1 and `TESTING.md` § OnPage instant_pages.
+regression + full-layer CLI pipeline tests). See `ROADMAP.md` § 7.1 and `TESTING.md` § OnPage instant_pages.
 Signal proxy / factor diagnostics: **Phase 5.6** (slice 34 tracker). Precursor:
 `analysis/textrazor_ranking_r2.py` (similarity + TextRazor adjusted R²,
 curated multivariate model, PNG charts via `ranking_explainability_viz.py`).
@@ -633,7 +633,7 @@ and join into stats via `SOURCE_MART_BY_KIND["backlinks_metric"]`. The similarit
 
 ## Phase 7.1 acceptance criteria (OnPage instant_pages)
 
-**Status:** 16 of 18 slices shipped.
+**Status:** 18 of 18 slices shipped.
 
 | Acceptance item | Slice(s) | Status |
 | --------------- | -------- | ------ |
@@ -646,7 +646,7 @@ and join into stats via `SOURCE_MART_BY_KIND["backlinks_metric"]`. The similarit
 | `parquet/onpage_features` feature mart at panel grain | 7 | Shipped |
 | Three `onpage_metric` families without `analysis_mart` schema bump | 8 | Shipped |
 | Full family stats (Spearman / OLS / diagnostics / PL) + legacy mart rebuild guard | 9 | Shipped |
-| Stored-run end-to-end regression + full-layer CLI pipeline tests | 10 | Shipped |
+| Stored-run end-to-end regression + full-layer CLI pipeline tests | 18 | Shipped |
 | Full `checks` coverage (46 booleans on `onpage_signals`) | 11 | Shipped |
 | `meta` block metrics (18 columns on `onpage_signals`) | 12 | Shipped |
 | `htags` counts + `social_media_tags` presence flags (5 columns) | 13 | Shipped |

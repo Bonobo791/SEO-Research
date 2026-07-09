@@ -58,7 +58,7 @@ at the same `target_keyword × SERP URL` grain as `analysis_mart`. The similarit
 mart stays unchanged; TextRazor, backlinks count, and OnPage signal families are
 additive for Phase 5 stats (TextRazor slices 27–30 and 32–33 shipped, golden
 fixtures slice 31 open; backlinks Phase 6.2 shipped; OnPage Phase 7.1 slices
-1–14 shipped, Slice 18 regression open).
+1–18 shipped).
 
 Product architecture, scope, and phased backlog live in root markdown:
 `ARCHITECTURE.md` (this file), `GOALS.md`, and `ROADMAP.md`.

@@ -1536,7 +1536,7 @@ or task id needed, and no `task_post` crawl/poll flow.
 
 ##### Dev slices
 
-**Progress:** 16 of 18 shipped.
+**Progress:** 18 of 18 shipped.
 
 1. **[x] Slice 1 — Request/schema/fixture** — `build_onpage_instant_pages_request()`,
    `DATAFORSEO_RESPONSE_SCHEMAS["onpage_instant_pages"]`,
@@ -1674,7 +1674,7 @@ or task id needed, and no `task_post` crawl/poll flow.
     `onpage_core_web_vitals`, consistency scores into
     `onpage_content_quality`. No `analysis_mart` schema bump, mirroring
     Slice 8. Tests in `test_stats_families.py`/`test_stats_spec.py`.
-18. **[ ] Slice 18 — Fixtures and regressions** — stored-run end-to-end
+18. **[x] Slice 18 — Fixtures and regressions** — stored-run end-to-end
     regression, full-layer CLI pipeline tests beyond analyze/mart guards,
     now covering the full expanded field set including the corrected nested
     `meta.content`/CLS shape.
@@ -1698,7 +1698,7 @@ or task id needed, and no `task_post` crawl/poll flow.
 | Full `page_timing` expansion | 15 | Shipped |
 | Feature mart + bounded validation for new columns | 16 | Shipped |
 | Analysis family wiring for new fields | 17 | Shipped |
-| Stored-run regression + full-layer CLI tests | 18 | Open |
+| Stored-run regression + full-layer CLI tests | 18 | Shipped |
 
 #### 7.2 — Backlink quality & anchor relevance (`backlinks/backlinks/live`)
 
@@ -2232,8 +2232,8 @@ with 8.3 and is a lower-priority cross-check.
   diagnostics, and family Plackett-Luce at all confirmatory rank depths.
   `ensure_feature_marts_for_analysis()` lives in `data/features.py` and rebuilds
   missing `onpage_features` on legacy run trees (when `run.json` exists) from
-  both `seo-rank analyze` and `run_phase5_stats()`. Slice 18 (stored-run
-  end-to-end regression, full-layer CLI tests) remains open.
+  both `seo-rank analyze` and `run_phase5_stats()`. Slice 18 stored-run
+  end-to-end regression and full-layer CLI pipeline tests shipped (Jul 2026).
 - **Phase 6.1 Slice 3 partial (2026-07-03):** `src/seo_rank/data/ranks.py`
   ships Polars-lazy `add_within_keyword_similarity_ranks()` with unit tests in
   `tests/unit/test_within_keyword_ranks.py`; mart wiring remains Slice 4.

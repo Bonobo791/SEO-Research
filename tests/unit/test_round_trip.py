@@ -7,10 +7,26 @@ import polars as pl
 import pyarrow.dataset as ds
 
 from seo_rank.cli import main
+from tests.fixtures.onpage_pipeline import assert_onpage_row_matches_fixture
+from tests.fixtures.onpage_pipeline import assert_onpage_stats_families
+from tests.fixtures.onpage_pipeline import write_backlinks_summary_raw_row
+from tests.fixtures.onpage_pipeline import write_onpage_instant_pages_raw_row
 
 
 def _read_run_payload(run_dir: Path) -> dict[str, object]:
     return json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+
+
+def _set_run_not_dry(run_dir: Path) -> None:
+    payload = _read_run_payload(run_dir)
+    config = payload.get("config")
+    if isinstance(config, dict):
+        config["dry_run"] = False
+    payload["dry_run"] = False
+    (run_dir / "run.json").write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _assert_dataset_materialized(run_dir: Path, dataset_name: str) -> int:
@@ -235,3 +251,79 @@ def test_cli_round_trip_materializes_structured_only_page_text_payload(
     assert field_row["field_path"] == "tasks[0].result[0].items[0].status_code"
     assert field_row["structured_value"] == "200"
     assert html_row["raw_html"] == "<html><body><main>Structured only</main></body></html>"
+
+
+def test_cli_round_trip_materializes_onpage_through_storage_chain(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    target_keyword = "technical seo"
+    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
+    monkeypatch.delenv("SEO_RANK_RUN_LIVE_INTEGRATION", raising=False)
+
+    assert (
+        main(
+            [
+                "run",
+                "--seed",
+                target_keyword,
+                "--depth",
+                "3",
+                "--output-dir",
+                str(output_dir),
+                "--dry-run",
+                "--skip-textrazor",
+                "--keyword-limit",
+                "3",
+            ]
+        )
+        == 0
+    )
+
+    run_payload = _read_run_payload(output_dir)
+    page_similarity = run_payload.get("page_similarity", [])
+    assert isinstance(page_similarity, list) and page_similarity
+    for entry in page_similarity:
+        assert isinstance(entry, dict)
+        write_onpage_instant_pages_raw_row(
+            output_dir,
+            target_keyword=str(entry["target_keyword"]),
+            url=str(entry["url"]),
+        )
+        write_backlinks_summary_raw_row(
+            output_dir,
+            target_keyword=str(entry["target_keyword"]),
+            url=str(entry["url"]),
+        )
+
+    assert main(["normalize", "--run", str(output_dir)]) == 0
+    assert main(["build-features", "--run", str(output_dir)]) == 0
+
+    feature_payload = _read_run_payload(output_dir)
+    serp_count = feature_payload["catalog"]["datasets"]["keyword_serp"]["row_count"]
+    assert feature_payload["catalog"]["datasets"]["onpage_signals"]["row_count"] == serp_count
+    assert feature_payload["catalog"]["datasets"]["onpage_features"]["row_count"] == serp_count
+
+    onpage_signals = ds.dataset(
+        output_dir / "parquet" / "onpage_signals",
+        format="parquet",
+    ).to_table().to_pylist()
+    onpage_features = ds.dataset(
+        output_dir / "parquet" / "onpage_features",
+        format="parquet",
+    ).to_table().to_pylist()
+
+    for row in onpage_signals:
+        assert_onpage_row_matches_fixture(row, row["url"])
+    for row in onpage_features:
+        assert_onpage_row_matches_fixture(row, row["url"])
+
+    _set_run_not_dry(output_dir)
+    assert main(["analyze", "--run", str(output_dir)]) == 0
+
+    summary = json.loads(
+        (output_dir / "stats" / "stats_summary.json").read_text(encoding="utf-8")
+    )
+    report = (output_dir / "stats" / "stats_report.md").read_text(encoding="utf-8")
+    assert_onpage_stats_families(summary, report)

@@ -80,7 +80,8 @@ placeholders only.
 | `test_textrazor_ingest.py` | TextRazor endpoint registry, page entity fetch, and dedupe helpers with injected transport |
 | `test_textrazor_backfill.py` | Stored-run TextRazor backfill: `load_pages_for_textrazor`, `--stored-run --live-textrazor-only` CLI path, no DataForSEO HTTP |
 | `test_raw_response_merge.py` | `merge_raw_response_records` for `endpoint=entities` dedupe and refresh semantics |
-| `test_round_trip.py` | Dedicated Parquet lake write → normalize → build-features → analyze round-trip regression sweep on real Parquet artifacts; validates `run.json` updates and keyword-filtered `analyze` output |
+| `test_round_trip.py` | Dedicated Parquet lake write → normalize → build-features → analyze round-trip regression sweep on real Parquet artifacts; validates `run.json` updates, keyword-filtered `analyze` output, and OnPage nested-fixture pipeline through stats (slice 18) |
+| `test_onpage_stored_run_regression.py` | Stored-run OnPage backfill end-to-end: live overlay fetches only onpage/backlinks, materializes `onpage_signals`/`onpage_features`/`stats_*` with nested `meta.content`/CLS fields (slice 18) |
 | `test_keyword_expansion.py` | 1-keyword default, deduplication, raw provider payload |
 | `test_serp_normalization.py` | Organic-only SERP rows, depth cap |
 | `test_env.py` | `.env` discovery, parsing, and override of shell exports |
@@ -420,12 +421,22 @@ exist.
   `_combined_onpage_features_frame()` backfills every `ONPAGE_FEATURES_EXTRA_COLUMNS`
   column so combined stats paths exercise the full registry.
 
-## Planned tests (not yet in suite) — Phase 7.1 slice 18
+## Shipped tests — Phase 7.1 slice 18 (Jul 2026)
 
-- Stored-run end-to-end regression proving OnPage backfill composes with the full
-  post-run materialization chain without refetching unrelated partitions.
-- Full-layer CLI pipeline tests beyond analyze / mart-rebuild guards (see
-  `ROADMAP.md` § 7.1 Slice 18).
+- **Shared OnPage pipeline helpers** — `tests/fixtures/onpage_pipeline.py` injects
+  nested `fixture_onpage_instant_pages_response` raw rows, derives expected curated
+  values via `_onpage_signals_row()`, and asserts `NESTED_CRITICAL_COLUMNS` across
+  layers plus OnPage family blocks in `stats_*`.
+- **Full-layer CLI round-trip** — `tests/unit/test_round_trip.py`
+  `test_cli_round_trip_materializes_onpage_through_storage_chain` runs
+  `run --dry-run` → inject onpage (+ backlinks) → `normalize` → `build-features`
+  → flip `dry_run` → `analyze` (stats) with per-URL fixture variation for
+  within-keyword signal variance.
+- **Stored-run end-to-end** — `tests/unit/test_onpage_stored_run_regression.py`
+  covers offline seed → `--stored-run --live-providers` backfill without
+  refetching SERP/page_text/keyword_expansion (`test_stored_run_onpage_backfill_materializes_full_pipeline_without_touching_unrelated_partitions`)
+  and partial onpage partition repair with downstream rematerialization
+  (`test_stored_run_partial_onpage_backfill_preserves_existing_row_and_materializes_downstream`).
 
 ## Shipped tests — Phase 6.2 backlinks count analysis (Jul 2026)
 
