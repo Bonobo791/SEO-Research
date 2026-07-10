@@ -30,7 +30,7 @@ DEFAULT_MAX_SERP_RANK = 20
 HESSIAN_CONDITION_NUMBER_THRESHOLD = 100.0
 OPTIMIZER_GRADIENT_TOLERANCE = 1e-6
 FORMULA = "rank_ordered_logit ~ similarity + log(page_text_length + 1)"
-FAMILY_PLACKETT_LUCE_OPTIMIZER_OPTIONS: dict[str, object] = {"maxiter": 250}
+FAMILY_PLACKETT_LUCE_OPTIMIZER_OPTIONS: dict[str, object] = {"maxiter": 50}
 
 
 @dataclass(frozen=True)
