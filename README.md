@@ -31,6 +31,7 @@ Use these commands in order. Each step reads or extends the same run tree under
 | **Materialize curated Parquet tables** | `seo-rank normalize --run runs/RUN_ID` |
 | **Build feature marts** | `seo-rank build-features --run runs/RUN_ID` |
 | **Analysis mart + stats** | `seo-rank analyze --run runs/RUN_ID` |
+| **Combine stored runs** | `seo-rank analyze --run runs/A --run runs/B --output-dir runs/combined` |
 | **Re-run stats only** (after mart exists) | `seo-rank analyze --run runs/RUN_ID` (exit `1` on guardrail hard-fail) |
 | **Inspect one keyword row** | `seo-rank analyze --run runs/RUN_ID --keyword "technical seo"` |
 | **Resume stored run in place** | `seo-rank run --seed "technical seo" --stored-run runs/RUN_ID` |
@@ -436,11 +437,16 @@ seo-rank normalize --run runs/RUN_ID      # raw_responses → curated tables
 seo-rank build-features --run runs/RUN_ID   # curated → feature marts
 seo-rank analyze --run runs/RUN_ID            # feature marts → analysis_mart (+ stats)
 seo-rank analyze --run runs/RUN_ID --keyword "technical seo"   # JSON rows for one keyword
+seo-rank analyze --run runs/A --run runs/B --output-dir runs/combined   # synthetic combined run
 ```
 
 `analyze` exit codes: `0` on success (or dry-run manifest with optional
 `--keyword` emit); `1` when Phase 5 guardrails hard-fail on a non–dry-run run;
 `2` on missing run data or unknown `--keyword`.
+
+When you pass multiple `--run` values to `seo-rank analyze`, `--output-dir` is
+required, overlaps are resolved by CLI order, and the resulting combined run can
+be re-analyzed later without rebuilding feature marts.
 
 #### `seo-rank replay`
 
