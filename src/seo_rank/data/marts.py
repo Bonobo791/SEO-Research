@@ -4,10 +4,11 @@ from collections.abc import Mapping
 
 import polars as pl
 
-ANALYSIS_SCHEMA_VERSION = "analysis_mart.v5"
+ANALYSIS_SCHEMA_VERSION = "analysis_mart.v6"
 
 _DEPRECATED_HTML_TAGS_COLUMN = "deprecated_html_tags"
 _META_KEYWORDS_CONSISTENCY_COLUMN = "meta_keywords_to_content_consistency"
+_TIME_TO_FIRST_BYTE_COLUMN = "time_to_first_byte_ms"
 _ANALYSIS_JOIN_KEYS = ["run_id", "target_keyword_id", "canonical_url_hash", "url"]
 
 _BACKENDS = ("bge", "gemini_doc_retrieval", "gemini_semantic_similarity")
@@ -75,6 +76,7 @@ def build_analysis_lazyframe(feature_frames: Mapping[str, pl.LazyFrame]) -> pl.L
     )
     frame = _attach_deprecated_html_tags(frame, feature_frames.get("onpage_signals"))
     frame = _attach_meta_keywords_consistency(frame, feature_frames.get("onpage_signals"))
+    frame = _attach_time_to_first_byte(frame, feature_frames.get("onpage_signals"))
     return (
         frame
         .sort(["target_keyword_id", "serp_rank", "canonical_url_hash"])
@@ -107,6 +109,23 @@ def _attach_meta_keywords_consistency(
         )
     return frame.join(
         onpage_signals.select([*_ANALYSIS_JOIN_KEYS, _META_KEYWORDS_CONSISTENCY_COLUMN]),
+        on=_ANALYSIS_JOIN_KEYS,
+        how="left",
+    )
+
+
+def _attach_time_to_first_byte(
+    frame: pl.LazyFrame, onpage_signals: pl.LazyFrame | None
+) -> pl.LazyFrame:
+    if (
+        onpage_signals is None
+        or _TIME_TO_FIRST_BYTE_COLUMN not in onpage_signals.collect_schema()
+    ):
+        return frame.with_columns(
+            pl.lit(None).cast(pl.Int64).alias(_TIME_TO_FIRST_BYTE_COLUMN)
+        )
+    return frame.join(
+        onpage_signals.select([*_ANALYSIS_JOIN_KEYS, _TIME_TO_FIRST_BYTE_COLUMN]),
         on=_ANALYSIS_JOIN_KEYS,
         how="left",
     )

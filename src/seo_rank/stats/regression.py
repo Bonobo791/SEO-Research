@@ -12,6 +12,7 @@ import pandas as pd
 import statsmodels.formula.api as smf
 from scipy import stats
 from seo_rank.stats.families import SignalFamily, SignalFamilyRegistry, source_mart_for_family
+from seo_rank.stats.model_inputs import control_error_summary, validate_control_columns
 from seo_rank.stats.rank_depth import filter_panel_by_max_rank
 from seo_rank.stats.scale import within_keyword_sd_rms
 from seo_rank.stats.spec import AnalysisSpec
@@ -28,10 +29,10 @@ SIMILARITY_SCORE_COLUMNS = {
 }
 REGRESSION_CONTROL_COLUMNS = (
     "deprecated_html_tags",
-    "meta_keywords_to_content_consistency",
+    "time_to_first_byte_ms",
 )
-BASELINE_FORMULA = "outcome ~ np.log(deprecated_html_tags + 1) + meta_keywords_to_content_consistency + C(target_keyword_id)"
-SINGLE_KEYWORD_BASELINE_FORMULA = "outcome ~ np.log(deprecated_html_tags + 1) + meta_keywords_to_content_consistency"
+BASELINE_FORMULA = "outcome ~ np.log(deprecated_html_tags + 1) + np.log(time_to_first_byte_ms + 1) + C(target_keyword_id)"
+SINGLE_KEYWORD_BASELINE_FORMULA = "outcome ~ np.log(deprecated_html_tags + 1) + np.log(time_to_first_byte_ms + 1)"
 REGRESSION_REQUIRED_COLUMNS = ("serp_rank",)
 
 
@@ -260,6 +261,19 @@ def _summarize_backend_regression_result(
         if score_column is None:
             score_column = _score_column_for_backend(backend)
         model_frame = _prepare_regression_frame(analysis_mart, score_column)
+        invalid_controls = (
+            validate_control_columns(model_frame.to_pandas())
+            if not model_frame.is_empty()
+            else ()
+        )
+        if invalid_controls:
+            return control_error_summary(
+                backend=backend,
+                score_column=score_column,
+                invalid_controls=invalid_controls,
+                row_count=model_frame.height,
+                keyword_count=model_frame["target_keyword_id"].n_unique(),
+            )
         skipped_reason = _regression_skip_reason(model_frame)
         row_count = model_frame.height
         keyword_count = (
@@ -320,6 +334,7 @@ def _summarize_backend_regression_result(
     return {
         "backend": fit.backend,
         "score_column": fit.score_column,
+        "status": "computed",
         "row_count": int(len(fit.model_data)),
         "keyword_count": keyword_count,
         "omitted_controls": [dict(control) for control in fit.omitted_controls],
@@ -419,6 +434,15 @@ def _fit_backend_regression_from_model_data(
     _coerce_regression_predictor(model_data, score_column)
     keyword_count = int(model_data["target_keyword_id"].nunique())
     if keyword_count < 1:
+        return None
+
+    invalid_controls = validate_control_columns(model_data, REGRESSION_CONTROL_COLUMNS)
+    if invalid_controls:
+        logger.info(
+            "regression backend=%s status=error invalid_controls=%s",
+            label,
+            list(invalid_controls),
+        )
         return None
 
     fitted_control_columns, omitted_controls = _select_regression_controls(model_data)
@@ -658,6 +682,8 @@ def _public_feature_formula(
 
 def _regression_control_formula_terms(control_columns: Sequence[str]) -> str:
     return " + ".join(
-        f"np.log({column} + 1)" if column in {"deprecated_html_tags"} else column
+        f"np.log({column} + 1)"
+        if column in {"deprecated_html_tags", "time_to_first_byte_ms"}
+        else column
         for column in control_columns
     )

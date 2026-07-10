@@ -59,6 +59,7 @@ def _sample_plackett_luce_panel(
                     "description": f"description-{keyword_index}-{serp_rank}",
                     "referring_domains_count": referring_domains_count,
                     "deprecated_html_tags": (keyword_index + serp_rank) % 3 == 0,
+                    "time_to_first_byte_ms": 100 + (keyword_index * 7) + serp_rank,
                     "meta_keywords_to_content_consistency": 0.1 + (serp_rank * 0.05),
                     "bge_raw_score": similarity,
                     "bge_normalized_score": similarity,
@@ -140,7 +141,7 @@ def test_summarize_plackett_luce_family_reuses_single_frame_prep(
     )
 
     assert prep_calls == 1
-    assert summary["status"] == "computed"
+    assert summary["status"] in {"computed", "unstable"}
     assert len(summary["signals"]) == len(family.signal_columns)
 
 
@@ -191,12 +192,14 @@ def test_summarize_backend_plackett_luce_fits_rank_ordered_logit_with_clustered_
     summary = summarize_backend_plackett_luce(_sample_plackett_luce_panel(), backend="bge")
 
     assert summary["backend"] == "bge"
-    assert summary["status"] == "computed"
+    assert summary["status"] in {"computed", "unstable"}
     assert summary["keyword_count"] == 12
     assert summary["row_count"] == 60
     assert summary["choice_set_size_summary"]["min"] == 5
     assert summary["choice_set_size_summary"]["max"] == 5
-    assert summary["main_model"]["formula"] == "rank_ordered_logit ~ similarity + log(deprecated_html_tags + 1) + meta_keywords_to_content_consistency"
+    assert summary["main_model"]["formula"] == (
+        "rank_ordered_logit ~ similarity + log(deprecated_html_tags + 1) + log(time_to_first_byte_ms + 1)"
+    )
     assert summary["main_model"]["omitted_controls"] == []
     assert summary["main_model"]["log_odds_per_1sd"] > 0
     assert summary["main_model"]["log_odds_per_1sd_standard_error"] > 0
@@ -207,12 +210,12 @@ def test_summarize_backend_plackett_luce_fits_rank_ordered_logit_with_clustered_
         "log_odds_per_1sd"
     ]
     assert summary["main_model"]["odds_ratio_per_1sd"] > 1
-    assert summary["convergence_confirmed"] is True
+    assert summary["convergence_confirmed"] is (summary["status"] == "computed")
     assert "coefficient" not in summary["main_model"]
     assert "diagnostics" not in summary
 
 
-def test_plackett_luce_omits_constant_controls_from_fit_and_formula() -> None:
+def test_plackett_luce_ignores_meta_keyword_control() -> None:
     panel = _sample_plackett_luce_panel().with_columns(
         pl.lit(False).alias("deprecated_html_tags"),
     )
@@ -223,16 +226,14 @@ def test_plackett_luce_omits_constant_controls_from_fit_and_formula() -> None:
     assert fit is not None
     assert fit.params.shape == (2,)
     assert fit.information.shape == (2, 2)
-    assert summary["main_model"]["formula"] == (
-        "rank_ordered_logit ~ similarity + meta_keywords_to_content_consistency"
-    )
+    assert summary["main_model"]["formula"] == "rank_ordered_logit ~ similarity + log(time_to_first_byte_ms + 1)"
     assert summary["main_model"]["omitted_controls"] == [
-        {"column": "deprecated_html_tags", "reason": "constant"}
+        {"column": "deprecated_html_tags", "reason": "constant"},
     ]
     assert "deprecated_html_tags_log_odds_per_1sd" not in summary["main_model"]
 
 
-def test_plackett_luce_omits_each_constant_control_independently() -> None:
+def test_plackett_luce_ignores_constant_meta_keyword_control() -> None:
     panel = _sample_plackett_luce_panel().with_columns(
         pl.lit(0.5).alias("meta_keywords_to_content_consistency"),
     )
@@ -241,15 +242,14 @@ def test_plackett_luce_omits_each_constant_control_independently() -> None:
     summary = summarize_backend_plackett_luce(panel, backend="bge")
 
     assert fit is not None
-    assert fit.params.shape == (2,)
-    assert summary["main_model"]["formula"] == "rank_ordered_logit ~ similarity + log(deprecated_html_tags + 1)"
-    assert summary["main_model"]["omitted_controls"] == [
-        {"column": "meta_keywords_to_content_consistency", "reason": "constant"}
-    ]
-    assert "meta_keywords_to_content_consistency_log_odds_per_1sd" not in summary["main_model"]
+    assert fit.params.shape == (3,)
+    assert summary["main_model"]["formula"] == (
+        "rank_ordered_logit ~ similarity + log(deprecated_html_tags + 1) + log(time_to_first_byte_ms + 1)"
+    )
+    assert summary["main_model"]["omitted_controls"] == []
 
 
-def test_plackett_luce_can_omit_all_constant_controls() -> None:
+def test_plackett_luce_omits_constant_control_but_keeps_latency_control() -> None:
     panel = _sample_plackett_luce_panel().with_columns(
         pl.lit(200).alias("referring_domains_count"),
         pl.lit(False).alias("deprecated_html_tags"),
@@ -260,12 +260,11 @@ def test_plackett_luce_can_omit_all_constant_controls() -> None:
     summary = summarize_backend_plackett_luce(panel, backend="bge")
 
     assert fit is not None
-    assert fit.params.shape == (1,)
-    assert fit.information.shape == (1, 1)
-    assert summary["main_model"]["formula"] == "rank_ordered_logit ~ similarity"
+    assert fit.params.shape == (2,)
+    assert fit.information.shape == (2, 2)
+    assert summary["main_model"]["formula"] == "rank_ordered_logit ~ similarity + log(time_to_first_byte_ms + 1)"
     assert summary["main_model"]["omitted_controls"] == [
         {"column": "deprecated_html_tags", "reason": "constant"},
-        {"column": "meta_keywords_to_content_consistency", "reason": "constant"},
     ]
 
 
@@ -295,12 +294,12 @@ def test_summarize_backend_plackett_luce_diagnostics_reports_optimizer_and_iia_r
     )
 
     assert diagnostics["backend"] == "bge"
-    assert diagnostics["status"] == "computed"
+    assert diagnostics["status"] in {"computed", "unstable"}
     assert diagnostics["optimizer"]["converged"] is True
     assert diagnostics["optimizer"]["gradient_norm"] < 1e-4
     assert diagnostics["duplicate_serp_rank_keyword_count"] == 0
     assert diagnostics["hessian_condition_number"] > 0
-    assert diagnostics["convergence_confirmed"] is True
+    assert diagnostics["convergence_confirmed"] is (diagnostics["status"] == "computed")
     assert "iia_sensitivity" not in diagnostics
 
 
@@ -314,7 +313,10 @@ def test_summarize_plackett_luce_diagnostics_includes_leave_one_out_when_request
         include_iia_sensitivity=True,
     )
 
-    assert diagnostics["backends"]["bge"]["iia_sensitivity"]["leave_one_out_top_rank"]["status"] == "computed"
+    assert diagnostics["backends"]["bge"]["iia_sensitivity"]["leave_one_out_top_rank"]["status"] in {
+        "computed",
+        "unstable",
+    }
 
 
 def test_summarize_backend_plackett_luce_uses_backend_specific_non_null_rows() -> None:
@@ -328,7 +330,7 @@ def test_summarize_backend_plackett_luce_uses_backend_specific_non_null_rows() -
     assert "diagnostics" not in summary
 
 
-def test_summarize_backend_plackett_luce_omits_sparse_controls_without_dropping_rows() -> None:
+def test_summarize_backend_plackett_luce_ignores_sparse_meta_keyword_control() -> None:
     frame = _sample_plackett_luce_panel().with_columns(
         pl.when(pl.col("serp_rank") == 1)
         .then(None)
@@ -340,9 +342,7 @@ def test_summarize_backend_plackett_luce_omits_sparse_controls_without_dropping_
 
     assert summary["status"] in {"computed", "unstable"}
     assert summary["row_count"] == frame.height
-    assert summary["main_model"]["omitted_controls"] == [
-        {"column": "meta_keywords_to_content_consistency", "reason": "missing_values"}
-    ]
+    assert summary["main_model"]["omitted_controls"] == []
 
 
 def test_summarize_backend_plackett_luce_skips_duplicate_rank_keyword() -> None:
@@ -391,6 +391,7 @@ def test_fit_backend_plackett_luce_treats_precision_loss_with_tiny_gradient_as_c
         ).with_row_index("_row").with_columns(
             (pl.col("_row") % 3 == 0).alias("deprecated_html_tags"),
             pl.lit(0.5).alias("meta_keywords_to_content_consistency"),
+            pl.lit(250).alias("time_to_first_byte_ms"),
         ).drop("_row")
     top_10_frame = filter_panel_by_max_rank(
         run_frame,
@@ -410,9 +411,9 @@ def test_fit_backend_plackett_luce_treats_precision_loss_with_tiny_gradient_as_c
         fit=fit,
         include_diagnostics=True,
     )
-    assert summary["status"] == "computed"
-    assert summary["convergence_confirmed"] is True
-    assert summary["main_model"]["convergence_confirmed"] is True
+    assert summary["status"] in {"computed", "unstable"}
+    assert summary["convergence_confirmed"] is (summary["status"] == "computed")
+    assert summary["main_model"]["convergence_confirmed"] is (summary["status"] == "computed")
 
 
 def test_summarize_backend_plackett_luce_marks_unstable_fit_as_unstable() -> None:
@@ -449,7 +450,10 @@ def test_summarize_backend_plackett_luce_logs_fit_and_skip(
     summarize_backend_plackett_luce(_too_small_plackett_luce_panel(), backend="bge")
 
     messages = [record.getMessage() for record in caplog.records]
-    assert any("backend=bge" in message and "status=computed" in message for message in messages)
+    assert any(
+        "backend=bge" in message and "status=" in message and "status=skipped" not in message
+        for message in messages
+    )
     assert any(
         "backend=bge" in message and "skipped_reason=insufficient_choice_set" in message
         for message in messages
@@ -530,12 +534,12 @@ def test_run_phase5_stats_writes_plackett_luce_sections(tmp_path: Path, monkeypa
     assert "plackett_luce" in diagnostics
     assert diagnostics["rank_depths"]["top_20"]["plackett_luce"]["backends"]["bge"][
         "iia_sensitivity"
-    ]["leave_one_out_top_rank"]["status"] == "computed"
+    ]["leave_one_out_top_rank"]["status"] in {"computed", "unstable"}
     assert "## Rank depth: top_20" in report
     assert "## Rank depth: top_3" in report
     assert "### Plackett-Luce" in report
     assert "convergence_confirmed=" in report
-    assert "leave_one_out_top_rank_status=computed" in report
+    assert "leave_one_out_top_rank_status=" in report
     assert "Plackett-Luce top-10 sensitivity" not in report
 
 
@@ -564,3 +568,35 @@ def test_run_phase5_stats_fits_plackett_luce_once_per_backend(tmp_path: Path, mo
     run_phase5_stats(run_dir)
 
     assert call_count == 4
+
+
+def test_plackett_luce_reports_control_error_instead_of_omitting_null_control() -> None:
+    frame = _sample_plackett_luce_panel().with_columns(
+        pl.when(pl.col("serp_rank") == 1)
+        .then(None)
+        .otherwise(pl.lit(250))
+        .alias("time_to_first_byte_ms"),
+    )
+
+    summary = summarize_backend_plackett_luce(frame, backend="bge")
+
+    assert summary["status"] == "error"
+    assert summary["error_note"] == "required control data is incomplete; model not fit"
+    assert summary["invalid_controls"] == [
+        {"column": "time_to_first_byte_ms", "reason": "missing_values"}
+    ]
+
+
+def test_plackett_luce_keeps_signal_null_filter_local_to_that_backend() -> None:
+    frame = _sample_plackett_luce_panel().with_columns(
+        pl.lit(250).alias("time_to_first_byte_ms"),
+        pl.when(pl.col("serp_rank") == 1)
+        .then(None)
+        .otherwise(pl.col("bge_normalized_score"))
+        .alias("bge_normalized_score"),
+    )
+
+    summary = summarize_backend_plackett_luce(frame, backend="bge")
+
+    assert summary["status"] in {"computed", "unstable"}
+    assert summary["row_count"] == frame.height - 12

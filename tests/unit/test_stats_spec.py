@@ -60,7 +60,7 @@ def test_load_analysis_spec_includes_plackett_luce_secondary_estimand() -> None:
     plackett_luce = analysis_spec.estimand["plackett_luce"]
 
     assert plackett_luce["outcome"] == "rank_ordered_logit"
-    assert plackett_luce["formula"] == "similarity + log(deprecated_html_tags + 1) + meta_keywords_to_content_consistency"
+    assert plackett_luce["formula"] == "similarity + log(deprecated_html_tags + 1) + log(time_to_first_byte_ms + 1)"
     assert plackett_luce["clustered_se"] == "target_keyword_id"
     assert plackett_luce["choice_set_scope"] == "observed_top_20_serp_results_per_keyword"
     assert plackett_luce["iia_sensitivity"] == {

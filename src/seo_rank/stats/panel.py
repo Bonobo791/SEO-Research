@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 _ANALYSIS_JOIN_KEYS = ("run_id", "target_keyword_id", "canonical_url_hash", "url")
 _ANALYSIS_CONTROL_DTYPES = {
     "deprecated_html_tags": pl.Boolean,
-    "meta_keywords_to_content_consistency": pl.Float64,
+    "time_to_first_byte_ms": pl.Int64,
 }
 
 SIMILARITY_RATE_COLUMNS = {

@@ -129,6 +129,7 @@ def test_build_analysis_mart_validates_the_analysis_frame_before_sinking(
                 "gemini_semantic_similarity_z",
                 "deprecated_html_tags",
                 "meta_keywords_to_content_consistency",
+                "time_to_first_byte_ms",
                 "schema_version",
             ),
         ),

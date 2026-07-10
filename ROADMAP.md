@@ -137,7 +137,7 @@ Plackett-Luce analysis.
    - Do not BH-adjust diagnostics or regression coefficients.
 
 5. **[x] Slice 5 — Pooled regression (secondary)**
-   - Baseline: `-log(serp_rank) ~ log(referring_domains_count + 1) + log(deprecated_html_tags + 1) + meta_keywords_to_content_consistency + C(target_keyword_id)`.
+   - Baseline: `-log(serp_rank) ~ log(deprecated_html_tags + 1) + log(time_to_first_byte_ms + 1) + C(target_keyword_id)`.
    - Feature: + one `*_normalized_score` at a time (univariate + keyword FE +
      deprecated HTML tag control); separate model per backend.
    - Keyword-clustered robust SEs; never emit naive IID SEs in primary output.

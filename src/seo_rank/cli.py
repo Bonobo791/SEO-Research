@@ -25,6 +25,7 @@ from seo_rank.data import (
     normalize_run,
 )
 from seo_rank.data.scans import scan_curated_table, scan_raw_responses
+from seo_rank.domain_blocklist import DomainBlocklist, is_domain_unreachable_error
 from seo_rank.progress import RunProgress
 from seo_rank.stats.artifacts import merge_keyword_analysis_frame, run_phase5_stats
 from seo_rank.dataforseo import (
@@ -154,6 +155,7 @@ class RunConfig:
     live_bge: bool = False
     live_gemini: bool = False
     live_textrazor: bool = False
+    domain_blocklist_path: Path | None = None
 
 
 class LiveProviderGateError(ValueError):
@@ -342,6 +344,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--live-bge", action="store_true")
     run.add_argument("--live-gemini", action="store_true")
     run.add_argument("--live-textrazor", action="store_true")
+    run.add_argument(
+        "--domain-blocklist",
+        type=Path,
+        help="Path to the domain blocklist file (default: committed domain_blocklist.txt)",
+    )
 
     normalize = subparsers.add_parser(
         "normalize",
@@ -423,6 +430,7 @@ def config_from_args(args: argparse.Namespace) -> RunConfig:
         live_bge=args.live_bge,
         live_gemini=args.live_gemini,
         live_textrazor=args.live_textrazor and not args.skip_textrazor,
+        domain_blocklist_path=args.domain_blocklist,
     )
 
 
@@ -1263,6 +1271,10 @@ def build_resumed_keyword_result(
         keyword=target_keyword,
         depth=config.depth,
     )
+    blocklist = DomainBlocklist.load(config.domain_blocklist_path)
+    serp_results = blocklist.filter_results(
+        serp_results, keyword=target_keyword, progress=progress
+    )
     replay_backlinks_variants = _backlinks_variants_for_replay(
         raw_keyword_records,
         stored_keyword_result=stored_keyword_result,
@@ -1338,6 +1350,7 @@ def build_resumed_keyword_result(
                 variants=(variant,),
                 progress=None,
                 run_dir=config.output_dir,
+                blocklist=blocklist,
             )
             if fetched_backlinks:
                 network_calls.append(f"dataforseo.{endpoint}")
@@ -1366,6 +1379,7 @@ def build_resumed_keyword_result(
             transport=DEFAULT_DATAFORSEO_TRANSPORT,
             progress=None,
             run_dir=config.output_dir,
+            blocklist=blocklist,
         )
         if fetched_onpage:
             network_calls.append(f"dataforseo.{ONPAGE_INSTANT_PAGES_ENDPOINT}")
@@ -1406,13 +1420,23 @@ def build_resumed_keyword_result(
         url = str(result["url"])
         if url in existing_page_text_by_url:
             continue
+        if blocklist.is_blocked(url):
+            continue
         if config.live_providers and live_context is not None:
-            response = execute_validated_dataforseo_request(
-                "page_text",
-                build_page_text_request(url),
-                credentials=live_context["credentials"].dataforseo,
-                transport=DEFAULT_DATAFORSEO_TRANSPORT,
-            )
+            try:
+                response = execute_validated_dataforseo_request(
+                    "page_text",
+                    build_page_text_request(url),
+                    credentials=live_context["credentials"].dataforseo,
+                    transport=DEFAULT_DATAFORSEO_TRANSPORT,
+                )
+            except DataForSeoClientError as error:
+                if is_domain_unreachable_error(error):
+                    blocklist.record(
+                        url, keyword=target_keyword, reason="page_text-unreachable"
+                    )
+                    continue
+                raise
             network_calls.append("dataforseo.page_text")
         else:
             response = fixture_page_text_response(url, target_keyword)
@@ -2551,6 +2575,7 @@ def build_live_keyword_result(
     network_calls: list[str],
     progress: RunProgress | None = None,
 ) -> dict[str, object]:
+    blocklist = DomainBlocklist.load(config.domain_blocklist_path)
     if progress is not None:
         progress.keyword_log(target_keyword, "dataforseo serp request")
     serp_response = execute_validated_dataforseo_request(
@@ -2575,6 +2600,9 @@ def build_live_keyword_result(
         serp_response,
         keyword=target_keyword,
         depth=config.depth,
+    )
+    serp_results = blocklist.filter_results(
+        serp_results, keyword=target_keyword, progress=progress
     )
     serp_titles_by_url = {
         str(result["url"]): str(result["title"]) for result in serp_results
@@ -2601,6 +2629,7 @@ def build_live_keyword_result(
             variants=tuple(live_backlinks_variants),
             progress=None,
             run_dir=config.output_dir,
+            blocklist=blocklist,
         )
         if backlinks_responses:
             partitioned = partition_backlinks_responses_by_variant(backlinks_responses)
@@ -2623,6 +2652,7 @@ def build_live_keyword_result(
         transport=dataforseo_transport,
         progress=None,
         run_dir=config.output_dir,
+        blocklist=blocklist,
     )
     if onpage_responses:
         network_calls.append(f"dataforseo.{ONPAGE_INSTANT_PAGES_ENDPOINT}")
@@ -2632,15 +2662,13 @@ def build_live_keyword_result(
             target_keyword,
             f"dataforseo page text ({len(serp_results)} urls)",
         )
-    page_text_responses = [
-        execute_validated_dataforseo_request(
-            "page_text",
-            build_page_text_request(str(result["url"])),
-            credentials=credentials.dataforseo,
-            transport=dataforseo_transport,
-        )
-        for result in serp_results
-    ]
+    page_text_responses = fetch_page_text_for_urls(
+        target_keyword,
+        [str(result["url"]) for result in serp_results],
+        credentials=credentials.dataforseo,
+        transport=dataforseo_transport,
+        blocklist=blocklist,
+    )
     if page_text_responses:
         network_calls.append("dataforseo.page_text")
     parsed_pages = [
@@ -2916,6 +2944,39 @@ def collect_onpage_instant_pages_responses(
     ]
 
 
+def fetch_page_text_for_urls(
+    target_keyword: str,
+    urls: Sequence[str],
+    *,
+    credentials: DataForSeoCredentials,
+    transport,
+    blocklist: DomainBlocklist | None = None,
+) -> list[dict[str, object]]:
+    """Fetch page_text for each URL, skipping blocked domains and recording any
+    that fail to load (transport error) instead of aborting the run."""
+
+    responses: list[dict[str, object]] = []
+    for url in urls:
+        if blocklist is not None and blocklist.is_blocked(url):
+            continue
+        try:
+            response = execute_validated_dataforseo_request(
+                "page_text",
+                build_page_text_request(url),
+                credentials=credentials,
+                transport=transport,
+            )
+        except DataForSeoClientError as error:
+            if blocklist is not None and is_domain_unreachable_error(error):
+                blocklist.record(
+                    url, keyword=target_keyword, reason="page_text-unreachable"
+                )
+                continue
+            raise
+        responses.append(response)
+    return responses
+
+
 def fetch_dataforseo_backlinks_for_urls(
     target_keyword: str,
     urls: Sequence[str],
@@ -2925,11 +2986,14 @@ def fetch_dataforseo_backlinks_for_urls(
     variants: Sequence[str] = (BACKLINKS_QUERY_SUMMARY, BACKLINKS_QUERY_DOFOLLOW),
     progress: RunProgress | None = None,
     run_dir: Path | None = None,
+    blocklist: DomainBlocklist | None = None,
 ) -> list[dict[str, object]]:
     responses: list[dict[str, object]] = []
     new_records: list[dict[str, object]] = []
     try:
         for url in urls:
+            if blocklist is not None and blocklist.is_blocked(url):
+                continue
             for variant in variants:
                 endpoint = BACKLINKS_VARIANT_ENDPOINTS[variant]
                 if progress is not None:
@@ -2937,12 +3001,22 @@ def fetch_dataforseo_backlinks_for_urls(
                         target_keyword, f"dataforseo {endpoint} ({url})"
                     )
                 request = BACKLINKS_VARIANT_REQUEST_BUILDERS[variant](url)
-                response = execute_validated_dataforseo_request(
-                    endpoint,
-                    request,
-                    credentials=credentials,
-                    transport=transport,
-                )
+                try:
+                    response = execute_validated_dataforseo_request(
+                        endpoint,
+                        request,
+                        credentials=credentials,
+                        transport=transport,
+                    )
+                except DataForSeoClientError as error:
+                    if blocklist is not None and is_domain_unreachable_error(error):
+                        blocklist.record(
+                            url,
+                            keyword=target_keyword,
+                            reason=f"{endpoint}-unreachable",
+                        )
+                        break
+                    raise
                 raise_for_failed_dataforseo_tasks(
                     endpoint,
                     response,
@@ -2994,6 +3068,7 @@ def fetch_onpage_signals_for_urls(
     transport,
     progress: RunProgress | None = None,
     run_dir: Path | None = None,
+    blocklist: DomainBlocklist | None = None,
 ) -> list[dict[str, object]]:
     """Fetch OnPage instant_pages signals for each URL in ``urls``.
 
@@ -3006,18 +3081,30 @@ def fetch_onpage_signals_for_urls(
     new_records: list[dict[str, object]] = []
     try:
         for url in urls:
+            if blocklist is not None and blocklist.is_blocked(url):
+                continue
             if progress is not None:
                 progress.keyword_log(
                     target_keyword,
                     f"dataforseo {ONPAGE_INSTANT_PAGES_ENDPOINT} ({url})",
                 )
             request = build_onpage_instant_pages_request(url)
-            response = execute_validated_dataforseo_request(
-                ONPAGE_INSTANT_PAGES_ENDPOINT,
-                request,
-                credentials=credentials,
-                transport=transport,
-            )
+            try:
+                response = execute_validated_dataforseo_request(
+                    ONPAGE_INSTANT_PAGES_ENDPOINT,
+                    request,
+                    credentials=credentials,
+                    transport=transport,
+                )
+            except DataForSeoClientError as error:
+                if blocklist is not None and is_domain_unreachable_error(error):
+                    blocklist.record(
+                        url,
+                        keyword=target_keyword,
+                        reason=f"{ONPAGE_INSTANT_PAGES_ENDPOINT}-unreachable",
+                    )
+                    continue
+                raise
             skippable = find_skippable_onpage_task_status(response)
             if skippable is not None:
                 status_code, status_message = skippable
@@ -3029,6 +3116,12 @@ def fetch_onpage_signals_for_urls(
                     status_code,
                     status_message,
                 )
+                if blocklist is not None:
+                    blocklist.record(
+                        url,
+                        keyword=target_keyword,
+                        reason=f"onpage-{status_code}",
+                    )
                 continue
             raise_for_failed_dataforseo_tasks(
                 ONPAGE_INSTANT_PAGES_ENDPOINT,

@@ -42,6 +42,7 @@ def _textrazor_panel_frame() -> pl.DataFrame:
                     "referring_domains_count": 120 + (keyword_index * 3) + serp_rank,
                     "deprecated_html_tags": (keyword_index + serp_rank) % 3 == 0,
                     "meta_keywords_to_content_consistency": 0.1 + (serp_rank * 0.05),
+                    "time_to_first_byte_ms": 100 + serp_rank,
                     "bge_raw_score": signal,
                     "bge_normalized_score": signal,
                     "gemini_doc_retrieval_raw_score": signal - 0.1,
@@ -108,6 +109,7 @@ def test_summarize_textrazor_ranking_explainability_computes_univariate_and_mult
     assert multivariate["status"] == "computed"
     assert multivariate["row_count"] == panel.height
     assert multivariate["keyword_count"] == 10
+    assert "meta_keywords_to_content_consistency" not in multivariate["feature_model"]["formula"]
     assert (
         multivariate["descriptive_fit_delta"]["adjusted_r_squared"] >= 0
     )

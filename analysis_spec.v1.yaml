@@ -215,16 +215,16 @@ signal_families:
         - total_dom_size
 
 estimand:
-  # Adjustment note: deprecated HTML tags replaced page-text length; meta-keyword
-  # consistency is an additional raw 0-1 control.
+  # Adjustment note: deprecated HTML tags replaced page-text length; time-to-
+  # first-byte is an additional log-transformed latency control.
   missing_control_policy: omit_term
   outcome: -log(serp_rank)
   primary_metric: keyword_level_spearman_rho
-  baseline_model: log(deprecated_html_tags + 1) + meta_keywords_to_content_consistency + C(target_keyword_id)
-  feature_model: normalized_similarity + log(deprecated_html_tags + 1) + meta_keywords_to_content_consistency + C(target_keyword_id)
+  baseline_model: log(deprecated_html_tags + 1) + log(time_to_first_byte_ms + 1) + C(target_keyword_id)
+  feature_model: normalized_similarity + log(deprecated_html_tags + 1) + log(time_to_first_byte_ms + 1) + C(target_keyword_id)
   plackett_luce:
     outcome: rank_ordered_logit
-    formula: similarity + log(deprecated_html_tags + 1) + meta_keywords_to_content_consistency
+    formula: similarity + log(deprecated_html_tags + 1) + log(time_to_first_byte_ms + 1)
     clustered_se: target_keyword_id
     choice_set_scope: observed_top_20_serp_results_per_keyword
     iia_sensitivity:
@@ -234,7 +234,7 @@ estimand:
     - gemini_doc_retrieval_normalized_score
     - gemini_semantic_similarity_normalized_score
     - log(deprecated_html_tags + 1)
-    - meta_keywords_to_content_consistency
+    - log(time_to_first_byte_ms + 1)
     - C(target_keyword_id)
 
 inference:

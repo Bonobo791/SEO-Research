@@ -44,6 +44,7 @@ def _diagnostics_analysis_mart_frame() -> pl.DataFrame:
                     "page_text_length": 300 + (keyword_index * 9) + ((serp_rank % 2) * 5),
                     "referring_domains_count": 300 + (keyword_index * 9) + ((serp_rank % 2) * 5),
                     "deprecated_html_tags": (keyword_index + serp_rank) % 3 == 0,
+                    "time_to_first_byte_ms": 100 + (keyword_index * 7) + serp_rank,
                     "meta_keywords_to_content_consistency": 0.5,
                     "bge_raw_score": score,
                     "bge_normalized_score": score,
@@ -112,6 +113,7 @@ def _multivariate_panel_frame(*, collinear: bool) -> pl.DataFrame:
                     "deprecated_html_tags": (keyword_index + serp_rank) % 3 == 0,
                     "meta_keywords_to_content_consistency": 0.1
                     + (((keyword_index * 7 + serp_rank * 11) % 9) * 0.1),
+                    "time_to_first_byte_ms": 100 + serp_rank,
                     "bge_normalized_score": bge_score,
                     "gemini_doc_retrieval_normalized_score": doc_score,
                     "gemini_semantic_similarity_normalized_score": semantic_score,
@@ -127,7 +129,7 @@ def test_summarize_backend_diagnostics_reports_reset_bp_and_influence_metrics() 
     assert summary["backend"] == "bge"
     assert summary["reset"]["status"] == "computed"
     assert summary["breusch_pagan"]["status"] == "computed"
-    assert summary["breusch_pagan"]["recommended_se_type"] == "HC3"
+    assert summary["breusch_pagan"]["recommended_se_type"] == "clustered"
     assert summary["influence"]["cook_d_threshold"] == pytest.approx(4 / summary["row_count"])
     assert summary["influence"]["influential_count"] >= 1
     assert summary["influence_sensitivity"]["status"] == "computed"
@@ -142,16 +144,18 @@ def test_summarize_backend_diagnostics_reports_reset_bp_and_influence_metrics() 
     )
 
 
-def test_summarize_backend_diagnostics_drops_rows_with_null_deprecated_html_tags() -> None:
+def test_summarize_backend_diagnostics_reports_null_deprecated_html_tags() -> None:
     frame = _diagnostics_analysis_mart_frame().with_columns(
         pl.lit(None, dtype=pl.Boolean).alias("deprecated_html_tags")
     )
 
     summary = summarize_backend_diagnostics(frame, backend="bge")
 
-    assert summary["status"] == "skipped"
-    assert summary["row_count"] == 0
-    assert summary["skipped_reason"] == "no_usable_rows"
+    assert summary["status"] == "error"
+    assert summary["row_count"] == frame.height
+    assert summary["invalid_controls"] == [
+        {"column": "deprecated_html_tags", "reason": "missing_values"},
+    ]
 
 
 def test_summarize_backend_diagnostics_skips_influence_sensitivity_when_trimmed_subset_is_unusable(
@@ -248,6 +252,7 @@ def test_summarize_backend_diagnostics_skips_reset_when_df_resid_is_too_small() 
     ).with_columns(
         pl.lit(False).alias("deprecated_html_tags"),
         pl.lit(0.5).alias("meta_keywords_to_content_consistency"),
+        pl.lit(250).alias("time_to_first_byte_ms"),
     )
     top_5_frame = filter_panel_by_max_rank(
         run_frame,
@@ -314,15 +319,19 @@ def test_summarize_multivariate_sensitivity_keeps_all_backends_when_vif_is_below
     assert summary["drop_log"] == []
     assert summary["vif_table"]
     assert any(row["term"] == "bge_normalized_score" for row in summary["vif_table"])
+    assert all(
+        row["term"] != "meta_keywords_to_content_consistency"
+        for row in summary["vif_table"]
+    )
 
 
-def test_summarize_multivariate_sensitivity_omits_sparse_control_without_dropping_rows() -> None:
+def test_summarize_multivariate_sensitivity_reports_sparse_latency_control() -> None:
     spec = load_analysis_spec()
     frame = _multivariate_panel_frame(collinear=False).with_row_index("_row").with_columns(
         pl.when(pl.col("_row") == 0)
         .then(None)
-        .otherwise(pl.col("meta_keywords_to_content_consistency"))
-        .alias("meta_keywords_to_content_consistency")
+        .otherwise(pl.col("time_to_first_byte_ms"))
+        .alias("time_to_first_byte_ms")
     ).drop("_row")
 
     summary = diagnostics_module.summarize_multivariate_sensitivity(
@@ -331,10 +340,10 @@ def test_summarize_multivariate_sensitivity_omits_sparse_control_without_droppin
         backend_drop_order=spec.backend_drop_order,
     )
 
-    assert summary["status"] == "computed"
+    assert summary["status"] == "error"
     assert summary["row_count"] == frame.height
-    assert summary["omitted_controls"] == [
-        {"column": "meta_keywords_to_content_consistency", "reason": "missing_values"}
+    assert summary["invalid_controls"] == [
+        {"column": "time_to_first_byte_ms", "reason": "missing_values"}
     ]
 
 
@@ -463,3 +472,25 @@ def test_summarize_backend_diagnostics_logs_fit_and_skip(
         "backend=bge" in message and "status=skipped" in message and "skipped_reason=no_usable_rows" in message
         for message in messages
     )
+
+
+def test_diagnostics_reports_control_error_instead_of_omitting_null_control() -> None:
+    spec = load_analysis_spec()
+    frame = _multivariate_panel_frame(collinear=False).with_columns(
+        pl.when(pl.col("serp_rank") == 1)
+        .then(None)
+        .otherwise(pl.col("time_to_first_byte_ms"))
+        .alias("time_to_first_byte_ms")
+    )
+
+    summary = diagnostics_module.summarize_multivariate_sensitivity(
+        frame,
+        vif_threshold=spec.multivariate_vif_threshold,
+        backend_drop_order=spec.backend_drop_order,
+    )
+
+    assert summary["status"] == "error"
+    assert summary["error_note"] == "required control data is incomplete; model not fit"
+    assert summary["invalid_controls"] == [
+        {"column": "time_to_first_byte_ms", "reason": "missing_values"}
+    ]

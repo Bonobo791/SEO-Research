@@ -16,6 +16,7 @@ from seo_rank.stats.scale import within_keyword_sd_rms
 from seo_rank.stats.spec import AnalysisSpec
 from scipy import optimize, stats
 from scipy.special import logsumexp
+from seo_rank.stats.model_inputs import control_error_summary, validate_control_columns
 
 
 logger = logging.getLogger(__name__)
@@ -27,9 +28,11 @@ SIMILARITY_SCORE_COLUMNS = {
 }
 PL_CONTROL_COLUMNS = (
     "deprecated_html_tags",
-    "meta_keywords_to_content_consistency",
+    "time_to_first_byte_ms",
 )
-PL_LOG_CONTROL_COLUMNS = frozenset(("deprecated_html_tags",))
+PL_LOG_CONTROL_COLUMNS = frozenset(
+    ("deprecated_html_tags", "time_to_first_byte_ms")
+)
 PLACKET_LUCE_REQUIRED_COLUMNS = (
     "serp_rank",
     "target_keyword_id",
@@ -37,7 +40,7 @@ PLACKET_LUCE_REQUIRED_COLUMNS = (
 DEFAULT_MAX_SERP_RANK = 20
 HESSIAN_CONDITION_NUMBER_THRESHOLD = 100.0
 OPTIMIZER_GRADIENT_TOLERANCE = 1e-6
-FORMULA = "rank_ordered_logit ~ similarity + log(deprecated_html_tags + 1) + meta_keywords_to_content_consistency"
+FORMULA = "rank_ordered_logit ~ similarity + log(deprecated_html_tags + 1) + log(time_to_first_byte_ms + 1)"
 FAMILY_PLACKETT_LUCE_OPTIMIZER_OPTIONS: dict[str, object] = {"maxiter": 100}
 
 
@@ -175,6 +178,16 @@ def fit_plackett_luce_for_prepared_model_data(
     model_data = sorted_model_data if sorted_model_data is not None else raw_model_data
     if score_column not in model_data.columns:
         logger.debug("plackett-luce backend=%s skipped: missing score column", label)
+        return None
+
+    model_data = model_data.loc[model_data[score_column].notna()].copy()
+    invalid_controls = validate_control_columns(model_data, PL_CONTROL_COLUMNS)
+    if invalid_controls:
+        logger.info(
+            "plackett-luce backend=%s status=error invalid_controls=%s",
+            label,
+            list(invalid_controls),
+        )
         return None
 
     if _pl_signal_variance(model_data, score_column) == 0.0:
@@ -642,6 +655,19 @@ def _summarize_backend_plackett_luce_result(
             score_column = _score_column_for_backend(backend)
         model_frame = _prepare_plackett_luce_frame(analysis_mart, max_rank=max_rank)
         score_rows = model_frame.filter(pl.col(score_column).is_not_null())
+        invalid_controls = (
+            validate_control_columns(score_rows.to_pandas(), PL_CONTROL_COLUMNS)
+            if not score_rows.is_empty()
+            else ()
+        )
+        if invalid_controls:
+            return control_error_summary(
+                backend=backend,
+                score_column=score_column,
+                invalid_controls=invalid_controls,
+                row_count=score_rows.height,
+                keyword_count=score_rows["target_keyword_id"].n_unique(),
+            )
         keyword_frames, _ = _build_keyword_frames(score_rows.to_pandas(), score_column)
         eligible_keyword_frames = [frame for frame in keyword_frames if len(frame) >= 2]
         prepared_rows = int(sum(len(frame) for frame in eligible_keyword_frames))
@@ -838,6 +864,16 @@ def _summarize_plackett_luce_for_prepared_model_data(
             "row_count": 0,
             "keyword_count": 0,
         }
+    signal_model_data = model_data[model_data[score_column].notna()].copy()
+    invalid_controls = validate_control_columns(signal_model_data, PL_CONTROL_COLUMNS)
+    if invalid_controls:
+        return control_error_summary(
+            backend=label,
+            score_column=score_column,
+            invalid_controls=invalid_controls,
+            row_count=len(signal_model_data),
+            keyword_count=int(signal_model_data["target_keyword_id"].nunique()),
+        )
     if _pl_signal_variance(model_data, score_column) == 0.0:
         return {
             "backend": label,

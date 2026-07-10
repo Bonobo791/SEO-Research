@@ -81,9 +81,9 @@ def test_build_analysis_lazyframe_lives_in_marts_module() -> None:
             "gemini_semantic_similarity_rank": 1,
             "gemini_semantic_similarity_pct": 0.0,
             "gemini_semantic_similarity_z": None,
-            "referring_domains_count": None,
             "deprecated_html_tags": None,
             "meta_keywords_to_content_consistency": None,
+            "time_to_first_byte_ms": None,
             "schema_version": ANALYSIS_SCHEMA_VERSION,
         }
     ]
@@ -140,6 +140,7 @@ def test_build_analysis_lazyframe_joins_meta_keyword_control() -> None:
                     "url": "https://example.com/technical-seo/1",
                     "deprecated_html_tags": False,
                     "meta_keywords_to_content_consistency": 0.25,
+                    "time_to_first_byte_ms": 180,
                 }
             ]
         ).lazy(),
@@ -150,6 +151,8 @@ def test_build_analysis_lazyframe_joins_meta_keyword_control() -> None:
     assert result["deprecated_html_tags"].to_list() == [False]
     assert result["meta_keywords_to_content_consistency"].to_list() == [0.25]
     assert result.schema["meta_keywords_to_content_consistency"] == pl.Float64
+    assert result["time_to_first_byte_ms"].to_list() == [180]
+    assert result.schema["time_to_first_byte_ms"] == pl.Int64
 
 
 def test_build_analysis_lazyframe_ranks_within_keyword() -> None:
@@ -224,7 +227,7 @@ def test_build_analysis_lazyframe_ranks_within_keyword() -> None:
         assert f"{suffix}_z" in result.columns
 
 
-def test_build_analysis_lazyframe_schema_version_is_v4() -> None:
+def test_build_analysis_lazyframe_schema_version_is_v6() -> None:
     feature_frames = {
         "keyword_serp": pl.DataFrame(
             [
@@ -270,7 +273,7 @@ def test_build_analysis_lazyframe_schema_version_is_v4() -> None:
     }
 
     result = build_analysis_lazyframe(feature_frames).collect()
-    assert result["schema_version"][0] == "analysis_mart.v4"
+    assert result["schema_version"][0] == "analysis_mart.v6"
 
 
 def test_build_analysis_lazyframe_tied_scores_rank_by_serp_rank() -> None:

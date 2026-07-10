@@ -27,6 +27,7 @@ from seo_rank.stats.regression import (
     fit_backend_regression,
 )
 from seo_rank.stats.families import SignalFamily, SignalFamilyRegistry, source_mart_for_family
+from seo_rank.stats.model_inputs import control_error_summary, validate_control_columns
 
 
 logger = logging.getLogger(__name__)
@@ -38,14 +39,14 @@ MIN_DF_RESID_FOR_RESET = RESET_POWER
 BREUSCH_PAGAN_P_VALUE_THRESHOLD = 0.05
 STUDENTIZED_RESIDUAL_THRESHOLD = 3.0
 MULTIVARIATE_DEPRECATED_HTML_TAGS_TERM = "np.log(deprecated_html_tags + 1)"
-MULTIVARIATE_META_KEYWORDS_CONSISTENCY_TERM = "meta_keywords_to_content_consistency"
+MULTIVARIATE_TIME_TO_FIRST_BYTE_TERM = "np.log(time_to_first_byte_ms + 1)"
 MULTIVARIATE_CONTROL_COLUMNS = (
     "deprecated_html_tags",
-    "meta_keywords_to_content_consistency",
+    "time_to_first_byte_ms",
 )
 MULTIVARIATE_CONTROL_TERMS = {
     "deprecated_html_tags": MULTIVARIATE_DEPRECATED_HTML_TAGS_TERM,
-    "meta_keywords_to_content_consistency": MULTIVARIATE_META_KEYWORDS_CONSISTENCY_TERM,
+    "time_to_first_byte_ms": MULTIVARIATE_TIME_TO_FIRST_BYTE_TERM,
 }
 MULTIVARIATE_SCORE_COLUMNS = (
     "bge_normalized_score",
@@ -178,6 +179,15 @@ def summarize_multivariate_sensitivity(
         analysis_mart,
         active_backends=active_backends,
     )
+    if skipped_reason == "control_data_error":
+        assert model_data is not None
+        return control_error_summary(
+            backend="multivariate_sensitivity",
+            score_column="joint_similarity_model",
+            invalid_controls=omitted_controls,
+            row_count=len(model_data),
+            keyword_count=int(model_data["target_keyword_id"].nunique()),
+        )
     if model_data is None:
         return _skipped_multivariate_sensitivity_summary(
             skipped_reason=skipped_reason,
@@ -202,7 +212,6 @@ def summarize_multivariate_sensitivity(
             current_backends,
             control_columns,
         )
-        fit_summary["omitted_controls"] = [dict(control) for control in omitted_controls]
         max_vif = float(fit_summary["max_vif"])
         if max_vif <= float(vif_threshold):
             return {
@@ -282,19 +291,17 @@ def _prepare_multivariate_sensitivity_data(
     if model_frame.height < 3:
         return None, "insufficient_rows", (), ()
 
-    control_columns: list[str] = []
-    omitted_controls: list[dict[str, str]] = []
-    for column in MULTIVARIATE_CONTROL_COLUMNS:
-        if column not in model_frame.columns:
-            omitted_controls.append({"column": column, "reason": "missing_column"})
-        elif model_frame[column].null_count() > 0:
-            omitted_controls.append({"column": column, "reason": "missing_values"})
-        else:
-            control_columns.append(column)
+    control_issues = validate_control_columns(
+        model_frame.to_pandas(),
+        MULTIVARIATE_CONTROL_COLUMNS,
+    )
+    if control_issues:
+        return model_frame.to_pandas(), "control_data_error", (), control_issues
 
+    control_columns = list(MULTIVARIATE_CONTROL_COLUMNS)
     model_data = model_frame.select([*required_columns, *control_columns]).to_pandas().copy()
     model_data["outcome"] = -np.log(model_data["serp_rank"].astype(float))
-    return model_data, "", tuple(control_columns), tuple(omitted_controls)
+    return model_data, "", tuple(control_columns), ()
 
 
 def _fit_multivariate_sensitivity_model(
@@ -431,8 +438,8 @@ def _multivariate_term_kind(term: str) -> str:
         return "intercept"
     if term == MULTIVARIATE_DEPRECATED_HTML_TAGS_TERM:
         return "deprecated_html_tags"
-    if term == MULTIVARIATE_META_KEYWORDS_CONSISTENCY_TERM:
-        return "meta_keywords_to_content_consistency"
+    if term == MULTIVARIATE_TIME_TO_FIRST_BYTE_TERM:
+        return "time_to_first_byte_ms"
     if term in MULTIVARIATE_SCORE_COLUMNS_TO_BACKEND:
         return "similarity_backend"
     if term.startswith("C(target_keyword_id)"):
@@ -515,6 +522,19 @@ def _summarize_backend_diagnostics_result(
         if score_column is None:
             score_column = _score_column_for_backend(backend)
         model_frame = _prepare_regression_frame(analysis_mart, score_column)
+        invalid_controls = (
+            validate_control_columns(model_frame.to_pandas())
+            if not model_frame.is_empty()
+            else ()
+        )
+        if invalid_controls:
+            return control_error_summary(
+                backend=backend,
+                score_column=score_column,
+                invalid_controls=invalid_controls,
+                row_count=model_frame.height,
+                keyword_count=model_frame["target_keyword_id"].n_unique(),
+            )
         skipped_reason = _regression_skip_reason(model_frame)
         row_count = model_frame.height
         keyword_count = (

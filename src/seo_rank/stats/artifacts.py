@@ -704,6 +704,14 @@ def _format_regression_lines(regression: dict[str, object]) -> list[str]:
                 f"skipped_reason={backend_summary['skipped_reason']}"
             )
             continue
+        if backend_summary.get("status") == "error":
+            lines.append(
+                "- "
+                f"{backend}: status=error, "
+                f"error_note={backend_summary['error_note']}, "
+                f"invalid_controls={backend_summary['invalid_controls']}"
+            )
+            continue
         keyword_count = int(backend_summary.get("keyword_count", 0))
         inference_mode = backend_summary.get(
             "inference_mode",
@@ -741,6 +749,14 @@ def _format_plackett_luce_lines(
                 f"skipped_reason={backend_summary['skipped_reason']}, "
                 f"keyword_count={backend_summary.get('keyword_count', 0)}, "
                 f"inference_mode={backend_summary.get('inference_mode', 'skipped')}"
+            )
+            continue
+        if backend_summary.get("status") == "error":
+            lines.append(
+                "- "
+                f"{backend}: status=error, "
+                f"error_note={backend_summary['error_note']}, "
+                f"invalid_controls={backend_summary['invalid_controls']}"
             )
             continue
         keyword_count = int(backend_summary.get("keyword_count", 0))
@@ -786,6 +802,14 @@ def _format_diagnostics_lines(diagnostics: dict[str, object]) -> list[str]:
                 f"skipped_reason={backend_summary['skipped_reason']}, "
                 f"keyword_count={backend_summary.get('keyword_count', 0)}, "
                 f"inference_mode={backend_summary.get('inference_mode', 'skipped')}"
+            )
+            continue
+        if backend_summary.get("status") == "error":
+            lines.append(
+                "- "
+                f"{backend}: status=error, "
+                f"error_note={backend_summary['error_note']}, "
+                f"invalid_controls={backend_summary['invalid_controls']}"
             )
             continue
         keyword_count = int(backend_summary.get("keyword_count", 0))
@@ -866,6 +890,12 @@ def _format_influence_sensitivity_lines(diagnostics: dict[str, object]) -> list[
 
 def _format_multivariate_sensitivity_lines(sensitivity: dict[str, object]) -> list[str]:
     lines: list[str] = []
+    if sensitivity.get("status") == "error":
+        return [
+            "- "
+            f"status=error, error_note={sensitivity['error_note']}, "
+            f"invalid_controls={sensitivity['invalid_controls']}"
+        ]
     drop_path = " -> ".join(sensitivity.get("drop_path", [])) or "none"
     kept_backends = ", ".join(sensitivity.get("kept_backends", [])) or "none"
     max_vif = sensitivity.get("max_vif", "n/a")
@@ -928,7 +958,7 @@ def _compute_actionable_association(
     regression_summary = regression["backends"].get(primary_backend)
     if not spearman_summary or not regression_summary:
         return False
-    if spearman_summary.get("status") == "skipped" or regression_summary.get("status") == "skipped":
+    if spearman_summary.get("status") == "skipped" or regression_summary.get("status") in {"skipped", "error"}:
         return False
 
     median_abs_rho = float(

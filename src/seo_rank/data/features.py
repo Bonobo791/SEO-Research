@@ -144,6 +144,7 @@ ANALYSIS_REQUIRED_COLUMNS = (
     "gemini_semantic_similarity_z",
     "deprecated_html_tags",
     "meta_keywords_to_content_consistency",
+    "time_to_first_byte_ms",
     "schema_version",
 )
 
@@ -397,6 +398,7 @@ FEATURE_VALIDATION_RULES = {
             "gemini_semantic_similarity_z": pl.Float64,
             "deprecated_html_tags": pl.Boolean,
             "meta_keywords_to_content_consistency": pl.Float64,
+            "time_to_first_byte_ms": pl.Int64,
             "schema_version": pl.Utf8,
         },
         "unique_columns": ("serp_item_id",),
@@ -427,6 +429,7 @@ FEATURE_VALIDATION_RULES = {
             "gemini_semantic_similarity_rank": (1, 20),
             "gemini_semantic_similarity_pct": (0, 1),
             "meta_keywords_to_content_consistency": (0, 1),
+            "time_to_first_byte_ms": (0, None),
         },
     },
 }
@@ -443,6 +446,7 @@ BACKLINKS_ANALYSIS_EXCLUDED_COLUMNS = {
     # so the backlinks_analysis join does not duplicate them.
     "deprecated_html_tags",
     "meta_keywords_to_content_consistency",
+    "time_to_first_byte_ms",
 }
 BACKLINKS_ANALYSIS_EXTRA_COLUMNS = tuple(
     column
@@ -484,6 +488,7 @@ ONPAGE_FEATURES_EXCLUDED_COLUMNS = {
     "url",
     "deprecated_html_tags",
     "meta_keywords_to_content_consistency",
+    "time_to_first_byte_ms",
     "schema_version",
 }
 ONPAGE_FEATURES_EXTRA_COLUMNS = tuple(

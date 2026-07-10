@@ -40,6 +40,7 @@ def _regression_analysis_mart_frame() -> pl.DataFrame:
                     "page_text_length": 300 + (keyword_index * 9) + ((serp_rank % 2) * 5),
                     "referring_domains_count": 300 + (keyword_index * 9) + ((serp_rank % 2) * 5),
                     "deprecated_html_tags": (keyword_index + serp_rank) % 3 == 0,
+                    "time_to_first_byte_ms": 100 + (keyword_index * 7) + serp_rank,
                     "meta_keywords_to_content_consistency": 0.1 + (serp_rank * 0.05),
                     "bge_raw_score": 1.1 - (serp_rank * 0.22) + keyword_offset,
                     "bge_normalized_score": 1.1 - (serp_rank * 0.22) + keyword_offset,
@@ -80,6 +81,7 @@ def _single_keyword_regression_frame() -> pl.DataFrame:
                 "page_text_length": 200 + serp_rank,
                 "referring_domains_count": 200 + serp_rank,
                 "deprecated_html_tags": False,
+                "time_to_first_byte_ms": 100 + serp_rank,
                 "meta_keywords_to_content_consistency": 0.1 + (serp_rank * 0.05),
                 "bge_raw_score": 1.0 - (serp_rank * 0.05),
                 "bge_normalized_score": 1.0 - (serp_rank * 0.05),
@@ -119,6 +121,7 @@ def _constant_similarity_keyword_regression_frame() -> pl.DataFrame:
                     "page_text_length": 220 + (keyword_index * 3) + serp_rank,
                     "referring_domains_count": 220 + (keyword_index * 3) + serp_rank,
                     "deprecated_html_tags": False,
+                    "time_to_first_byte_ms": 100 + (keyword_index * 7) + serp_rank,
                     "meta_keywords_to_content_consistency": 0.1 + (serp_rank * 0.05),
                     "bge_raw_score": similarity,
                     "bge_normalized_score": similarity,
@@ -144,6 +147,7 @@ def test_summarize_regression_for_boolean_onpage_predictor_uses_numeric_encoding
                     "page_text_length": 200 + serp_rank,
                     "referring_domains_count": 200 + serp_rank,
                     "deprecated_html_tags": False,
+                    "time_to_first_byte_ms": 100 + serp_rank,
                     "meta_keywords_to_content_consistency": 0.1 + (serp_rank * 0.05),
                     "title_too_long": serp_rank == 1,
                 }
@@ -172,9 +176,13 @@ def test_summarize_backend_regression_supports_single_keyword_with_hc3_inference
     assert summary["row_count"] == 10
     assert summary["feature_model"]["covariance"]["type"] == "HC3"
     assert summary["feature_model"]["covariance"]["clusters"] == []
-    assert summary["baseline_model"]["formula"] == "outcome ~ np.log(deprecated_html_tags + 1) + meta_keywords_to_content_consistency"
+    assert summary["baseline_model"]["formula"] == (
+        "outcome ~ np.log(deprecated_html_tags + 1) + np.log(time_to_first_byte_ms + 1)"
+    )
     assert "C(target_keyword_id)" not in summary["feature_model"]["formula"]
-    assert summary["feature_model"]["formula"] == "outcome ~ bge_normalized_score + np.log(deprecated_html_tags + 1) + meta_keywords_to_content_consistency"
+    assert summary["feature_model"]["formula"] == (
+        "outcome ~ bge_normalized_score + np.log(deprecated_html_tags + 1) + np.log(time_to_first_byte_ms + 1)"
+    )
     assert summary["feature_model"]["clustered_standard_error"] > 0
 
 
@@ -189,11 +197,11 @@ def test_summarize_backend_regression_uses_keyword_clustered_inference() -> None
     assert summary["feature_model"]["covariance"]["clusters"] == ["target_keyword_id"]
     assert (
         summary["baseline_model"]["formula"]
-        == "outcome ~ np.log(deprecated_html_tags + 1) + meta_keywords_to_content_consistency + C(target_keyword_id)"
+        == "outcome ~ np.log(deprecated_html_tags + 1) + np.log(time_to_first_byte_ms + 1) + C(target_keyword_id)"
     )
     assert (
         summary["feature_model"]["formula"]
-        == "outcome ~ bge_normalized_score + np.log(deprecated_html_tags + 1) + meta_keywords_to_content_consistency + C(target_keyword_id)"
+        == "outcome ~ bge_normalized_score + np.log(deprecated_html_tags + 1) + np.log(time_to_first_byte_ms + 1) + C(target_keyword_id)"
     )
     assert summary["feature_model"]["coefficient"] > 0
     assert summary["feature_model"]["clustered_standard_error"] > 0
@@ -239,7 +247,7 @@ def test_summarize_backend_regression_keeps_zero_variance_keyword_in_raw_model()
     assert summary["row_count"] == 12
     assert summary["keyword_count"] == 3
     assert summary["feature_model"]["formula"] == (
-        "outcome ~ bge_normalized_score + np.log(deprecated_html_tags + 1) + meta_keywords_to_content_consistency + C(target_keyword_id)"
+        "outcome ~ bge_normalized_score + np.log(deprecated_html_tags + 1) + np.log(time_to_first_byte_ms + 1) + C(target_keyword_id)"
     )
 
 
@@ -256,6 +264,7 @@ def test_fit_backend_regression_skips_when_design_matrix_is_column_rank_deficien
             "page_text_length": [100, 200, 300, 400, 500, 600, 600],
             "referring_domains_count": [100, 200, 300, 400, 500, 600, 600],
             "deprecated_html_tags": [False, False, False, False, False, False, False],
+            "time_to_first_byte_ms": [100, 200, 300, 400, 500, 600, 600],
             "meta_keywords_to_content_consistency": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
             "target_keyword_id": ["k0", "k1", "k2", "k3", "k4", "k4", "k4"],
             "serp_rank": [1, 1, 1, 1, 1, 2, 3],
@@ -304,7 +313,7 @@ def test_summarize_backend_regression_logs_fit_and_skip(
     )
 
 
-def test_summarize_backend_regression_retains_rows_with_incomplete_covariates() -> None:
+def test_summarize_backend_regression_reports_incomplete_control_data() -> None:
     frame = _regression_analysis_mart_frame()
     frame = pl.concat(
         [
@@ -326,9 +335,10 @@ def test_summarize_backend_regression_retains_rows_with_incomplete_covariates() 
                         "title": "extra",
                         "description": "extra",
                         "page_text_length": None,
-                        "referring_domains_count": None,
-                        "deprecated_html_tags": None,
-                        "meta_keywords_to_content_consistency": None,
+                            "referring_domains_count": None,
+                            "deprecated_html_tags": None,
+                            "time_to_first_byte_ms": None,
+                            "meta_keywords_to_content_consistency": None,
                         "bge_raw_score": 0.5,
                         "bge_normalized_score": 0.5,
                         "gemini_doc_retrieval_raw_score": None,
@@ -345,12 +355,11 @@ def test_summarize_backend_regression_retains_rows_with_incomplete_covariates() 
 
     summary = summarize_backend_regression(frame, backend="bge")
 
-    assert summary["row_count"] == 41
-    assert summary["omitted_controls"] == [
+    assert summary["status"] == "error"
+    assert summary["invalid_controls"] == [
         {"column": "deprecated_html_tags", "reason": "missing_values"},
-        {"column": "meta_keywords_to_content_consistency", "reason": "missing_values"},
+        {"column": "time_to_first_byte_ms", "reason": "missing_values"},
     ]
-    assert "status" not in summary
 
 
 def test_summarize_regression_backends_skips_empty_backend_without_aborting_others() -> None:
@@ -398,10 +407,6 @@ def test_run_phase5_stats_writes_regression_summary_for_passing_panels(
     frame = _regression_analysis_mart_frame().with_row_index("_row").with_columns(
         pl.when(pl.col("_row") == 0)
         .then(None)
-        .otherwise(pl.col("deprecated_html_tags"))
-        .alias("deprecated_html_tags"),
-        pl.when(pl.col("_row") == 0)
-        .then(None)
         .otherwise(pl.col("meta_keywords_to_content_consistency"))
         .alias("meta_keywords_to_content_consistency"),
     ).drop("_row")
@@ -430,7 +435,6 @@ def test_run_phase5_stats_writes_regression_summary_for_passing_panels(
     assert diagnostics["rank_depths"]["top_20"]["regression"]["backends"]["bge"]["backend"] == "bge"
     assert "## Rank depth: top_20" in report
     assert "### Regression" in report
-    assert "omitted_controls=" in report
 
 
 def test_run_phase5_stats_sets_actionable_association_on_passing_panels(
@@ -479,3 +483,37 @@ def test_run_phase5_stats_fits_regression_once_per_backend(
     run_phase5_stats(run_dir)
 
     assert call_count == 12
+
+
+def test_regression_reports_control_error_instead_of_omitting_null_control() -> None:
+    frame = _regression_analysis_mart_frame().with_columns(
+        pl.when(pl.col("serp_rank") == 1)
+        .then(None)
+        .otherwise(pl.lit(250))
+        .alias("time_to_first_byte_ms"),
+    )
+
+    summary = summarize_backend_regression(frame, backend="bge")
+
+    assert summary["status"] == "error"
+    assert summary["error_note"] == "required control data is incomplete; model not fit"
+    assert summary["invalid_controls"] == [
+        {"column": "time_to_first_byte_ms", "reason": "missing_values"}
+    ]
+    assert "omitted_controls" not in summary
+
+
+def test_regression_filters_null_signal_rows_without_mutating_other_model_inputs() -> None:
+    frame = _regression_analysis_mart_frame().with_columns(
+        pl.lit(250).alias("time_to_first_byte_ms"),
+        pl.when(pl.col("serp_rank") == 1)
+        .then(None)
+        .otherwise(pl.col("bge_normalized_score"))
+        .alias("bge_normalized_score"),
+    )
+
+    summary = summarize_backend_regression(frame, backend="bge")
+
+    assert summary["status"] == "computed"
+    assert summary["row_count"] == frame.height - 10
+    assert "np.log(time_to_first_byte_ms + 1)" in summary["feature_model"]["formula"]

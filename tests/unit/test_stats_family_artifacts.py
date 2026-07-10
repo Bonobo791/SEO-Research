@@ -418,15 +418,15 @@ def test_build_family_source_frames_restores_missing_controls_from_analysis_mart
     ).to_list()
 
 
-def test_build_family_source_frames_restores_meta_keyword_control_from_analysis_mart(
+def test_build_family_source_frames_restores_latency_control_from_analysis_mart(
     tmp_path: Path,
 ) -> None:
     run_dir = tmp_path / "runs" / "run-1"
     (run_dir / "parquet" / "onpage_features").mkdir(parents=True)
-    analysis_mart = _combined_analysis_mart_frame()
-    legacy_onpage = _combined_onpage_features_frame().drop(
-        "meta_keywords_to_content_consistency"
+    analysis_mart = _combined_analysis_mart_frame().with_columns(
+        (pl.arange(0, pl.len()) + 100).cast(pl.Int64).alias("time_to_first_byte_ms")
     )
+    legacy_onpage = _combined_onpage_features_frame().drop("time_to_first_byte_ms")
     legacy_onpage.write_parquet(run_dir / "parquet" / "onpage_features" / "part-0.parquet")
 
     source_frames = build_family_source_frames(
@@ -436,8 +436,8 @@ def test_build_family_source_frames_restores_meta_keyword_control_from_analysis_
     )
 
     restored = source_frames["onpage_features"]
-    assert restored.get_column("meta_keywords_to_content_consistency").to_list() == analysis_mart.get_column(
-        "meta_keywords_to_content_consistency"
+    assert restored.get_column("time_to_first_byte_ms").to_list() == analysis_mart.get_column(
+        "time_to_first_byte_ms"
     ).to_list()
 
 

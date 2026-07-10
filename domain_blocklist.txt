@@ -1,0 +1,5 @@
+# Domains that failed to load. Auto-appended on failure; skipped on future runs.
+# Delete a line to re-enable a domain.
+zillow.com  # keyword="cypress tx realtor" reason=onpage-50402
+realtor.com  # keyword="realtor com cypress tx" reason=onpage-50402
+parkaveappliance.com  # keyword="front load coin operated washer" reason=onpage-50402

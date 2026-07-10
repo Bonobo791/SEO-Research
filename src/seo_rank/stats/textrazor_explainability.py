@@ -14,10 +14,9 @@ from seo_rank.stats.artifacts import build_family_source_frames
 from seo_rank.stats.panel import build_limitations_for_rank_depth, load_analysis_panel
 from seo_rank.stats.rank_depth import filter_panel_by_max_rank
 from seo_rank.stats.regression import (
-    BASELINE_FORMULA,
+    REGRESSION_CONTROL_COLUMNS,
     REGRESSION_REQUIRED_COLUMNS,
     SIMILARITY_SCORE_COLUMNS,
-    SINGLE_KEYWORD_BASELINE_FORMULA,
     summarize_regression_for_score_column,
     _inference_metadata,
     _parameter_confidence_interval,
@@ -418,10 +417,17 @@ def fit_multivariate_ranking_model(
     model_data = model_frame.to_pandas().copy()
     keyword_count = int(model_data["target_keyword_id"].nunique())
     model_data["outcome"] = -np.log(model_data["serp_rank"].astype(float))
+    control_columns = tuple(
+        column
+        for column in REGRESSION_CONTROL_COLUMNS
+        if column in model_data.columns and not model_data[column].isna().any()
+    )
 
     if keyword_count >= 2:
-        baseline_formula = BASELINE_FORMULA
-        feature_formula = _multivariate_feature_formula(score_columns, keyword_count)
+        baseline_formula = _public_baseline_formula(keyword_count, control_columns)
+        feature_formula = _multivariate_feature_formula(
+            score_columns, keyword_count, control_columns
+        )
         baseline_result = smf.ols(baseline_formula, data=model_data).fit()
         feature_result = smf.ols(feature_formula, data=model_data).fit()
         if feature_result.df_resid <= 0:
@@ -448,8 +454,10 @@ def fit_multivariate_ranking_model(
             groups=model_data["target_keyword_id"],
         )
     else:
-        baseline_formula = SINGLE_KEYWORD_BASELINE_FORMULA
-        feature_formula = _multivariate_feature_formula(score_columns, keyword_count)
+        baseline_formula = _public_baseline_formula(keyword_count, control_columns)
+        feature_formula = _multivariate_feature_formula(
+            score_columns, keyword_count, control_columns
+        )
         baseline_result = smf.ols(baseline_formula, data=model_data).fit()
         feature_result = smf.ols(feature_formula, data=model_data).fit()
         if feature_result.df_resid <= 0:
@@ -487,8 +495,15 @@ def _prepare_multivariate_frame(
 def _multivariate_feature_formula(
     score_columns: Sequence[str],
     keyword_count: int,
+    control_columns: Sequence[str],
 ) -> str:
-    terms = " + ".join(score_columns)
+    control_terms = [
+        f"np.log({column} + 1)"
+        if column in {"deprecated_html_tags", "time_to_first_byte_ms"}
+        else column
+        for column in control_columns
+    ]
+    terms = " + ".join([*score_columns, *control_terms])
     if keyword_count >= 2:
-        return f"outcome ~ {terms} + np.log(deprecated_html_tags + 1) + meta_keywords_to_content_consistency + C(target_keyword_id)"
-    return f"outcome ~ {terms} + np.log(deprecated_html_tags + 1) + meta_keywords_to_content_consistency"
+        return f"outcome ~ {terms} + C(target_keyword_id)"
+    return f"outcome ~ {terms}"
