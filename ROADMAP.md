@@ -9,15 +9,15 @@ Active scope contract: `GOALS.md` (Phase 5).
 
 ### Phase 5 — Statistical analysis
 
-Observational association between similarity scores and SERP rank on the
+Observational association between observed page variables and SERP rank on the
 `analysis_mart` panel (`target_keyword × SERP URL`, top 20 per keyword). Full
 product and estimand review: `PHASE5-STATS-PLAN-REVIEW.md`.
 
 **Primary decision (v1):** association exists (A) + backend comparison (B) —
-pooled within-keyword association per similarity backend, with **BGE as the
-pre-registered primary backend** and Gemini backends as secondary comparisons
-(fixed order: BGE → Gemini Doc Retrieval → Gemini Semantic Similarity; not
-data-driven).
+pooled within-keyword association per signal family, with the similarity
+backends as the pre-registered starting point, **BGE as the primary backend**
+and Gemini backends as secondary comparisons (fixed order: BGE → Gemini Doc
+Retrieval → Gemini Semantic Similarity; not data-driven).
 
 **Headline metric:** keyword-level Spearman ρ (primary). Pooled regression
 coefficients + clustered CIs (secondary). Prefer CIs over p-values alone;
@@ -249,9 +249,10 @@ Plackett-Luce analysis.
         (today only `leave_one_out_top_rank: true` is specified).
       - `AnalysisSpec` accessor / typed loader for `estimand.plackett_luce`
         settings.
-      - Replace hardcoded constants in `plackett_luce.py` (`FORMULA`,
-        `DEFAULT_MAX_SERP_RANK`, `HESSIAN_CONDITION_NUMBER_THRESHOLD`,
-        `OPTIMIZER_GRADIENT_TOLERANCE`) with spec-driven values.
+      - Replace hardcoded constants in `plackett_luce.py`
+        (`DEFAULT_MAX_SERP_RANK`, `HESSIAN_CONDITION_NUMBER_THRESHOLD`,
+        `OPTIMIZER_GRADIENT_TOLERANCE`) with spec-driven values and keep the
+        reported formula aligned to the fitted score column.
       - Drive IIA enablement from `estimand.plackett_luce.iia_sensitivity`
         instead of `depth_key == spec.primary_rank_depth` in `artifacts.py`.
       - Tests: spec-driven threshold loader and regression coverage that spec

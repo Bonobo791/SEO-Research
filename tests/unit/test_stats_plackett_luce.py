@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import polars as pl
 import pytest
 
@@ -37,7 +38,7 @@ def _sample_plackett_luce_panel(
         keyword = f"keyword {keyword_index}"
         frame_rows: list[dict[str, object]] = []
         for serp_rank in range(1, items_per_keyword + 1):
-            similarity = float(rng.normal(loc=0.0, scale=1.0))
+            similarity = float(rng.uniform(0.0, 1.0))
             referring_domains_count = int(rng.integers(120, 420))
             utility = (similarity_beta * similarity) + (
                 length_beta * float(np.log(referring_domains_count + 1.0))
@@ -198,7 +199,7 @@ def test_summarize_backend_plackett_luce_fits_rank_ordered_logit_with_clustered_
     assert summary["choice_set_size_summary"]["min"] == 5
     assert summary["choice_set_size_summary"]["max"] == 5
     assert summary["main_model"]["formula"] == (
-        "rank_ordered_logit ~ similarity + log(deprecated_html_tags + 1) + log(time_to_first_byte_ms + 1)"
+        "rank_ordered_logit ~ log(bge_normalized_score + 1) + log(deprecated_html_tags + 1) + log(time_to_first_byte_ms + 1)"
     )
     assert summary["main_model"]["omitted_controls"] == []
     assert summary["main_model"]["log_odds_per_1sd"] > 0
@@ -226,7 +227,7 @@ def test_plackett_luce_ignores_meta_keyword_control() -> None:
     assert fit is not None
     assert fit.params.shape == (2,)
     assert fit.information.shape == (2, 2)
-    assert summary["main_model"]["formula"] == "rank_ordered_logit ~ similarity + log(time_to_first_byte_ms + 1)"
+    assert summary["main_model"]["formula"] == "rank_ordered_logit ~ log(bge_normalized_score + 1) + log(time_to_first_byte_ms + 1)"
     assert summary["main_model"]["omitted_controls"] == [
         {"column": "deprecated_html_tags", "reason": "constant"},
     ]
@@ -244,7 +245,7 @@ def test_plackett_luce_ignores_constant_meta_keyword_control() -> None:
     assert fit is not None
     assert fit.params.shape == (3,)
     assert summary["main_model"]["formula"] == (
-        "rank_ordered_logit ~ similarity + log(deprecated_html_tags + 1) + log(time_to_first_byte_ms + 1)"
+        "rank_ordered_logit ~ log(bge_normalized_score + 1) + log(deprecated_html_tags + 1) + log(time_to_first_byte_ms + 1)"
     )
     assert summary["main_model"]["omitted_controls"] == []
 
@@ -262,7 +263,7 @@ def test_plackett_luce_omits_constant_control_but_keeps_latency_control() -> Non
     assert fit is not None
     assert fit.params.shape == (2,)
     assert fit.information.shape == (2, 2)
-    assert summary["main_model"]["formula"] == "rank_ordered_logit ~ similarity + log(time_to_first_byte_ms + 1)"
+    assert summary["main_model"]["formula"] == "rank_ordered_logit ~ log(bge_normalized_score + 1) + log(time_to_first_byte_ms + 1)"
     assert summary["main_model"]["omitted_controls"] == [
         {"column": "deprecated_html_tags", "reason": "constant"},
     ]
@@ -284,6 +285,34 @@ def test_plackett_luce_recomputes_omitted_controls_for_subset_refits() -> None:
     assert subset_fit is not None
     assert subset_fit.omitted_controls == (
         {"column": "deprecated_html_tags", "reason": "constant"},
+    )
+
+
+def test_plackett_luce_logs_score_and_controls_in_feature_matrix() -> None:
+    frame = pd.DataFrame(
+        {
+            "bge_normalized_score": [2.0, 3.0],
+            "deprecated_html_tags": [1.0, 2.0],
+            "time_to_first_byte_ms": [10.0, 20.0],
+        }
+    )
+
+    features = plackett_luce_module._feature_matrix(
+        frame,
+        "bge_normalized_score",
+        ("deprecated_html_tags", "time_to_first_byte_ms"),
+    )
+
+    np.testing.assert_allclose(
+        features,
+        np.log(
+            np.array(
+                [
+                    [3.0, 2.0, 11.0],
+                    [4.0, 3.0, 21.0],
+                ]
+            )
+        ),
     )
 
 

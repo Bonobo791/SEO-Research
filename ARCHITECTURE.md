@@ -26,7 +26,8 @@
 
 ## Overview
 
-SEO-Research is a Python CLI for research-grade SEO ranking similarity analysis.
+SEO-Research is a Python CLI for research-grade SEO ranking research across
+observed page variables, signal families, and SERP rank.
 
 **Shipped today (Phase 1):** offline `seo-rank run` expands a seed keyword from
 fixtures, normalizes SERP rows, passages, page-level similarity features, and
@@ -48,7 +49,8 @@ Live Gemini embeddings replace the live-path Gemini fixtures when
 fixture when `--live-bge` is enabled — see
 [Live similarity backends (Phase 4)](#live-similarity-backends-phase-4).
 Later phases add keyword-level Spearman inference with BH per backend, pooled
-OLS with clustered SEs, and OLS pre-analysis diagnostics on pooled models.
+OLS with clustered SEs over observed variables, and OLS pre-analysis diagnostics
+on pooled models.
 
 TextRazor page signals are captured per SERP URL (one TextRazor call per parsed
 page, up to `--depth` organic rows per keyword). Raw responses land in
@@ -553,8 +555,8 @@ OLS work (Phase 5).
 
 ## Planned Per-Run Statistical Analysis
 
-Every completed run must include observational ranking analysis, not only
-similarity feature generation. Product review and open questions:
+Every completed run must include SEO ranking research over observed variables,
+not only similarity feature generation. Product review and open questions:
 `PHASE5-STATS-PLAN-REVIEW.md`. Implementation slices: `ROADMAP.md` Phase 5.
 
 ### Phase 5 estimand (v1)
@@ -578,9 +580,9 @@ under multiple keywords; do not dedupe the panel in v1. Optional robustness:
 two-way cluster (keyword × `canonical_url_hash`).
 
 **Primary decision:** (A) association exists and (B) backend comparison — pooled
-within-keyword association per similarity backend. **BGE** is the pre-registered
-primary backend; Gemini Doc Retrieval and Gemini Semantic Similarity are
-secondary (fixed order, not data-driven).
+within-keyword association per signal family, starting with the similarity
+backends. **BGE** is the pre-registered primary backend; Gemini Doc Retrieval
+and Gemini Semantic Similarity are secondary (fixed order, not data-driven).
 
 **Headline metric:** keyword-level Spearman ρ (primary). Pooled regression with
 clustered CIs (secondary). Prefer CIs over p-values; coefficients are likely
@@ -656,8 +658,9 @@ LOWESS/CCPR file artifacts in v1 unless debug.
 **Plackett-Luce (page-level, secondary):** rank-ordered logit on the same
 `analysis_mart` panel at each confirmatory rank depth, using observed page rows
 per keyword with `serp_rank` capped at that depth and keyword-clustered inference.
-The implementation reports odds ratios per 1 SD similarity increase, optimizer
-stability, Hessian conditioning, and leave-one-out-top-rank IIA on `top_20` only.
+The implementation reports odds ratios per 1 SD increase in the fitted score
+column, optimizer stability, Hessian conditioning, and leave-one-out-top-rank
+IIA on `top_20` only.
 Passage-level Plackett-Luce remains deferred backlog work only.
 
 **Module layout:** `src/seo_rank/stats/`; spec in `analysis_spec.v1.yaml`.

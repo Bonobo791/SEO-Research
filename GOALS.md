@@ -6,9 +6,9 @@
 ## Active Objective
 
 Build Phase 5 **statistical analysis** on the `analysis_mart` panel so the CLI
-can quantify observational association between page-level similarity scores and
-SERP rank, compare backends with a pre-registered estimand, and emit
-guardrail-aware `stats_*` artifacts with explicit limitations (no causal claims).
+can quantify how observed page variables relate to SERP rank, compare backends
+with a pre-registered estimand, and emit guardrail-aware `stats_*` artifacts
+with explicit limitations (no causal claims).
 
 Full product review and estimand defaults: `PHASE5-STATS-PLAN-REVIEW.md`.
 Implementation slices and acceptance table: `ROADMAP.md` § Phase 5.
@@ -22,7 +22,7 @@ Completed: Phase 4.77 is recorded there as shipped work.
 
 ### Phase 5 objective
 
-Measure observational association between normalized similarity scores and SERP
+Measure observational relationships between observed page variables and SERP
 rank on the page-level panel (`target_keyword × SERP URL`, top 20 per keyword),
 and add a separate TextRazor-derived page-signal mart at the same grain. The
 similarity mart stays unchanged; the TextRazor families are additive.
@@ -85,7 +85,7 @@ Plackett-Luce is deferred backlog work only and is not wired in code today.
 | 41 | Signal registry for new families (Phase 5.7) | Stats | Open | `analysis_spec` families + validation |
 | 42 | Salience explainability & golden fixtures (Phase 5.7) | Stats | Open | Curated models + slice 31 golden path |
 
-**Remaining to close the core similarity delivery:** slice 31 (TextRazor golden
+**Remaining to close the core Phase 5 delivery:** slice 31 (TextRazor golden
 fixtures; see `ROADMAP.md`). OLS / Plackett-Luce standardization and relative-rank work (former
 Phase 5 slices 11–15) is **Phase 6.1** in `ROADMAP.md`. TextRazor-only ingestion:
 slices 21–26 shipped; shared raw-response schema contract (slice 26) is shipped.
@@ -266,9 +266,10 @@ schema drift).
         (today only `leave_one_out_top_rank: true` is specified).
       - `AnalysisSpec` accessor / typed loader for `estimand.plackett_luce`
         settings.
-      - Replace hardcoded constants in `plackett_luce.py` (`FORMULA`,
-        `DEFAULT_MAX_SERP_RANK`, `HESSIAN_CONDITION_NUMBER_THRESHOLD`,
-        `OPTIMIZER_GRADIENT_TOLERANCE`) with spec-driven values.
+      - Replace hardcoded constants in `plackett_luce.py`
+        (`DEFAULT_MAX_SERP_RANK`, `HESSIAN_CONDITION_NUMBER_THRESHOLD`,
+        `OPTIMIZER_GRADIENT_TOLERANCE`) with spec-driven values and keep the
+        reported formula aligned to the fitted score column.
       - Drive IIA enablement from `estimand.plackett_luce.iia_sensitivity`
         instead of `depth_key == spec.primary_rank_depth` in `artifacts.py`.
       - Tests: spec-driven threshold loader and regression coverage that spec

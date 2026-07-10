@@ -224,7 +224,7 @@ estimand:
   feature_model: normalized_similarity + log(deprecated_html_tags + 1) + log(time_to_first_byte_ms + 1) + C(target_keyword_id)
   plackett_luce:
     outcome: rank_ordered_logit
-    formula: similarity + log(deprecated_html_tags + 1) + log(time_to_first_byte_ms + 1)
+    formula: log(observed_variable + 1) + log(deprecated_html_tags + 1) + log(time_to_first_byte_ms + 1)
     clustered_se: target_keyword_id
     choice_set_scope: observed_top_20_serp_results_per_keyword
     iia_sensitivity:

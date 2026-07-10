@@ -6,8 +6,8 @@ Preparation) and `ROADMAP.md` (Phase 5). Written for product and implementation
 review before Phase 5 ships.
 
 **Status:** Draft for review  
-**Scope:** Observational association between similarity scores and SERP rank on
-the `analysis_mart` panel (`target_keyword × SERP URL`, top 20 per keyword).
+**Scope:** Observational relationships between observed page variables and SERP
+rank on the `analysis_mart` panel (`target_keyword × SERP URL`, top 20 per keyword).
 
 ---
 
@@ -33,7 +33,7 @@ make the rest secondary or sensitivity-only.
 
 | Decision | Example action if positive | Implied analysis |
 | -------- | -------------------------- | ---------------- |
-| **A. Association exists** | Continue investing in similarity stack | Pooled within-keyword association; report effect size + CI |
+| **A. Association exists** | Continue investing in the SEO ranking signal stack | Pooled within-keyword association; report effect size + CI |
 | **B. Backend comparison** | Prefer one scorer in product/docs | Pre-specified primary backend; pairwise or separate univariate models |
 | **C. Keyword heterogeneity** | Deep-dive high-signal keywords | Per-keyword slopes with explicit multiplicity family |
 | **D. Run quality gate** | Flag run as "low signal" for human review | Guardrail metrics only; no BH on a single run |

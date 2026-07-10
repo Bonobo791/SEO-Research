@@ -32,7 +32,6 @@ REGRESSION_CONTROL_COLUMNS = (
     "time_to_first_byte_ms",
 )
 BASELINE_FORMULA = "outcome ~ np.log(deprecated_html_tags + 1) + np.log(time_to_first_byte_ms + 1) + C(target_keyword_id)"
-SINGLE_KEYWORD_BASELINE_FORMULA = "outcome ~ np.log(deprecated_html_tags + 1) + np.log(time_to_first_byte_ms + 1)"
 REGRESSION_REQUIRED_COLUMNS = ("serp_rank",)
 
 
@@ -177,7 +176,7 @@ def summarize_regression_for_score_column(
         fit=fit,
         score_column=score_column,
     )
-    if summary.get("status") == "skipped":
+    if summary.get("status") in {"skipped", "error"}:
         return summary
     summary["status"] = "computed"
     return summary

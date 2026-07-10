@@ -1,6 +1,6 @@
 # SEO-Research
 
-Python CLI research scaffold for DataForSEO/TextRazor SEO ranking similarity
+Python CLI research scaffold for SEO ranking research across DataForSEO/TextRazor signals
 analysis.
 
 ## What works today
@@ -200,7 +200,7 @@ By default, keyword expansion keeps **one** cluster keyword (the seed). Pass
 `--keyword-limit 25` for the full fixture expansion set used in lake round-trip
 tests.
 
-### Similarity backends (fixture vs live)
+### Ranking signal backends (fixture vs live)
 
 All three page-level backends are always emitted in JSON/Markdown. Default and
 live runs without optional flags use **deterministic fixture scorers** in
@@ -223,8 +223,8 @@ see `ROADMAP.md` (BGE hybrid / retrieve-then-rerank backlog).
 
 ### `seo-rank analyze` today
 
-`analyze` writes `parquet/analysis_mart/` (SERP rank plus the three similarity
-columns and page text length). TextRazor page metrics live in separate marts
+`analyze` writes `parquet/analysis_mart/` (SERP rank plus the three primary
+backend score columns and page text length). TextRazor page metrics live in separate marts
 (`textrazor_page_metrics_curated`, `textrazor_page_metrics`) at the same URL
 grain; they are not columns on `analysis_mart` today. The curated and feature
 marts include `textrazor_page_metrics_complete` so incomplete upstream

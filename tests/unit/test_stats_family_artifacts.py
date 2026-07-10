@@ -6,6 +6,7 @@ from pathlib import Path
 import polars as pl
 
 from seo_rank.data.features import ONPAGE_FEATURES_EXPECTED_SCHEMA, ONPAGE_FEATURES_EXTRA_COLUMNS
+from seo_rank.stats.artifacts import _format_regression_lines
 from seo_rank.stats.artifacts import build_family_source_frames
 from seo_rank.stats.artifacts import run_phase5_stats
 from seo_rank.stats.spec import load_analysis_spec
@@ -86,6 +87,31 @@ def _combined_textrazor_frame() -> pl.DataFrame:
                 }
             )
     return pl.DataFrame(rows)
+
+
+def test_format_regression_lines_handles_control_error_summary() -> None:
+    regression = {
+        "backends": {
+            "onpage_core_web_vitals": {
+                "backend": "onpage_core_web_vitals",
+                "score_column": "onpage_core_web_vitals_score",
+                "status": "error",
+                "error_note": "required control data is incomplete; model not fit",
+                "invalid_controls": [
+                    {"column": "time_to_first_byte_ms", "reason": "missing_values"}
+                ],
+            }
+        }
+    }
+
+    lines = _format_regression_lines(regression)
+
+    assert lines == [
+        "- onpage_core_web_vitals: status=error, "
+        "error_note=required control data is incomplete; model not fit, "
+        "invalid_controls=[{'column': 'time_to_first_byte_ms', "
+        "'reason': 'missing_values'}]"
+    ]
 
 
 def _combined_backlinks_analysis_frame() -> pl.DataFrame:

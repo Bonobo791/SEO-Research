@@ -70,8 +70,8 @@ placeholders only.
 | `test_stats_panel.py` | Guardrail evaluation (SERP-rank variance hard-fail, similarity-variance warn), panel grain filtering, full vs minimal stats artifact writing on pass/fail |
 | `test_stats_spearman.py` | Benjamini-Hochberg adjustment, backend Spearman summaries, and Spearman artifact emission on passing panels |
 | `test_stats_diagnostics.py` | Pooled OLS diagnostics, multivariate VIF sensitivity with spec drop order, influence refit (`influence_sensitivity`), small-sample Shapiro handling, diagnostic artifact emission on passing panels, and skipped-backend diagnostics behavior |
-| `test_stats_regression.py` | Pooled baseline and per-backend feature regressions with keyword-clustered SEs, effect-size translation, two-way-cluster sensitivity, and regression artifact emission on passing panels |
-| `test_stats_plackett_luce.py` | Page-level Plackett-Luce rank-ordered logit summaries, partial-ranking handling, optimizer / leave-one-out IIA diagnostics, and PL artifact emission on passing panels |
+| `test_stats_regression.py` | Pooled baseline and per-backend feature regressions with keyword-clustered SEs, effect-size translation, two-way-cluster sensitivity, error-state preservation when required controls are incomplete, and regression artifact emission on passing panels |
+| `test_stats_plackett_luce.py` | Page-level Plackett-Luce rank-ordered logit summaries, partial-ranking handling, optimizer / leave-one-out IIA diagnostics, actual score-column formula recording, and PL artifact emission on passing panels |
 | `test_stats_families.py` | Declarative signal-family registry loading, ordered enumeration, panel-grain preservation, and malformed-entry rejection |
 | `test_stats_family_dispatch.py` | Family-aware Spearman summaries with BH scoped per signal family (similarity vs TextRazor source marts) |
 | `test_stats_family_artifacts.py` | Combined `stats_*` artifact tree for all signal families (similarity, TextRazor, `backlinks_counts`), hard-fail family skip path, and underpowered `inference_mode` labeling |
@@ -147,13 +147,15 @@ exist.
 - **Pooled regression secondary path** — `tests/unit/test_stats_regression.py`
   covers baseline vs feature models, keyword-clustered SEs only in the primary
   output, the explicit Δ-rank effect-size formula, repeated-URL two-way-cluster
-  sensitivity, and regression sections in `stats_summary.json` /
+  sensitivity, preservation of `status=error` when required controls are
+  incomplete, and regression sections in `stats_summary.json` /
   `stats_report.md`.
 - **Page-level Plackett-Luce secondary path** —
   `tests/unit/test_stats_plackett_luce.py` covers the rank-ordered logit fit,
   partial-ranking row dropping, optimizer convergence / non-convergence,
-  choice-set sizing, leave-one-out IIA on `top_20`, and per-depth PL sections in
-  `stats_summary.json` / `stats_diagnostics.json` / `stats_report.md`.
+  choice-set sizing, leave-one-out IIA on `top_20`, actual score-column formula
+  recording, and per-depth PL sections in `stats_summary.json` /
+  `stats_diagnostics.json` / `stats_report.md`.
 - **Rank-depth confirmatory slices** — `tests/unit/test_stats_rank_depth.py`
   covers spec accessors, `filter_panel_by_max_rank`, per-depth Spearman/OLS/PL,
   monotonic row counts, `actionable_association_by_rank_depth`, and four

@@ -30,9 +30,6 @@ PL_CONTROL_COLUMNS = (
     "deprecated_html_tags",
     "time_to_first_byte_ms",
 )
-PL_LOG_CONTROL_COLUMNS = frozenset(
-    ("deprecated_html_tags", "time_to_first_byte_ms")
-)
 PLACKET_LUCE_REQUIRED_COLUMNS = (
     "serp_rank",
     "target_keyword_id",
@@ -40,7 +37,6 @@ PLACKET_LUCE_REQUIRED_COLUMNS = (
 DEFAULT_MAX_SERP_RANK = 20
 HESSIAN_CONDITION_NUMBER_THRESHOLD = 100.0
 OPTIMIZER_GRADIENT_TOLERANCE = 1e-6
-FORMULA = "rank_ordered_logit ~ similarity + log(deprecated_html_tags + 1) + log(time_to_first_byte_ms + 1)"
 FAMILY_PLACKETT_LUCE_OPTIMIZER_OPTIONS: dict[str, object] = {"maxiter": 100}
 
 
@@ -265,7 +261,10 @@ def fit_plackett_luce_for_prepared_model_data(
         information=information,
         log_likelihood=log_likelihood,
         optimizer=optimizer_result,
-        similarity_within_keyword_sd=within_keyword_sd_rms(fitted_model_data, score_column),
+        similarity_within_keyword_sd=_logged_signal_sd_rms(
+            fitted_model_data,
+            score_column,
+        ),
     )
 
 
@@ -578,7 +577,7 @@ def _summarize_fit(fit: PlackettLuceFit) -> dict[str, object]:
     convergence_confirmed = _convergence_confirmed(fit)
     choice_set_size_summary = _choice_set_size_summary(fit.choice_set_sizes)
     main_model: dict[str, object] = {
-        "formula": _fitted_formula(fit.fitted_control_columns),
+        "formula": _fitted_formula(fit.score_column, fit.fitted_control_columns),
         "omitted_controls": [dict(control) for control in fit.omitted_controls],
         "log_likelihood": float(fit.log_likelihood),
         "similarity_within_keyword_sd": similarity_sd,
@@ -586,11 +585,7 @@ def _summarize_fit(fit: PlackettLuceFit) -> dict[str, object]:
     }
     for parameter_index, column in enumerate(fit.fitted_control_columns, start=1):
         values = fit.model_data[column].astype(float)
-        transformed = (
-            np.log(values + 1.0)
-            if column in PL_LOG_CONTROL_COLUMNS
-            else values
-        )
+        transformed = np.log(values + 1.0)
         spread = float(transformed.std(ddof=1))
         raw_coefficient = float(fit.params[parameter_index])
         raw_standard_error = float(
@@ -601,7 +596,7 @@ def _summarize_fit(fit: PlackettLuceFit) -> dict[str, object]:
             raw_standard_error,
             df=max(len(fit.choice_set_sizes) - 1, 1),
         )
-        spread_key = f"log_{column}_sd" if column in PL_LOG_CONTROL_COLUMNS else f"{column}_sd"
+        spread_key = f"log_{column}_sd"
         main_model[spread_key] = spread
         main_model[f"{column}_log_odds_per_1sd"] = raw_coefficient * spread
         main_model[f"{column}_log_odds_per_1sd_confidence_interval"] = [
@@ -913,7 +908,14 @@ def _pl_signal_variance(model_data: pd.DataFrame, score_column: str) -> float:
     usable = variance_frame.dropna(subset=[score_column])
     if usable.empty:
         return 0.0
-    return float(within_keyword_sd_rms(usable, score_column))
+    return _logged_signal_sd_rms(usable, score_column)
+
+
+def _logged_signal_sd_rms(model_data: pd.DataFrame, score_column: str) -> float:
+    logged = model_data[[score_column, "target_keyword_id"]].copy()
+    _coerce_pl_predictor(logged, score_column)
+    logged[score_column] = np.log(logged[score_column].astype(float) + 1.0)
+    return float(within_keyword_sd_rms(logged, score_column))
 
 
 def _build_keyword_frames(
@@ -957,7 +959,7 @@ def _select_pl_controls(
             omitted_controls.append({"column": column, "reason": "missing_values"})
             continue
         values = model_data[column].to_numpy(dtype=float)
-        log_values = np.log(values + 1.0) if column in PL_LOG_CONTROL_COLUMNS else values
+        log_values = np.log(values + 1.0)
         if np.ptp(log_values) == 0.0:
             omitted_controls.append({"column": column, "reason": "constant"})
         else:
@@ -989,30 +991,19 @@ def _feature_matrix(
     score_column: str,
     control_columns: Sequence[str],
 ) -> np.ndarray:
-    similarity_series = frame[score_column]
-    if pd.api.types.is_bool_dtype(similarity_series):
-        similarity = similarity_series.to_numpy(dtype=float)
-    else:
-        similarity = similarity_series.to_numpy(dtype=float)
-    columns = [similarity]
+    score = frame[score_column].to_numpy(dtype=float)
+    columns = [np.log(score + 1.0)]
     columns.extend(
-        (
-            np.log(frame[column].to_numpy(dtype=float) + 1.0)
-            if column in PL_LOG_CONTROL_COLUMNS
-            else frame[column].to_numpy(dtype=float)
-        )
+        np.log(frame[column].to_numpy(dtype=float) + 1.0)
         for column in control_columns
     )
     return np.column_stack(columns)
 
 
-def _fitted_formula(control_columns: Sequence[str]) -> str:
+def _fitted_formula(score_column: str, control_columns: Sequence[str]) -> str:
     terms = [
-        "similarity",
-        *(
-            f"log({column} + 1)" if column in PL_LOG_CONTROL_COLUMNS else column
-            for column in control_columns
-        ),
+        f"log({score_column} + 1)",
+        *(f"log({column} + 1)" for column in control_columns),
     ]
     return "rank_ordered_logit ~ " + " + ".join(terms)
 

@@ -517,3 +517,21 @@ def test_regression_filters_null_signal_rows_without_mutating_other_model_inputs
     assert summary["status"] == "computed"
     assert summary["row_count"] == frame.height - 10
     assert "np.log(time_to_first_byte_ms + 1)" in summary["feature_model"]["formula"]
+
+
+def test_summarize_score_column_preserves_control_error_status() -> None:
+    frame = _regression_analysis_mart_frame().with_columns(
+        pl.when(pl.col("serp_rank") == 1)
+        .then(None)
+        .otherwise(pl.lit(250))
+        .alias("time_to_first_byte_ms"),
+    )
+
+    summary = summarize_regression_for_score_column(
+        frame,
+        label="onpage_core_web_vitals",
+        score_column="bge_normalized_score",
+    )
+
+    assert summary["status"] == "error"
+    assert summary["error_note"] == "required control data is incomplete; model not fit"
