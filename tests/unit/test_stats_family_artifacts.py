@@ -37,6 +37,7 @@ def _combined_analysis_mart_frame() -> pl.DataFrame:
                     "page_text_length": 120 + (keyword_index * 3) + serp_rank,
                     "referring_domains_count": 120 + (keyword_index * 3) + serp_rank,
                     "deprecated_html_tags": (keyword_index + serp_rank) % 3 == 0,
+                    "meta_keywords_to_content_consistency": 0.5,
                     "bge_raw_score": signal,
                     "bge_normalized_score": signal,
                     "gemini_doc_retrieval_raw_score": signal - 0.1,
@@ -414,6 +415,29 @@ def test_build_family_source_frames_restores_missing_controls_from_analysis_mart
     assert "deprecated_html_tags" in restored.columns
     assert restored.get_column("deprecated_html_tags").to_list() == analysis_mart.get_column(
         "deprecated_html_tags"
+    ).to_list()
+
+
+def test_build_family_source_frames_restores_meta_keyword_control_from_analysis_mart(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "runs" / "run-1"
+    (run_dir / "parquet" / "onpage_features").mkdir(parents=True)
+    analysis_mart = _combined_analysis_mart_frame()
+    legacy_onpage = _combined_onpage_features_frame().drop(
+        "meta_keywords_to_content_consistency"
+    )
+    legacy_onpage.write_parquet(run_dir / "parquet" / "onpage_features" / "part-0.parquet")
+
+    source_frames = build_family_source_frames(
+        run_dir,
+        analysis_mart=analysis_mart,
+        spec=load_analysis_spec(),
+    )
+
+    restored = source_frames["onpage_features"]
+    assert restored.get_column("meta_keywords_to_content_consistency").to_list() == analysis_mart.get_column(
+        "meta_keywords_to_content_consistency"
     ).to_list()
 
 

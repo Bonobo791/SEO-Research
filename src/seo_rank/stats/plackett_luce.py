@@ -25,17 +25,20 @@ SIMILARITY_SCORE_COLUMNS = {
     "gemini_doc_retrieval": "gemini_doc_retrieval_normalized_score",
     "gemini_semantic_similarity": "gemini_semantic_similarity_normalized_score",
 }
-PL_CONTROL_COLUMNS = ("referring_domains_count", "deprecated_html_tags")
+PL_CONTROL_COLUMNS = (
+    "deprecated_html_tags",
+    "meta_keywords_to_content_consistency",
+)
+PL_LOG_CONTROL_COLUMNS = frozenset(("deprecated_html_tags",))
 PLACKET_LUCE_REQUIRED_COLUMNS = (
     "serp_rank",
-    "referring_domains_count",
-    "deprecated_html_tags",
+    "target_keyword_id",
 )
 DEFAULT_MAX_SERP_RANK = 20
 HESSIAN_CONDITION_NUMBER_THRESHOLD = 100.0
 OPTIMIZER_GRADIENT_TOLERANCE = 1e-6
-FORMULA = "rank_ordered_logit ~ similarity + log(referring_domains_count + 1) + log(deprecated_html_tags + 1)"
-FAMILY_PLACKETT_LUCE_OPTIMIZER_OPTIONS: dict[str, object] = {"maxiter": 50}
+FORMULA = "rank_ordered_logit ~ similarity + log(deprecated_html_tags + 1) + meta_keywords_to_content_consistency"
+FAMILY_PLACKETT_LUCE_OPTIMIZER_OPTIONS: dict[str, object] = {"maxiter": 100}
 
 
 @dataclass(frozen=True)
@@ -187,14 +190,15 @@ def fit_plackett_luce_for_prepared_model_data(
         score_column,
         sorted_model_data=model_data,
     )
-    if not keyword_frames:
+    eligible_keyword_frames = [frame for frame in keyword_frames if len(frame) >= 2]
+    if not eligible_keyword_frames:
         logger.debug("plackett-luce backend=%s skipped: no keyword groups", label)
         return None
 
-    fitted_model_data = pd.concat(keyword_frames, ignore_index=True)
+    fitted_model_data = pd.concat(eligible_keyword_frames, ignore_index=True)
     fitted_control_columns, omitted_controls = _select_pl_controls(fitted_model_data)
     grouped = _build_keyword_groups(
-        keyword_frames,
+        eligible_keyword_frames,
         score_column,
         fitted_control_columns,
     )
@@ -568,8 +572,13 @@ def _summarize_fit(fit: PlackettLuceFit) -> dict[str, object]:
         "convergence_confirmed": convergence_confirmed,
     }
     for parameter_index, column in enumerate(fit.fitted_control_columns, start=1):
-        log_values = np.log(fit.model_data[column].astype(float) + 1.0)
-        log_sd = float(log_values.std(ddof=1))
+        values = fit.model_data[column].astype(float)
+        transformed = (
+            np.log(values + 1.0)
+            if column in PL_LOG_CONTROL_COLUMNS
+            else values
+        )
+        spread = float(transformed.std(ddof=1))
         raw_coefficient = float(fit.params[parameter_index])
         raw_standard_error = float(
             np.sqrt(max(fit.covariance[parameter_index, parameter_index], 0.0))
@@ -579,10 +588,11 @@ def _summarize_fit(fit: PlackettLuceFit) -> dict[str, object]:
             raw_standard_error,
             df=max(len(fit.choice_set_sizes) - 1, 1),
         )
-        main_model[f"log_{column}_sd"] = log_sd
-        main_model[f"{column}_log_odds_per_1sd"] = raw_coefficient * log_sd
+        spread_key = f"log_{column}_sd" if column in PL_LOG_CONTROL_COLUMNS else f"{column}_sd"
+        main_model[spread_key] = spread
+        main_model[f"{column}_log_odds_per_1sd"] = raw_coefficient * spread
         main_model[f"{column}_log_odds_per_1sd_confidence_interval"] = [
-            float(bound * log_sd) for bound in confidence_interval
+            float(bound * spread) for bound in confidence_interval
         ]
     main_model.update(
         {
@@ -631,12 +641,24 @@ def _summarize_backend_plackett_luce_result(
         if score_column is None:
             score_column = _score_column_for_backend(backend)
         model_frame = _prepare_plackett_luce_frame(analysis_mart, max_rank=max_rank)
-        prepared_rows = int(model_frame.height)
-        keyword_count = int(model_frame["target_keyword_id"].n_unique()) if prepared_rows else 0
+        score_rows = model_frame.filter(pl.col(score_column).is_not_null())
+        keyword_frames, _ = _build_keyword_frames(score_rows.to_pandas(), score_column)
+        eligible_keyword_frames = [frame for frame in keyword_frames if len(frame) >= 2]
+        prepared_rows = int(sum(len(frame) for frame in eligible_keyword_frames))
+        keyword_count = len(eligible_keyword_frames)
+        if score_rows.is_empty():
+            skipped_reason = "no_usable_rows"
+        elif not eligible_keyword_frames:
+            skipped_reason = "insufficient_choice_set"
+        elif _pl_signal_variance(score_rows.to_pandas(), score_column) == 0.0:
+            skipped_reason = "insufficient_signal_variance"
+        else:
+            skipped_reason = "insufficient_design"
         logger.info(
-            "plackett-luce backend=%s status=skipped skipped_reason=insufficient_choice_set "
+            "plackett-luce backend=%s status=skipped skipped_reason=%s "
             "row_count=%d keyword_count=%d",
             backend,
+            skipped_reason,
             prepared_rows,
             keyword_count,
         )
@@ -644,7 +666,7 @@ def _summarize_backend_plackett_luce_result(
             "backend": backend,
             "score_column": score_column,
             "status": "skipped",
-            "skipped_reason": "insufficient_choice_set",
+            "skipped_reason": skipped_reason,
             "row_count": prepared_rows,
             "keyword_count": keyword_count,
         }
@@ -876,7 +898,8 @@ def _build_keyword_frames(
             by=["serp_rank", "serp_item_id"],
             kind="mergesort",
         ).reset_index(drop=True)
-        if sorted_frame[score_column].isna().any():
+        sorted_frame = sorted_frame[sorted_frame[score_column].notna()].reset_index(drop=True)
+        if sorted_frame.empty:
             continue
         if sorted_frame["serp_rank"].duplicated().any():
             duplicate_serp_rank_keyword_count += 1
@@ -891,7 +914,14 @@ def _select_pl_controls(
     fitted_controls: list[str] = []
     omitted_controls: list[dict[str, str]] = []
     for column in PL_CONTROL_COLUMNS:
-        log_values = np.log(model_data[column].to_numpy(dtype=float) + 1.0)
+        if column not in model_data.columns:
+            omitted_controls.append({"column": column, "reason": "missing_column"})
+            continue
+        if model_data[column].isna().any():
+            omitted_controls.append({"column": column, "reason": "missing_values"})
+            continue
+        values = model_data[column].to_numpy(dtype=float)
+        log_values = np.log(values + 1.0) if column in PL_LOG_CONTROL_COLUMNS else values
         if np.ptp(log_values) == 0.0:
             omitted_controls.append({"column": column, "reason": "constant"})
         else:
@@ -930,14 +960,24 @@ def _feature_matrix(
         similarity = similarity_series.to_numpy(dtype=float)
     columns = [similarity]
     columns.extend(
-        np.log(frame[column].to_numpy(dtype=float) + 1.0)
+        (
+            np.log(frame[column].to_numpy(dtype=float) + 1.0)
+            if column in PL_LOG_CONTROL_COLUMNS
+            else frame[column].to_numpy(dtype=float)
+        )
         for column in control_columns
     )
     return np.column_stack(columns)
 
 
 def _fitted_formula(control_columns: Sequence[str]) -> str:
-    terms = ["similarity", *(f"log({column} + 1)" for column in control_columns)]
+    terms = [
+        "similarity",
+        *(
+            f"log({column} + 1)" if column in PL_LOG_CONTROL_COLUMNS else column
+            for column in control_columns
+        ),
+    ]
     return "rank_ordered_logit ~ " + " + ".join(terms)
 
 

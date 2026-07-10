@@ -60,7 +60,7 @@ def test_load_analysis_spec_includes_plackett_luce_secondary_estimand() -> None:
     plackett_luce = analysis_spec.estimand["plackett_luce"]
 
     assert plackett_luce["outcome"] == "rank_ordered_logit"
-    assert plackett_luce["formula"] == "similarity + log(referring_domains_count + 1) + log(deprecated_html_tags + 1)"
+    assert plackett_luce["formula"] == "similarity + log(deprecated_html_tags + 1) + meta_keywords_to_content_consistency"
     assert plackett_luce["clustered_se"] == "target_keyword_id"
     assert plackett_luce["choice_set_scope"] == "observed_top_20_serp_results_per_keyword"
     assert plackett_luce["iia_sensitivity"] == {
@@ -98,6 +98,12 @@ def test_load_analysis_spec_exposes_multivariate_sensitivity_settings() -> None:
     analysis_spec = load_analysis_spec()
 
     assert analysis_spec.multivariate_vif_threshold == 5
+
+
+def test_load_analysis_spec_declares_missing_control_policy() -> None:
+    analysis_spec = load_analysis_spec()
+
+    assert analysis_spec.data["estimand"]["missing_control_policy"] == "omit_term"
     assert analysis_spec.backend_drop_order == (
         "gemini_semantic_similarity",
         "gemini_doc_retrieval",

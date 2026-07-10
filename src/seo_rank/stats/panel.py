@@ -16,6 +16,12 @@ from seo_rank.stats.spec import AnalysisSpec, load_analysis_spec
 
 logger = logging.getLogger(__name__)
 
+_ANALYSIS_JOIN_KEYS = ("run_id", "target_keyword_id", "canonical_url_hash", "url")
+_ANALYSIS_CONTROL_DTYPES = {
+    "deprecated_html_tags": pl.Boolean,
+    "meta_keywords_to_content_consistency": pl.Float64,
+}
+
 SIMILARITY_RATE_COLUMNS = {
     "bge": "bge_normalized_score",
     "gemini_doc_retrieval": "gemini_doc_retrieval_normalized_score",
@@ -58,6 +64,7 @@ def load_analysis_panel(
     logger.info("loading analysis panel run_dir=%s", run_dir)
     analysis_spec = spec or load_analysis_spec()
     analysis_mart = scan_curated_table(run_dir, "analysis_mart").collect()
+    analysis_mart = _normalize_analysis_mart_controls(run_dir, analysis_mart)
     result = prepare_analysis_panel(run_dir, analysis_mart, spec=analysis_spec)
     logger.info(
         "loaded analysis panel run_dir=%s mart_rows=%d panel_rows=%d hard_fail=%s",
@@ -67,6 +74,87 @@ def load_analysis_panel(
         result.hard_fail,
     )
     return result
+
+
+def _normalize_analysis_mart_controls(
+    run_dir: Path,
+    analysis_mart: pl.DataFrame,
+) -> pl.DataFrame:
+    """Restore controls omitted by legacy analysis-mart partitions."""
+    missing = [
+        column for column in _ANALYSIS_CONTROL_DTYPES if column not in analysis_mart.columns
+    ]
+    if not missing:
+        return analysis_mart
+
+    for source_name in ("onpage_features", "onpage_signals", "backlinks"):
+        source_path = Path(run_dir) / "parquet" / source_name
+        if not source_path.exists():
+            continue
+        try:
+            source = scan_curated_table(run_dir, source_name).collect()
+        except OSError:
+            continue
+        joinable = [
+            column
+            for column in missing
+            if column in source.columns and all(key in source.columns for key in _ANALYSIS_JOIN_KEYS)
+        ]
+        if not joinable:
+            continue
+        analysis_mart = analysis_mart.join(
+            source.select([*_ANALYSIS_JOIN_KEYS, *joinable]),
+            on=list(_ANALYSIS_JOIN_KEYS),
+            how="left",
+        )
+        missing = [column for column in missing if column not in analysis_mart.columns]
+        if not missing:
+            return analysis_mart
+
+    return analysis_mart.with_columns(
+        [
+            pl.lit(None).cast(_ANALYSIS_CONTROL_DTYPES[column]).alias(column)
+            for column in missing
+        ]
+    )
+
+
+def _restore_analysis_controls(
+    source_frame: pl.DataFrame,
+    analysis_mart: pl.DataFrame,
+) -> pl.DataFrame:
+    """Restore controls omitted by older optional family-mart schemas."""
+    if source_frame.is_empty():
+        return source_frame
+
+    missing = [
+        column for column in _ANALYSIS_CONTROL_DTYPES if column not in source_frame.columns
+    ]
+    if not missing:
+        return source_frame
+
+    joinable = [
+        column
+        for column in missing
+        if column in analysis_mart.columns
+        and all(key in source_frame.columns for key in _ANALYSIS_JOIN_KEYS)
+    ]
+    if joinable:
+        source_frame = source_frame.join(
+            analysis_mart.select([*_ANALYSIS_JOIN_KEYS, *joinable]),
+            on=list(_ANALYSIS_JOIN_KEYS),
+            how="left",
+        )
+
+    remaining = [column for column in missing if column not in source_frame.columns]
+    if remaining:
+        source_frame = source_frame.with_columns(
+            [
+                pl.lit(None).cast(_ANALYSIS_CONTROL_DTYPES[column]).alias(column)
+                for column in remaining
+            ]
+        )
+    return source_frame
 
 
 def prepare_analysis_panel(

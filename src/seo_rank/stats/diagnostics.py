@@ -37,8 +37,16 @@ RESET_POWER = 2
 MIN_DF_RESID_FOR_RESET = RESET_POWER
 BREUSCH_PAGAN_P_VALUE_THRESHOLD = 0.05
 STUDENTIZED_RESIDUAL_THRESHOLD = 3.0
-MULTIVARIATE_REFERRING_DOMAINS_TERM = "np.log(referring_domains_count + 1)"
 MULTIVARIATE_DEPRECATED_HTML_TAGS_TERM = "np.log(deprecated_html_tags + 1)"
+MULTIVARIATE_META_KEYWORDS_CONSISTENCY_TERM = "meta_keywords_to_content_consistency"
+MULTIVARIATE_CONTROL_COLUMNS = (
+    "deprecated_html_tags",
+    "meta_keywords_to_content_consistency",
+)
+MULTIVARIATE_CONTROL_TERMS = {
+    "deprecated_html_tags": MULTIVARIATE_DEPRECATED_HTML_TAGS_TERM,
+    "meta_keywords_to_content_consistency": MULTIVARIATE_META_KEYWORDS_CONSISTENCY_TERM,
+}
 MULTIVARIATE_SCORE_COLUMNS = (
     "bge_normalized_score",
     "gemini_doc_retrieval_normalized_score",
@@ -166,7 +174,7 @@ def summarize_multivariate_sensitivity(
             backend_drop_order=backend_drop_order,
         )
 
-    model_data, skipped_reason = _prepare_multivariate_sensitivity_data(
+    model_data, skipped_reason, control_columns, omitted_controls = _prepare_multivariate_sensitivity_data(
         analysis_mart,
         active_backends=active_backends,
     )
@@ -183,8 +191,18 @@ def summarize_multivariate_sensitivity(
     current_backends = active_backends
 
     while True:
-        fit = _fit_multivariate_sensitivity_model(model_data, current_backends)
-        fit_summary = _summarize_multivariate_sensitivity_fit(fit, model_data, current_backends)
+        fit = _fit_multivariate_sensitivity_model(
+            model_data,
+            current_backends,
+            control_columns,
+        )
+        fit_summary = _summarize_multivariate_sensitivity_fit(
+            fit,
+            model_data,
+            current_backends,
+            control_columns,
+        )
+        fit_summary["omitted_controls"] = [dict(control) for control in omitted_controls]
         max_vif = float(fit_summary["max_vif"])
         if max_vif <= float(vif_threshold):
             return {
@@ -243,34 +261,48 @@ def _prepare_multivariate_sensitivity_data(
     analysis_mart: pl.DataFrame,
     *,
     active_backends: Sequence[str],
-) -> tuple[pd.DataFrame | None, str]:
+) -> tuple[
+    pd.DataFrame | None,
+    str,
+    tuple[str, ...],
+    tuple[dict[str, str], ...],
+]:
     required_columns = [
         "target_keyword_id",
         "serp_rank",
-        "referring_domains_count",
-        "deprecated_html_tags",
         *[SIMILARITY_SCORE_COLUMNS[backend] for backend in active_backends],
     ]
     missing_columns = [column for column in required_columns if column not in analysis_mart.columns]
     if missing_columns:
-        return None, "missing_required_columns"
+        return None, "missing_required_columns", (), ()
 
     model_frame = analysis_mart.drop_nulls(required_columns)
     if model_frame.is_empty():
-        return None, "no_usable_rows"
+        return None, "no_usable_rows", (), ()
     if model_frame.height < 3:
-        return None, "insufficient_rows"
+        return None, "insufficient_rows", (), ()
 
-    model_data = model_frame.select(required_columns).to_pandas().copy()
+    control_columns: list[str] = []
+    omitted_controls: list[dict[str, str]] = []
+    for column in MULTIVARIATE_CONTROL_COLUMNS:
+        if column not in model_frame.columns:
+            omitted_controls.append({"column": column, "reason": "missing_column"})
+        elif model_frame[column].null_count() > 0:
+            omitted_controls.append({"column": column, "reason": "missing_values"})
+        else:
+            control_columns.append(column)
+
+    model_data = model_frame.select([*required_columns, *control_columns]).to_pandas().copy()
     model_data["outcome"] = -np.log(model_data["serp_rank"].astype(float))
-    return model_data, ""
+    return model_data, "", tuple(control_columns), tuple(omitted_controls)
 
 
 def _fit_multivariate_sensitivity_model(
     model_data: pd.DataFrame,
     active_backends: Sequence[str],
+    control_columns: Sequence[str],
 ):
-    formula = _multivariate_formula(active_backends)
+    formula = _multivariate_formula(active_backends, control_columns)
     return smf.ols(formula, data=model_data).fit()
 
 
@@ -278,9 +310,10 @@ def _summarize_multivariate_sensitivity_fit(
     fit,
     model_data: pd.DataFrame,
     active_backends: Sequence[str],
+    control_columns: Sequence[str],
 ) -> dict[str, object]:
     parameter_table = _multivariate_parameter_table(fit)
-    vif_table = _multivariate_vif_table(fit, active_backends)
+    vif_table = _multivariate_vif_table(fit, active_backends, control_columns)
     max_vif_entry = max(vif_table, key=lambda row: row["vif"])
     max_vif = float(max_vif_entry["vif"])
     return {
@@ -320,13 +353,13 @@ def _multivariate_parameter_table(fit) -> list[dict[str, object]]:
 def _multivariate_vif_table(
     fit,
     active_backends: Sequence[str],
+    control_columns: Sequence[str],
 ) -> list[dict[str, object]]:
     exog_names = list(fit.model.exog_names)
     exog = np.asarray(fit.model.exog, dtype=float)
     selected_terms = [
         *[SIMILARITY_SCORE_COLUMNS[backend] for backend in active_backends],
-        MULTIVARIATE_REFERRING_DOMAINS_TERM,
-        MULTIVARIATE_DEPRECATED_HTML_TAGS_TERM,
+        *(MULTIVARIATE_CONTROL_TERMS[column] for column in control_columns),
     ]
     selected_indices = [
         exog_names.index(term)
@@ -334,13 +367,15 @@ def _multivariate_vif_table(
         if term in exog_names
     ]
     selected_exog = exog[:, selected_indices]
+    selected_terms_present = [term for term in selected_terms if term in exog_names]
     vif_rows: list[dict[str, object]] = []
-    for vif_index, term in enumerate(term for term in selected_terms if term in exog_names):
-        if term not in exog_names:
-            continue
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", RuntimeWarning)
-            vif = variance_inflation_factor(selected_exog, vif_index)
+    for vif_index, term in enumerate(selected_terms_present):
+        if len(selected_terms_present) == 1:
+            vif = 1.0
+        else:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                vif = variance_inflation_factor(selected_exog, vif_index)
         vif_rows.append(
             {
                 "term": term,
@@ -351,15 +386,17 @@ def _multivariate_vif_table(
     return vif_rows
 
 
-def _multivariate_formula(active_backends: Sequence[str]) -> str:
+def _multivariate_formula(
+    active_backends: Sequence[str],
+    control_columns: Sequence[str] = MULTIVARIATE_CONTROL_COLUMNS,
+) -> str:
     score_terms = [SIMILARITY_SCORE_COLUMNS[backend] for backend in active_backends]
     return (
         "outcome ~ "
         + " + ".join(
             [
                 *score_terms,
-                MULTIVARIATE_REFERRING_DOMAINS_TERM,
-                MULTIVARIATE_DEPRECATED_HTML_TAGS_TERM,
+                *(MULTIVARIATE_CONTROL_TERMS[column] for column in control_columns),
                 "C(target_keyword_id)",
             ]
         )
@@ -392,10 +429,10 @@ def _next_multivariate_drop_backend(
 def _multivariate_term_kind(term: str) -> str:
     if term == "Intercept":
         return "intercept"
-    if term == MULTIVARIATE_REFERRING_DOMAINS_TERM:
-        return "referring_domains_count"
     if term == MULTIVARIATE_DEPRECATED_HTML_TAGS_TERM:
         return "deprecated_html_tags"
+    if term == MULTIVARIATE_META_KEYWORDS_CONSISTENCY_TERM:
+        return "meta_keywords_to_content_consistency"
     if term in MULTIVARIATE_SCORE_COLUMNS_TO_BACKEND:
         return "similarity_backend"
     if term.startswith("C(target_keyword_id)"):
@@ -584,6 +621,7 @@ def summarize_backend_diagnostics_from_fit(
         "status": "computed",
         "row_count": nobs,
         "keyword_count": int(fit.model_data["target_keyword_id"].nunique()),
+        "omitted_controls": [dict(control) for control in fit.omitted_controls],
         "model_formula": fit.feature_result.model.formula,
         "baseline_formula": fit.baseline_result.model.formula,
         "residuals_vs_fitted": _residuals_vs_fitted_summary(residuals, fitted),

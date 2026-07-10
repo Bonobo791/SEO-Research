@@ -82,6 +82,7 @@ def _analysis_mart_frame(
                     "page_text_length": 200 + (keyword_index * 3) + serp_rank,
                     "referring_domains_count": 200 + (keyword_index * 3) + serp_rank,
                     "deprecated_html_tags": (keyword_index + serp_rank) % 3 == 0,
+                    "meta_keywords_to_content_consistency": 0.5,
                     "bge_raw_score": bge_score,
                     "bge_normalized_score": bge_score,
                     "gemini_doc_retrieval_raw_score": gemini_doc_score,
@@ -353,7 +354,7 @@ def test_onpage_stats_golden_contract_with_combined_feature_marts(tmp_path: Path
 
     assert onpage_quality["spearman"]["signals"]["onpage_score"]["status"] == "computed"
     assert onpage_quality["regression"]["signals"]["onpage_score"]["status"] == "computed"
-    assert onpage_score_coefficient == pytest.approx(0.05043754552636334)
+    assert onpage_score_coefficient == pytest.approx(0.05493061443340709)
     assert onpage_quality["plackett_luce"]["signals"]["onpage_score"]["status"] in {
         "computed",
         "unstable",

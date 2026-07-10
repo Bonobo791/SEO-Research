@@ -26,9 +26,13 @@ SIMILARITY_SCORE_COLUMNS = {
     "gemini_doc_retrieval": "gemini_doc_retrieval_normalized_score",
     "gemini_semantic_similarity": "gemini_semantic_similarity_normalized_score",
 }
-BASELINE_FORMULA = "outcome ~ np.log(referring_domains_count + 1) + np.log(deprecated_html_tags + 1) + C(target_keyword_id)"
-SINGLE_KEYWORD_BASELINE_FORMULA = "outcome ~ np.log(referring_domains_count + 1) + np.log(deprecated_html_tags + 1)"
-REGRESSION_REQUIRED_COLUMNS = ("serp_rank", "referring_domains_count", "deprecated_html_tags")
+REGRESSION_CONTROL_COLUMNS = (
+    "deprecated_html_tags",
+    "meta_keywords_to_content_consistency",
+)
+BASELINE_FORMULA = "outcome ~ np.log(deprecated_html_tags + 1) + meta_keywords_to_content_consistency + C(target_keyword_id)"
+SINGLE_KEYWORD_BASELINE_FORMULA = "outcome ~ np.log(deprecated_html_tags + 1) + meta_keywords_to_content_consistency"
+REGRESSION_REQUIRED_COLUMNS = ("serp_rank",)
 
 
 @dataclass(frozen=True)
@@ -42,6 +46,8 @@ class BackendRegressionFit:
     feature_result: RegressionResultsWrapper
     clustered_result: RegressionResultsWrapper
     similarity_within_keyword_sd: float
+    fitted_control_columns: tuple[str, ...]
+    omitted_controls: tuple[dict[str, str], ...]
 
 
 def summarize_regression_backends(
@@ -316,13 +322,14 @@ def _summarize_backend_regression_result(
         "score_column": fit.score_column,
         "row_count": int(len(fit.model_data)),
         "keyword_count": keyword_count,
+        "omitted_controls": [dict(control) for control in fit.omitted_controls],
         "baseline_model": {
-            "formula": _public_baseline_formula(keyword_count),
+            "formula": fit.baseline_formula,
             "adjusted_r_squared": float(fit.baseline_result.rsquared_adj),
             "aic": float(fit.baseline_result.aic),
         },
         "feature_model": {
-            "formula": _public_feature_formula(fit.score_column, keyword_count),
+            "formula": fit.feature_formula,
             "coefficient": coefficient,
             "clustered_standard_error": clustered_standard_error,
             "clustered_confidence_interval": clustered_confidence_interval,
@@ -414,12 +421,21 @@ def _fit_backend_regression_from_model_data(
     if keyword_count < 1:
         return None
 
+    fitted_control_columns, omitted_controls = _select_regression_controls(model_data)
+
     similarity_within_keyword_sd = within_keyword_sd_rms(model_data, score_column)
     model_data["outcome"] = -np.log(model_data["serp_rank"].astype(float))
 
     if keyword_count >= 2:
-        baseline_formula = BASELINE_FORMULA
-        feature_formula = _public_feature_formula(score_column, keyword_count)
+        feature_formula = _public_feature_formula(
+            score_column,
+            keyword_count,
+            fitted_control_columns,
+        )
+        baseline_formula = _public_baseline_formula(
+            keyword_count,
+            fitted_control_columns,
+        )
         baseline_result = smf.ols(baseline_formula, data=model_data).fit()
         feature_result = smf.ols(feature_formula, data=model_data).fit()
         if feature_result.df_resid <= 0:
@@ -436,8 +452,15 @@ def _fit_backend_regression_from_model_data(
             groups=model_data["target_keyword_id"],
         )
     else:
-        baseline_formula = SINGLE_KEYWORD_BASELINE_FORMULA
-        feature_formula = _public_feature_formula(score_column, keyword_count)
+        baseline_formula = _public_baseline_formula(
+            keyword_count,
+            fitted_control_columns,
+        )
+        feature_formula = _public_feature_formula(
+            score_column,
+            keyword_count,
+            fitted_control_columns,
+        )
         baseline_result = smf.ols(baseline_formula, data=model_data).fit()
         feature_result = smf.ols(feature_formula, data=model_data).fit()
         if feature_result.df_resid <= 0:
@@ -454,6 +477,8 @@ def _fit_backend_regression_from_model_data(
         feature_result=feature_result,
         clustered_result=clustered_result,
         similarity_within_keyword_sd=similarity_within_keyword_sd,
+        fitted_control_columns=fitted_control_columns,
+        omitted_controls=omitted_controls,
     )
 
 
@@ -462,7 +487,7 @@ def _prepare_regression_frame(
     score_column: str,
 ) -> pl.DataFrame:
     return analysis_mart.filter(pl.col(score_column).is_not_null()).drop_nulls(
-        [score_column, *REGRESSION_REQUIRED_COLUMNS]
+        [score_column, *REGRESSION_REQUIRED_COLUMNS, "target_keyword_id"]
     )
 
 
@@ -471,7 +496,22 @@ def _regression_skip_reason(model_frame: pl.DataFrame) -> str:
         return "no_usable_rows"
     if model_frame.height < 3:
         return "insufficient_rows"
-    return "no_usable_rows"
+    return "insufficient_design"
+
+
+def _select_regression_controls(
+    model_data: pd.DataFrame,
+) -> tuple[tuple[str, ...], tuple[dict[str, str], ...]]:
+    fitted_controls: list[str] = []
+    omitted_controls: list[dict[str, str]] = []
+    for column in REGRESSION_CONTROL_COLUMNS:
+        if column not in model_data.columns:
+            omitted_controls.append({"column": column, "reason": "missing_column"})
+        elif model_data[column].isna().any():
+            omitted_controls.append({"column": column, "reason": "missing_values"})
+        else:
+            fitted_controls.append(column)
+    return tuple(fitted_controls), tuple(omitted_controls)
 
 
 def _inference_metadata(keyword_count: int) -> dict[str, object]:
@@ -596,13 +636,28 @@ def _two_way_cluster_sensitivity(
     }
 
 
-def _public_baseline_formula(keyword_count: int) -> str:
-    if keyword_count >= 2:
-        return BASELINE_FORMULA
-    return SINGLE_KEYWORD_BASELINE_FORMULA
+def _public_baseline_formula(
+    keyword_count: int,
+    control_columns: Sequence[str] = REGRESSION_CONTROL_COLUMNS,
+) -> str:
+    controls = _regression_control_formula_terms(control_columns)
+    fixed_effect = " + C(target_keyword_id)" if keyword_count >= 2 else ""
+    return f"outcome ~ {controls or '1'}{fixed_effect}"
 
 
-def _public_feature_formula(score_column: str, keyword_count: int) -> str:
-    if keyword_count >= 2:
-        return f"outcome ~ {score_column} + np.log(referring_domains_count + 1) + np.log(deprecated_html_tags + 1) + C(target_keyword_id)"
-    return f"outcome ~ {score_column} + np.log(referring_domains_count + 1) + np.log(deprecated_html_tags + 1)"
+def _public_feature_formula(
+    score_column: str,
+    keyword_count: int,
+    control_columns: Sequence[str] = REGRESSION_CONTROL_COLUMNS,
+) -> str:
+    controls = _regression_control_formula_terms(control_columns)
+    fixed_effect = " + C(target_keyword_id)" if keyword_count >= 2 else ""
+    terms = " + ".join(filter(None, [score_column, controls]))
+    return f"outcome ~ {terms}{fixed_effect}"
+
+
+def _regression_control_formula_terms(control_columns: Sequence[str]) -> str:
+    return " + ".join(
+        f"np.log({column} + 1)" if column in {"deprecated_html_tags"} else column
+        for column in control_columns
+    )

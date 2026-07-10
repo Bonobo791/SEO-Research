@@ -142,12 +142,15 @@ family**. BH is only meaningful if the family is fixed before looking.
 ROADMAP mentions "baseline vs similarity-feature models" but ARCHITECTURE does not
 define the baseline.
 
-`analysis_mart` includes OnPage checks. Deprecated HTML tags are used as the
-adjustment control instead of page-text length for this implementation.
+`analysis_mart` includes OnPage checks. The adjustment set changed from page-text
+length to deprecated HTML tags for this implementation, with meta-keyword
+consistency added as a raw bounded control.
 
 **Recommendation — default adjustment set:**
 
+- `referring_domains_count` (modeled as `log(referring_domains_count + 1)`).
 - `deprecated_html_tags` (modeled as `log(deprecated_html_tags + 1)`).
+- `meta_keywords_to_content_consistency` (modeled as the raw 0–1 value).
 - **Keyword fixed effects** in pooled regression (absorbs keyword difficulty).
 - Do **not** include URL fixed effects in v1 (collapses variation within keyword).
 
@@ -161,7 +164,8 @@ adjustment control instead of page-text length for this implementation.
 
 **Pre-specify (shipped in slice 7):**
 
-1. **Primary:** separate model per backend (univariate + keyword FE + length).
+1. **Primary:** separate model per backend (univariate + keyword FE + all three
+   adjustment controls).
 2. **Sensitivity:** one multivariate model; if VIF > 5, drop lowest-priority
    backend per pre-registered order (semantic similarity → doc retrieval → keep
    BGE). Results land in `rank_depths.top_20.multivariate_sensitivity` and
@@ -311,12 +315,12 @@ For implementation review. Adjust thresholds after golden fixtures.
 2. Summarize distribution of ρ across keywords (median, IQR, fraction positive).
 3. Apply BH across keywords **within backend** on two-sided correlation tests.
 4. Pooled regression (secondary):  
-   `-log(serp_rank) ~ normalized_similarity + log(deprecated_html_tags + 1) + C(target_keyword_id)`  
+  `-log(serp_rank) ~ normalized_similarity + log(referring_domains_count + 1) + log(deprecated_html_tags + 1) + meta_keywords_to_content_consistency + C(target_keyword_id)`  
    with **cluster-robust SE** at `target_keyword_id`.
 
 ### Baseline
 
-- Pooled: `-log(serp_rank) ~ log(deprecated_html_tags + 1) + C(target_keyword_id)`
+- Pooled: `-log(serp_rank) ~ log(referring_domains_count + 1) + log(deprecated_html_tags + 1) + meta_keywords_to_content_consistency + C(target_keyword_id)`
   Compare adjusted R² or AIC to feature model (descriptive, not BH-adjusted).
 
 ### Diagnostics (pooled model only)

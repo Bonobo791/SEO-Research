@@ -83,9 +83,73 @@ def test_build_analysis_lazyframe_lives_in_marts_module() -> None:
             "gemini_semantic_similarity_z": None,
             "referring_domains_count": None,
             "deprecated_html_tags": None,
+            "meta_keywords_to_content_consistency": None,
             "schema_version": ANALYSIS_SCHEMA_VERSION,
         }
     ]
+
+
+def test_build_analysis_lazyframe_joins_meta_keyword_control() -> None:
+    feature_frames = {
+        "keyword_serp": pl.DataFrame(
+            [
+                {
+                    "run_id": "run-1",
+                    "target_keyword_id": "kw-1",
+                    "target_keyword": "technical seo",
+                    "keyword_order": 1,
+                    "source_response_id": "resp-keywords",
+                    "serp_item_id": "serp-1",
+                    "canonical_url_hash": "url-1",
+                    "url": "https://example.com/technical-seo/1",
+                    "serp_rank": 1,
+                    "title": "Example",
+                    "description": "Example description",
+                    "schema_version": "feature_marts.v1",
+                }
+            ]
+        ).lazy(),
+        "page_features": pl.DataFrame(
+            [
+                {
+                    "run_id": "run-1",
+                    "target_keyword_id": "kw-1",
+                    "target_keyword": "technical seo",
+                    "page_id": "page-1",
+                    "response_id": "resp-page",
+                    "canonical_url_hash": "url-1",
+                    "url": "https://example.com/technical-seo/1",
+                    "title": "Example",
+                    "page_text_length": 120,
+                    "bge_raw_score": 0.98,
+                    "bge_normalized_score": 0.98,
+                    "gemini_doc_retrieval_raw_score": 1.0,
+                    "gemini_doc_retrieval_normalized_score": 1.0,
+                    "gemini_semantic_similarity_raw_score": 0.75,
+                    "gemini_semantic_similarity_normalized_score": 0.75,
+                    "schema_version": "feature_marts.v1",
+                }
+            ]
+        ).lazy(),
+        "onpage_signals": pl.DataFrame(
+            [
+                {
+                    "run_id": "run-1",
+                    "target_keyword_id": "kw-1",
+                    "canonical_url_hash": "url-1",
+                    "url": "https://example.com/technical-seo/1",
+                    "deprecated_html_tags": False,
+                    "meta_keywords_to_content_consistency": 0.25,
+                }
+            ]
+        ).lazy(),
+    }
+
+    result = build_analysis_lazyframe(feature_frames).collect()
+
+    assert result["deprecated_html_tags"].to_list() == [False]
+    assert result["meta_keywords_to_content_consistency"].to_list() == [0.25]
+    assert result.schema["meta_keywords_to_content_consistency"] == pl.Float64
 
 
 def test_build_analysis_lazyframe_ranks_within_keyword() -> None:
@@ -160,7 +224,7 @@ def test_build_analysis_lazyframe_ranks_within_keyword() -> None:
         assert f"{suffix}_z" in result.columns
 
 
-def test_build_analysis_lazyframe_schema_version_is_v2() -> None:
+def test_build_analysis_lazyframe_schema_version_is_v4() -> None:
     feature_frames = {
         "keyword_serp": pl.DataFrame(
             [
@@ -206,7 +270,7 @@ def test_build_analysis_lazyframe_schema_version_is_v2() -> None:
     }
 
     result = build_analysis_lazyframe(feature_frames).collect()
-    assert result["schema_version"][0] == "analysis_mart.v3"
+    assert result["schema_version"][0] == "analysis_mart.v4"
 
 
 def test_build_analysis_lazyframe_tied_scores_rank_by_serp_rank() -> None:

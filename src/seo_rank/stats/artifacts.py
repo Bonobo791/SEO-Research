@@ -18,6 +18,7 @@ from seo_rank.stats.diagnostics import summarize_diagnostics_families
 from seo_rank.stats.diagnostics import summarize_multivariate_sensitivity
 from seo_rank.stats.panel import (
     AnalysisPanelResult,
+    _restore_analysis_controls,
     load_analysis_panel,
     prepare_rank_depth_panel,
 )
@@ -39,14 +40,6 @@ from seo_rank.stats.spec import AnalysisSpec, load_analysis_spec
 
 
 logger = logging.getLogger(__name__)
-
-_ANALYSIS_JOIN_KEYS = ("run_id", "target_keyword_id", "canonical_url_hash", "url")
-_ANALYSIS_CONTROL_DTYPES = {
-    "referring_domains_count": pl.Int64,
-    "deprecated_html_tags": pl.Boolean,
-}
-_ANALYSIS_CONTROL_COLUMNS = tuple(_ANALYSIS_CONTROL_DTYPES)
-
 
 def build_stats_output_metadata(spec: AnalysisSpec) -> Mapping[str, object]:
     return {
@@ -118,46 +111,6 @@ def build_family_source_frames(
             analysis_mart,
         )
     return source_frames
-
-
-def _restore_analysis_controls(
-    source_frame: pl.DataFrame,
-    analysis_mart: pl.DataFrame,
-) -> pl.DataFrame:
-    """Restore controls omitted by older optional family-mart schemas."""
-    if source_frame.is_empty():
-        return source_frame
-
-    missing = [
-        column
-        for column in _ANALYSIS_CONTROL_COLUMNS
-        if column not in source_frame.columns
-    ]
-    if not missing:
-        return source_frame
-
-    joinable = [
-        column
-        for column in missing
-        if column in analysis_mart.columns
-        and column not in source_frame.columns
-    ]
-    if joinable and all(key in source_frame.columns for key in _ANALYSIS_JOIN_KEYS):
-        source_frame = source_frame.join(
-            analysis_mart.select([*_ANALYSIS_JOIN_KEYS, *joinable]),
-            on=list(_ANALYSIS_JOIN_KEYS),
-            how="left",
-        )
-
-    remaining = [column for column in missing if column not in source_frame.columns]
-    if remaining:
-        source_frame = source_frame.with_columns(
-            [
-                pl.lit(None).cast(_ANALYSIS_CONTROL_DTYPES[column]).alias(column)
-                for column in remaining
-            ]
-        )
-    return source_frame
 
 
 def _load_textrazor_family_frame(
@@ -759,7 +712,7 @@ def _format_regression_lines(regression: dict[str, object]) -> list[str]:
         feature_model = backend_summary["feature_model"]
         effect_size = backend_summary["effect_size"]
         two_way_cluster = backend_summary["sensitivity"]["two_way_cluster"]
-        lines.append(
+        line = (
             "- "
             f"{backend}: keyword_count={backend_summary['keyword_count']}, "
             f"inference_mode={inference_mode}, "
@@ -768,6 +721,9 @@ def _format_regression_lines(regression: dict[str, object]) -> list[str]:
             f"approx_delta_rank_per_1sd={effect_size['approximate_delta_rank_per_1sd']}, "
             f"two_way_cluster_status={two_way_cluster['status']}"
         )
+        if backend_summary.get("omitted_controls"):
+            line += f", omitted_controls={backend_summary['omitted_controls']}"
+        lines.append(line)
     return lines
 
 
@@ -803,7 +759,7 @@ def _format_plackett_luce_lines(
                 leave_one_out = iia_sensitivity.get("leave_one_out_top_rank")
                 if isinstance(leave_one_out, dict) and "status" in leave_one_out:
                     leave_one_out_top_rank_status = leave_one_out["status"]
-        lines.append(
+        line = (
             "- "
             f"{backend}: status={status}, "
             f"keyword_count={backend_summary.get('keyword_count', 0)}, "
@@ -813,6 +769,9 @@ def _format_plackett_luce_lines(
             f"hessian_condition_number={diagnostics_summary['hessian_condition_number'] if diagnostics_summary else 'n/a'}, "
             f"leave_one_out_top_rank_status={leave_one_out_top_rank_status}"
         )
+        if main_model.get("omitted_controls"):
+            line += f", omitted_controls={main_model['omitted_controls']}"
+        lines.append(line)
     return lines
 
 
@@ -919,6 +878,8 @@ def _format_multivariate_sensitivity_lines(sensitivity: dict[str, object]) -> li
         f"vif_threshold={sensitivity.get('vif_threshold', 'n/a')}, "
         f"drop_path={drop_path}"
     )
+    if sensitivity.get("omitted_controls"):
+        line += f", omitted_controls={sensitivity['omitted_controls']}"
     unresolved_reason = sensitivity.get("unresolved_reason")
     if unresolved_reason is not None:
         line += f", unresolved_reason={unresolved_reason}"

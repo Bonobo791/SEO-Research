@@ -59,6 +59,7 @@ def _sample_plackett_luce_panel(
                     "description": f"description-{keyword_index}-{serp_rank}",
                     "referring_domains_count": referring_domains_count,
                     "deprecated_html_tags": (keyword_index + serp_rank) % 3 == 0,
+                    "meta_keywords_to_content_consistency": 0.1 + (serp_rank * 0.05),
                     "bge_raw_score": similarity,
                     "bge_normalized_score": similarity,
                     "gemini_doc_retrieval_raw_score": similarity * 0.8,
@@ -195,7 +196,7 @@ def test_summarize_backend_plackett_luce_fits_rank_ordered_logit_with_clustered_
     assert summary["row_count"] == 60
     assert summary["choice_set_size_summary"]["min"] == 5
     assert summary["choice_set_size_summary"]["max"] == 5
-    assert summary["main_model"]["formula"] == "rank_ordered_logit ~ similarity + log(referring_domains_count + 1) + log(deprecated_html_tags + 1)"
+    assert summary["main_model"]["formula"] == "rank_ordered_logit ~ similarity + log(deprecated_html_tags + 1) + meta_keywords_to_content_consistency"
     assert summary["main_model"]["omitted_controls"] == []
     assert summary["main_model"]["log_odds_per_1sd"] > 0
     assert summary["main_model"]["log_odds_per_1sd_standard_error"] > 0
@@ -223,7 +224,7 @@ def test_plackett_luce_omits_constant_controls_from_fit_and_formula() -> None:
     assert fit.params.shape == (2,)
     assert fit.information.shape == (2, 2)
     assert summary["main_model"]["formula"] == (
-        "rank_ordered_logit ~ similarity + log(referring_domains_count + 1)"
+        "rank_ordered_logit ~ similarity + meta_keywords_to_content_consistency"
     )
     assert summary["main_model"]["omitted_controls"] == [
         {"column": "deprecated_html_tags", "reason": "constant"}
@@ -233,7 +234,7 @@ def test_plackett_luce_omits_constant_controls_from_fit_and_formula() -> None:
 
 def test_plackett_luce_omits_each_constant_control_independently() -> None:
     panel = _sample_plackett_luce_panel().with_columns(
-        pl.lit(200).alias("referring_domains_count"),
+        pl.lit(0.5).alias("meta_keywords_to_content_consistency"),
     )
 
     fit = fit_backend_plackett_luce(panel, backend="bge")
@@ -241,19 +242,18 @@ def test_plackett_luce_omits_each_constant_control_independently() -> None:
 
     assert fit is not None
     assert fit.params.shape == (2,)
-    assert summary["main_model"]["formula"] == (
-        "rank_ordered_logit ~ similarity + log(deprecated_html_tags + 1)"
-    )
+    assert summary["main_model"]["formula"] == "rank_ordered_logit ~ similarity + log(deprecated_html_tags + 1)"
     assert summary["main_model"]["omitted_controls"] == [
-        {"column": "referring_domains_count", "reason": "constant"}
+        {"column": "meta_keywords_to_content_consistency", "reason": "constant"}
     ]
-    assert "referring_domains_log_odds_per_1sd" not in summary["main_model"]
+    assert "meta_keywords_to_content_consistency_log_odds_per_1sd" not in summary["main_model"]
 
 
 def test_plackett_luce_can_omit_all_constant_controls() -> None:
     panel = _sample_plackett_luce_panel().with_columns(
         pl.lit(200).alias("referring_domains_count"),
         pl.lit(False).alias("deprecated_html_tags"),
+        pl.lit(0.5).alias("meta_keywords_to_content_consistency"),
     )
 
     fit = fit_backend_plackett_luce(panel, backend="bge")
@@ -264,8 +264,8 @@ def test_plackett_luce_can_omit_all_constant_controls() -> None:
     assert fit.information.shape == (1, 1)
     assert summary["main_model"]["formula"] == "rank_ordered_logit ~ similarity"
     assert summary["main_model"]["omitted_controls"] == [
-        {"column": "referring_domains_count", "reason": "constant"},
         {"column": "deprecated_html_tags", "reason": "constant"},
+        {"column": "meta_keywords_to_content_consistency", "reason": "constant"},
     ]
 
 
@@ -321,11 +321,28 @@ def test_summarize_backend_plackett_luce_uses_backend_specific_non_null_rows() -
     summary = summarize_backend_plackett_luce(_partial_plackett_luce_panel(), backend="bge")
 
     assert summary["status"] in {"computed", "unstable"}
-    assert summary["row_count"] == 12
-    assert summary["keyword_count"] == 3
-    assert summary["choice_set_size_summary"]["min"] == 4
+    assert summary["row_count"] == 15
+    assert summary["keyword_count"] == 4
+    assert summary["choice_set_size_summary"]["min"] == 3
     assert summary["choice_set_size_summary"]["per_keyword"][0]["choice_set_size"] == 4
     assert "diagnostics" not in summary
+
+
+def test_summarize_backend_plackett_luce_omits_sparse_controls_without_dropping_rows() -> None:
+    frame = _sample_plackett_luce_panel().with_columns(
+        pl.when(pl.col("serp_rank") == 1)
+        .then(None)
+        .otherwise(pl.col("meta_keywords_to_content_consistency"))
+        .alias("meta_keywords_to_content_consistency")
+    )
+
+    summary = summarize_backend_plackett_luce(frame, backend="bge")
+
+    assert summary["status"] in {"computed", "unstable"}
+    assert summary["row_count"] == frame.height
+    assert summary["main_model"]["omitted_controls"] == [
+        {"column": "meta_keywords_to_content_consistency", "reason": "missing_values"}
+    ]
 
 
 def test_summarize_backend_plackett_luce_skips_duplicate_rank_keyword() -> None:
@@ -371,9 +388,10 @@ def test_fit_backend_plackett_luce_treats_precision_loss_with_tiny_gradient_as_c
         / "parquet"
         / "analysis_mart"
         / "part-0.parquet"
-    ).with_row_index("_row").with_columns(
-        (pl.col("_row") % 3 == 0).alias("deprecated_html_tags")
-    ).drop("_row")
+        ).with_row_index("_row").with_columns(
+            (pl.col("_row") % 3 == 0).alias("deprecated_html_tags"),
+            pl.lit(0.5).alias("meta_keywords_to_content_consistency"),
+        ).drop("_row")
     top_10_frame = filter_panel_by_max_rank(
         run_frame,
         max_rank=spec.rank_depth_limit("top_10"),

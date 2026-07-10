@@ -44,6 +44,7 @@ def _diagnostics_analysis_mart_frame() -> pl.DataFrame:
                     "page_text_length": 300 + (keyword_index * 9) + ((serp_rank % 2) * 5),
                     "referring_domains_count": 300 + (keyword_index * 9) + ((serp_rank % 2) * 5),
                     "deprecated_html_tags": (keyword_index + serp_rank) % 3 == 0,
+                    "meta_keywords_to_content_consistency": 0.5,
                     "bge_raw_score": score,
                     "bge_normalized_score": score,
                     "gemini_doc_retrieval_raw_score": 0.9 - (serp_rank * 0.16) + keyword_offset,
@@ -109,6 +110,8 @@ def _multivariate_panel_frame(*, collinear: bool) -> pl.DataFrame:
                     "page_text_length": page_text_length,
                     "referring_domains_count": page_text_length,
                     "deprecated_html_tags": (keyword_index + serp_rank) % 3 == 0,
+                    "meta_keywords_to_content_consistency": 0.1
+                    + (((keyword_index * 7 + serp_rank * 11) % 9) * 0.1),
                     "bge_normalized_score": bge_score,
                     "gemini_doc_retrieval_normalized_score": doc_score,
                     "gemini_semantic_similarity_normalized_score": semantic_score,
@@ -162,6 +165,7 @@ def test_summarize_backend_diagnostics_skips_influence_sensitivity_when_trimmed_
                 "page_text_length": 100,
                 "referring_domains_count": 100,
                 "deprecated_html_tags": False,
+                "meta_keywords_to_content_consistency": 0.1,
                 "bge_normalized_score": 1.0,
             },
             {
@@ -170,6 +174,7 @@ def test_summarize_backend_diagnostics_skips_influence_sensitivity_when_trimmed_
                 "page_text_length": 101,
                 "referring_domains_count": 101,
                 "deprecated_html_tags": False,
+                "meta_keywords_to_content_consistency": 0.2,
                 "bge_normalized_score": 0.9,
             },
             {
@@ -178,6 +183,7 @@ def test_summarize_backend_diagnostics_skips_influence_sensitivity_when_trimmed_
                 "page_text_length": 102,
                 "referring_domains_count": 102,
                 "deprecated_html_tags": False,
+                "meta_keywords_to_content_consistency": 0.3,
                 "bge_normalized_score": 0.8,
             },
         ]
@@ -239,7 +245,10 @@ def test_summarize_backend_diagnostics_skips_reset_when_df_resid_is_too_small() 
         / "parquet"
         / "analysis_mart"
         / "part-0.parquet"
-    ).with_columns(pl.lit(False).alias("deprecated_html_tags"))
+    ).with_columns(
+        pl.lit(False).alias("deprecated_html_tags"),
+        pl.lit(0.5).alias("meta_keywords_to_content_consistency"),
+    )
     top_5_frame = filter_panel_by_max_rank(
         run_frame,
         max_rank=spec.rank_depth_limit("top_5"),
@@ -305,6 +314,28 @@ def test_summarize_multivariate_sensitivity_keeps_all_backends_when_vif_is_below
     assert summary["drop_log"] == []
     assert summary["vif_table"]
     assert any(row["term"] == "bge_normalized_score" for row in summary["vif_table"])
+
+
+def test_summarize_multivariate_sensitivity_omits_sparse_control_without_dropping_rows() -> None:
+    spec = load_analysis_spec()
+    frame = _multivariate_panel_frame(collinear=False).with_row_index("_row").with_columns(
+        pl.when(pl.col("_row") == 0)
+        .then(None)
+        .otherwise(pl.col("meta_keywords_to_content_consistency"))
+        .alias("meta_keywords_to_content_consistency")
+    ).drop("_row")
+
+    summary = diagnostics_module.summarize_multivariate_sensitivity(
+        frame,
+        vif_threshold=spec.multivariate_vif_threshold,
+        backend_drop_order=spec.backend_drop_order,
+    )
+
+    assert summary["status"] == "computed"
+    assert summary["row_count"] == frame.height
+    assert summary["omitted_controls"] == [
+        {"column": "meta_keywords_to_content_consistency", "reason": "missing_values"}
+    ]
 
 
 def test_summarize_multivariate_sensitivity_drops_backends_in_configured_order() -> None:
