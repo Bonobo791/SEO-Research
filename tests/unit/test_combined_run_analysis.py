@@ -37,6 +37,7 @@ def _analysis_rows(
                     "title": f"{target_keyword} title {serp_rank}",
                     "description": f"{target_keyword} description {serp_rank}",
                     "page_text_length": 100 + keyword_order + serp_rank,
+                    "referring_domains_count": 100 + keyword_order + serp_rank,
                     "bge_raw_score": signal,
                     "bge_normalized_score": signal,
                     "bge_rank": serp_rank,

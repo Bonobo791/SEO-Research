@@ -4,7 +4,13 @@ from collections.abc import Mapping
 
 import polars as pl
 
-ANALYSIS_SCHEMA_VERSION = "analysis_mart.v2"
+ANALYSIS_SCHEMA_VERSION = "analysis_mart.v3"
+
+# Robustness control column joined from the backlinks curated table. Null for pages
+# without fetched backlinks data (those rows drop out of the stats models downstream).
+_REFERRING_DOMAINS_COLUMN = "referring_domains_count"
+_DEPRECATED_HTML_TAGS_COLUMN = "deprecated_html_tags"
+_ANALYSIS_JOIN_KEYS = ["run_id", "target_keyword_id", "canonical_url_hash", "url"]
 
 _BACKENDS = ("bge", "gemini_doc_retrieval", "gemini_semantic_similarity")
 
@@ -36,7 +42,7 @@ def _rank_columns() -> list[pl.Expr]:
 
 
 def build_analysis_lazyframe(feature_frames: Mapping[str, pl.LazyFrame]) -> pl.LazyFrame:
-    return (
+    frame = (
         feature_frames["keyword_serp"]
         .join(
             feature_frames["page_features"],
@@ -68,7 +74,43 @@ def build_analysis_lazyframe(feature_frames: Mapping[str, pl.LazyFrame]) -> pl.L
                 "gemini_semantic_similarity_normalized_score",
             ]
         )
+    )
+    frame = _attach_referring_domains(frame, feature_frames.get("backlinks"))
+    frame = _attach_deprecated_html_tags(frame, feature_frames.get("onpage_signals"))
+    return (
+        frame
         .sort(["target_keyword_id", "serp_rank", "canonical_url_hash"])
         .with_columns(*_rank_columns())
         .with_columns(pl.lit(ANALYSIS_SCHEMA_VERSION).alias("schema_version"))
+    )
+
+
+def _attach_referring_domains(
+    frame: pl.LazyFrame, backlinks: pl.LazyFrame | None
+) -> pl.LazyFrame:
+    """Left-join the referring_domains_count robustness control from backlinks.
+
+    Null when backlinks were not fetched for a page; such rows drop out of the
+    stats models (which drop_nulls on the control column).
+    """
+    if backlinks is None:
+        return frame.with_columns(
+            pl.lit(None).cast(pl.Int64).alias(_REFERRING_DOMAINS_COLUMN)
+        )
+    return frame.join(
+        backlinks.select([*_ANALYSIS_JOIN_KEYS, _REFERRING_DOMAINS_COLUMN]),
+        on=_ANALYSIS_JOIN_KEYS,
+        how="left",
+    )
+
+
+def _attach_deprecated_html_tags(
+    frame: pl.LazyFrame, onpage_signals: pl.LazyFrame | None
+) -> pl.LazyFrame:
+    if onpage_signals is None or _DEPRECATED_HTML_TAGS_COLUMN not in onpage_signals.collect_schema():
+        return frame.with_columns(pl.lit(None).cast(pl.Boolean).alias(_DEPRECATED_HTML_TAGS_COLUMN))
+    return frame.join(
+        onpage_signals.select([*_ANALYSIS_JOIN_KEYS, _DEPRECATED_HTML_TAGS_COLUMN]),
+        on=_ANALYSIS_JOIN_KEYS,
+        how="left",
     )

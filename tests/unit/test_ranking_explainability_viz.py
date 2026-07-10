@@ -29,6 +29,8 @@ def _explainability_panel_frame() -> pl.DataFrame:
                     "canonical_url_hash": f"url-{keyword_index}-{serp_rank}",
                     "serp_rank": serp_rank,
                     "page_text_length": 120 + (keyword_index * 3) + serp_rank,
+                    "referring_domains_count": 120 + (keyword_index * 3) + serp_rank,
+                    "deprecated_html_tags": (keyword_index + serp_rank) % 3 == 0,
                     "bge_normalized_score": signal,
                     "gemini_doc_retrieval_normalized_score": signal - 0.1,
                     "gemini_semantic_similarity_normalized_score": signal - 0.2,

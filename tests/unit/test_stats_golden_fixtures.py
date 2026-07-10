@@ -80,6 +80,8 @@ def _analysis_mart_frame(
                     "title": f"title-{keyword_index}-{serp_rank}",
                     "description": f"description-{keyword_index}-{serp_rank}",
                     "page_text_length": 200 + (keyword_index * 3) + serp_rank,
+                    "referring_domains_count": 200 + (keyword_index * 3) + serp_rank,
+                    "deprecated_html_tags": (keyword_index + serp_rank) % 3 == 0,
                     "bge_raw_score": bge_score,
                     "bge_normalized_score": bge_score,
                     "gemini_doc_retrieval_raw_score": gemini_doc_score,
@@ -356,4 +358,3 @@ def test_onpage_stats_golden_contract_with_combined_feature_marts(tmp_path: Path
         "computed",
         "unstable",
     }
-

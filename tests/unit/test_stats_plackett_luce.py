@@ -38,9 +38,9 @@ def _sample_plackett_luce_panel(
         frame_rows: list[dict[str, object]] = []
         for serp_rank in range(1, items_per_keyword + 1):
             similarity = float(rng.normal(loc=0.0, scale=1.0))
-            page_text_length = int(rng.integers(120, 420))
+            referring_domains_count = int(rng.integers(120, 420))
             utility = (similarity_beta * similarity) + (
-                length_beta * float(np.log(page_text_length + 1.0))
+                length_beta * float(np.log(referring_domains_count + 1.0))
             )
             frame_rows.append(
                 {
@@ -57,7 +57,8 @@ def _sample_plackett_luce_panel(
                     "serp_rank": serp_rank,
                     "title": f"title-{keyword_index}-{serp_rank}",
                     "description": f"description-{keyword_index}-{serp_rank}",
-                    "page_text_length": page_text_length,
+                    "referring_domains_count": referring_domains_count,
+                    "deprecated_html_tags": (keyword_index + serp_rank) % 3 == 0,
                     "bge_raw_score": similarity,
                     "bge_normalized_score": similarity,
                     "gemini_doc_retrieval_raw_score": similarity * 0.8,
@@ -194,7 +195,8 @@ def test_summarize_backend_plackett_luce_fits_rank_ordered_logit_with_clustered_
     assert summary["row_count"] == 60
     assert summary["choice_set_size_summary"]["min"] == 5
     assert summary["choice_set_size_summary"]["max"] == 5
-    assert summary["main_model"]["formula"] == "rank_ordered_logit ~ similarity + log(page_text_length + 1)"
+    assert summary["main_model"]["formula"] == "rank_ordered_logit ~ similarity + log(referring_domains_count + 1) + log(deprecated_html_tags + 1)"
+    assert summary["main_model"]["omitted_controls"] == []
     assert summary["main_model"]["log_odds_per_1sd"] > 0
     assert summary["main_model"]["log_odds_per_1sd_standard_error"] > 0
     assert summary["main_model"]["log_odds_per_1sd_confidence_interval"][0] < summary["main_model"][
@@ -207,6 +209,83 @@ def test_summarize_backend_plackett_luce_fits_rank_ordered_logit_with_clustered_
     assert summary["convergence_confirmed"] is True
     assert "coefficient" not in summary["main_model"]
     assert "diagnostics" not in summary
+
+
+def test_plackett_luce_omits_constant_controls_from_fit_and_formula() -> None:
+    panel = _sample_plackett_luce_panel().with_columns(
+        pl.lit(False).alias("deprecated_html_tags"),
+    )
+
+    fit = fit_backend_plackett_luce(panel, backend="bge")
+    summary = summarize_backend_plackett_luce(panel, backend="bge")
+
+    assert fit is not None
+    assert fit.params.shape == (2,)
+    assert fit.information.shape == (2, 2)
+    assert summary["main_model"]["formula"] == (
+        "rank_ordered_logit ~ similarity + log(referring_domains_count + 1)"
+    )
+    assert summary["main_model"]["omitted_controls"] == [
+        {"column": "deprecated_html_tags", "reason": "constant"}
+    ]
+    assert "deprecated_html_tags_log_odds_per_1sd" not in summary["main_model"]
+
+
+def test_plackett_luce_omits_each_constant_control_independently() -> None:
+    panel = _sample_plackett_luce_panel().with_columns(
+        pl.lit(200).alias("referring_domains_count"),
+    )
+
+    fit = fit_backend_plackett_luce(panel, backend="bge")
+    summary = summarize_backend_plackett_luce(panel, backend="bge")
+
+    assert fit is not None
+    assert fit.params.shape == (2,)
+    assert summary["main_model"]["formula"] == (
+        "rank_ordered_logit ~ similarity + log(deprecated_html_tags + 1)"
+    )
+    assert summary["main_model"]["omitted_controls"] == [
+        {"column": "referring_domains_count", "reason": "constant"}
+    ]
+    assert "referring_domains_log_odds_per_1sd" not in summary["main_model"]
+
+
+def test_plackett_luce_can_omit_all_constant_controls() -> None:
+    panel = _sample_plackett_luce_panel().with_columns(
+        pl.lit(200).alias("referring_domains_count"),
+        pl.lit(False).alias("deprecated_html_tags"),
+    )
+
+    fit = fit_backend_plackett_luce(panel, backend="bge")
+    summary = summarize_backend_plackett_luce(panel, backend="bge")
+
+    assert fit is not None
+    assert fit.params.shape == (1,)
+    assert fit.information.shape == (1, 1)
+    assert summary["main_model"]["formula"] == "rank_ordered_logit ~ similarity"
+    assert summary["main_model"]["omitted_controls"] == [
+        {"column": "referring_domains_count", "reason": "constant"},
+        {"column": "deprecated_html_tags", "reason": "constant"},
+    ]
+
+
+def test_plackett_luce_recomputes_omitted_controls_for_subset_refits() -> None:
+    panel = _sample_plackett_luce_panel().with_columns(
+        (pl.col("serp_rank") == 1).alias("deprecated_html_tags"),
+    )
+    fit = fit_backend_plackett_luce(panel, backend="bge")
+
+    assert fit is not None
+    subset_fit = plackett_luce_module._fit_subset(
+        fit,
+        lambda frame: frame[frame["serp_rank"] > 1],
+    )
+
+    assert fit.omitted_controls == ()
+    assert subset_fit is not None
+    assert subset_fit.omitted_controls == (
+        {"column": "deprecated_html_tags", "reason": "constant"},
+    )
 
 
 def test_summarize_backend_plackett_luce_diagnostics_reports_optimizer_and_iia_refits() -> None:
@@ -292,7 +371,9 @@ def test_fit_backend_plackett_luce_treats_precision_loss_with_tiny_gradient_as_c
         / "parquet"
         / "analysis_mart"
         / "part-0.parquet"
-    )
+    ).with_row_index("_row").with_columns(
+        (pl.col("_row") % 3 == 0).alias("deprecated_html_tags")
+    ).drop("_row")
     top_10_frame = filter_panel_by_max_rank(
         run_frame,
         max_rank=spec.rank_depth_limit("top_10"),

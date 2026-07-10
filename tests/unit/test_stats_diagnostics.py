@@ -42,6 +42,8 @@ def _diagnostics_analysis_mart_frame() -> pl.DataFrame:
                     "title": f"title-{keyword_index}-{serp_rank}",
                     "description": f"description-{keyword_index}-{serp_rank}",
                     "page_text_length": 300 + (keyword_index * 9) + ((serp_rank % 2) * 5),
+                    "referring_domains_count": 300 + (keyword_index * 9) + ((serp_rank % 2) * 5),
+                    "deprecated_html_tags": (keyword_index + serp_rank) % 3 == 0,
                     "bge_raw_score": score,
                     "bge_normalized_score": score,
                     "gemini_doc_retrieval_raw_score": 0.9 - (serp_rank * 0.16) + keyword_offset,
@@ -105,6 +107,8 @@ def _multivariate_panel_frame(*, collinear: bool) -> pl.DataFrame:
                     "title": f"title-{keyword_index}-{serp_rank}",
                     "description": f"description-{keyword_index}-{serp_rank}",
                     "page_text_length": page_text_length,
+                    "referring_domains_count": page_text_length,
+                    "deprecated_html_tags": (keyword_index + serp_rank) % 3 == 0,
                     "bge_normalized_score": bge_score,
                     "gemini_doc_retrieval_normalized_score": doc_score,
                     "gemini_semantic_similarity_normalized_score": semantic_score,
@@ -135,6 +139,18 @@ def test_summarize_backend_diagnostics_reports_reset_bp_and_influence_metrics() 
     )
 
 
+def test_summarize_backend_diagnostics_drops_rows_with_null_deprecated_html_tags() -> None:
+    frame = _diagnostics_analysis_mart_frame().with_columns(
+        pl.lit(None, dtype=pl.Boolean).alias("deprecated_html_tags")
+    )
+
+    summary = summarize_backend_diagnostics(frame, backend="bge")
+
+    assert summary["status"] == "skipped"
+    assert summary["row_count"] == 0
+    assert summary["skipped_reason"] == "no_usable_rows"
+
+
 def test_summarize_backend_diagnostics_skips_influence_sensitivity_when_trimmed_subset_is_unusable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -144,18 +160,24 @@ def test_summarize_backend_diagnostics_skips_influence_sensitivity_when_trimmed_
                 "target_keyword_id": "kw-1",
                 "serp_rank": 1,
                 "page_text_length": 100,
+                "referring_domains_count": 100,
+                "deprecated_html_tags": False,
                 "bge_normalized_score": 1.0,
             },
             {
                 "target_keyword_id": "kw-1",
                 "serp_rank": 2,
                 "page_text_length": 101,
+                "referring_domains_count": 101,
+                "deprecated_html_tags": False,
                 "bge_normalized_score": 0.9,
             },
             {
                 "target_keyword_id": "kw-1",
                 "serp_rank": 3,
                 "page_text_length": 102,
+                "referring_domains_count": 102,
+                "deprecated_html_tags": False,
                 "bge_normalized_score": 0.8,
             },
         ]
@@ -217,7 +239,7 @@ def test_summarize_backend_diagnostics_skips_reset_when_df_resid_is_too_small() 
         / "parquet"
         / "analysis_mart"
         / "part-0.parquet"
-    )
+    ).with_columns(pl.lit(False).alias("deprecated_html_tags"))
     top_5_frame = filter_panel_by_max_rank(
         run_frame,
         max_rank=spec.rank_depth_limit("top_5"),

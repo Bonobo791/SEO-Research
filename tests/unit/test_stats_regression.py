@@ -38,6 +38,8 @@ def _regression_analysis_mart_frame() -> pl.DataFrame:
                     "title": f"title-{keyword_index}-{serp_rank}",
                     "description": f"description-{keyword_index}-{serp_rank}",
                     "page_text_length": 300 + (keyword_index * 9) + ((serp_rank % 2) * 5),
+                    "referring_domains_count": 300 + (keyword_index * 9) + ((serp_rank % 2) * 5),
+                    "deprecated_html_tags": (keyword_index + serp_rank) % 3 == 0,
                     "bge_raw_score": 1.1 - (serp_rank * 0.22) + keyword_offset,
                     "bge_normalized_score": 1.1 - (serp_rank * 0.22) + keyword_offset,
                     "gemini_doc_retrieval_raw_score": 0.9 - (serp_rank * 0.16) + keyword_offset,
@@ -75,6 +77,8 @@ def _single_keyword_regression_frame() -> pl.DataFrame:
                 "title": f"title-1-{serp_rank}",
                 "description": f"description-1-{serp_rank}",
                 "page_text_length": 200 + serp_rank,
+                "referring_domains_count": 200 + serp_rank,
+                "deprecated_html_tags": False,
                 "bge_raw_score": 1.0 - (serp_rank * 0.05),
                 "bge_normalized_score": 1.0 - (serp_rank * 0.05),
                 "gemini_doc_retrieval_raw_score": 0.9 - (serp_rank * 0.04),
@@ -111,6 +115,8 @@ def _constant_similarity_keyword_regression_frame() -> pl.DataFrame:
                     "title": f"title-{keyword_index}-{serp_rank}",
                     "description": f"description-{keyword_index}-{serp_rank}",
                     "page_text_length": 220 + (keyword_index * 3) + serp_rank,
+                    "referring_domains_count": 220 + (keyword_index * 3) + serp_rank,
+                    "deprecated_html_tags": False,
                     "bge_raw_score": similarity,
                     "bge_normalized_score": similarity,
                     "gemini_doc_retrieval_raw_score": similarity * 0.8,
@@ -133,6 +139,8 @@ def test_summarize_regression_for_boolean_onpage_predictor_uses_numeric_encoding
                     "canonical_url_hash": f"url-{keyword_index}-{serp_rank}",
                     "serp_rank": serp_rank,
                     "page_text_length": 200 + serp_rank,
+                    "referring_domains_count": 200 + serp_rank,
+                    "deprecated_html_tags": False,
                     "title_too_long": serp_rank == 1,
                 }
             )
@@ -160,9 +168,9 @@ def test_summarize_backend_regression_supports_single_keyword_with_hc3_inference
     assert summary["row_count"] == 10
     assert summary["feature_model"]["covariance"]["type"] == "HC3"
     assert summary["feature_model"]["covariance"]["clusters"] == []
-    assert summary["baseline_model"]["formula"] == "outcome ~ np.log(page_text_length + 1)"
+    assert summary["baseline_model"]["formula"] == "outcome ~ np.log(referring_domains_count + 1) + np.log(deprecated_html_tags + 1)"
     assert "C(target_keyword_id)" not in summary["feature_model"]["formula"]
-    assert summary["feature_model"]["formula"] == "outcome ~ bge_normalized_score + np.log(page_text_length + 1)"
+    assert summary["feature_model"]["formula"] == "outcome ~ bge_normalized_score + np.log(referring_domains_count + 1) + np.log(deprecated_html_tags + 1)"
     assert summary["feature_model"]["clustered_standard_error"] > 0
 
 
@@ -177,11 +185,11 @@ def test_summarize_backend_regression_uses_keyword_clustered_inference() -> None
     assert summary["feature_model"]["covariance"]["clusters"] == ["target_keyword_id"]
     assert (
         summary["baseline_model"]["formula"]
-        == "outcome ~ np.log(page_text_length + 1) + C(target_keyword_id)"
+        == "outcome ~ np.log(referring_domains_count + 1) + np.log(deprecated_html_tags + 1) + C(target_keyword_id)"
     )
     assert (
         summary["feature_model"]["formula"]
-        == "outcome ~ bge_normalized_score + np.log(page_text_length + 1) + C(target_keyword_id)"
+        == "outcome ~ bge_normalized_score + np.log(referring_domains_count + 1) + np.log(deprecated_html_tags + 1) + C(target_keyword_id)"
     )
     assert summary["feature_model"]["coefficient"] > 0
     assert summary["feature_model"]["clustered_standard_error"] > 0
@@ -227,7 +235,7 @@ def test_summarize_backend_regression_keeps_zero_variance_keyword_in_raw_model()
     assert summary["row_count"] == 12
     assert summary["keyword_count"] == 3
     assert summary["feature_model"]["formula"] == (
-        "outcome ~ bge_normalized_score + np.log(page_text_length + 1) + C(target_keyword_id)"
+        "outcome ~ bge_normalized_score + np.log(referring_domains_count + 1) + np.log(deprecated_html_tags + 1) + C(target_keyword_id)"
     )
 
 
@@ -242,6 +250,8 @@ def test_fit_backend_regression_skips_when_design_matrix_is_column_rank_deficien
             "outcome": [1.0, 2.0, 1.5, 3.0, 2.5, 4.0, 4.2],
             "bge_normalized_score": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.6],
             "page_text_length": [100, 200, 300, 400, 500, 600, 600],
+            "referring_domains_count": [100, 200, 300, 400, 500, 600, 600],
+            "deprecated_html_tags": [False, False, False, False, False, False, False],
             "target_keyword_id": ["k0", "k1", "k2", "k3", "k4", "k4", "k4"],
             "serp_rank": [1, 1, 1, 1, 1, 2, 3],
         }
@@ -311,6 +321,8 @@ def test_summarize_backend_regression_excludes_rows_with_incomplete_covariates()
                         "title": "extra",
                         "description": "extra",
                         "page_text_length": None,
+                        "referring_domains_count": None,
+                        "deprecated_html_tags": None,
                         "bge_raw_score": 0.5,
                         "bge_normalized_score": 0.5,
                         "gemini_doc_retrieval_raw_score": None,

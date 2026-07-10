@@ -217,11 +217,11 @@ signal_families:
 estimand:
   outcome: -log(serp_rank)
   primary_metric: keyword_level_spearman_rho
-  baseline_model: log(page_text_length + 1) + C(target_keyword_id)
-  feature_model: normalized_similarity + log(page_text_length + 1) + C(target_keyword_id)
+  baseline_model: log(referring_domains_count + 1) + log(deprecated_html_tags + 1) + C(target_keyword_id)
+  feature_model: normalized_similarity + log(referring_domains_count + 1) + log(deprecated_html_tags + 1) + C(target_keyword_id)
   plackett_luce:
     outcome: rank_ordered_logit
-    formula: similarity + log(page_text_length + 1)
+    formula: similarity + log(referring_domains_count + 1) + log(deprecated_html_tags + 1)
     clustered_se: target_keyword_id
     choice_set_scope: observed_top_20_serp_results_per_keyword
     iia_sensitivity:
@@ -230,7 +230,8 @@ estimand:
     - bge_normalized_score
     - gemini_doc_retrieval_normalized_score
     - gemini_semantic_similarity_normalized_score
-    - log(page_text_length + 1)
+    - log(referring_domains_count + 1)
+    - log(deprecated_html_tags + 1)
     - C(target_keyword_id)
 
 inference:

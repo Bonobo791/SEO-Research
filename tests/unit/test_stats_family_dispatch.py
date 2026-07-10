@@ -24,6 +24,7 @@ def _family_dispatch_frame(
                     "target_keyword": keyword,
                     "serp_rank": serp_rank,
                     "page_text_length": 100 + serp_rank,
+                    "referring_domains_count": 100 + serp_rank,
                     score_column: float(4 - serp_rank),
                 }
             )

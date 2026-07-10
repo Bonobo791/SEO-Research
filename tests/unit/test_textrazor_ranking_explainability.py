@@ -39,6 +39,7 @@ def _textrazor_panel_frame() -> pl.DataFrame:
                     "title": f"title-{keyword_index}-{serp_rank}",
                     "description": f"description-{keyword_index}-{serp_rank}",
                     "page_text_length": 120 + (keyword_index * 3) + serp_rank,
+                    "referring_domains_count": 120 + (keyword_index * 3) + serp_rank,
                     "bge_raw_score": signal,
                     "bge_normalized_score": signal,
                     "gemini_doc_retrieval_raw_score": signal - 0.1,
@@ -65,6 +66,7 @@ def test_fit_multivariate_ranking_model_skips_when_design_matrix_is_column_rank_
             "target_keyword_id": ["k0", "k1", "k2", "k3", "k4", "k4", "k4"],
             "serp_rank": [1, 1, 1, 1, 1, 2, 3],
             "page_text_length": [100, 200, 300, 400, 500, 600, 600],
+            "referring_domains_count": [100, 200, 300, 400, 500, 600, 600],
             "bge_normalized_score": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.6],
         }
     )

@@ -81,6 +81,8 @@ def test_build_analysis_lazyframe_lives_in_marts_module() -> None:
             "gemini_semantic_similarity_rank": 1,
             "gemini_semantic_similarity_pct": 0.0,
             "gemini_semantic_similarity_z": None,
+            "referring_domains_count": None,
+            "deprecated_html_tags": None,
             "schema_version": ANALYSIS_SCHEMA_VERSION,
         }
     ]
@@ -204,7 +206,7 @@ def test_build_analysis_lazyframe_schema_version_is_v2() -> None:
     }
 
     result = build_analysis_lazyframe(feature_frames).collect()
-    assert result["schema_version"][0] == "analysis_mart.v2"
+    assert result["schema_version"][0] == "analysis_mart.v3"
 
 
 def test_build_analysis_lazyframe_tied_scores_rank_by_serp_rank() -> None:

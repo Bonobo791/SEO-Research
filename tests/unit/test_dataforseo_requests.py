@@ -30,6 +30,7 @@ from seo_rank.dataforseo import (
     validate_dataforseo_credentials,
 )
 from seo_rank.cli import (
+    execute_validated_dataforseo_request,
     find_skippable_onpage_task_status,
     raise_for_failed_dataforseo_tasks,
 )
@@ -489,6 +490,73 @@ def test_execute_dataforseo_request_posts_json_with_basic_auth() -> None:
         b'"language_code":"en"}]'
     )
     assert sent["timeout"] == 7.0
+
+
+def test_execute_dataforseo_request_defaults_to_sixty_second_timeout() -> None:
+    sent: dict[str, object] = {}
+
+    def transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        sent["timeout"] = timeout
+        return {"tasks": [{"result": [{"keyword": "technical seo"}]}]}
+
+    execute_dataforseo_request(
+        build_keyword_expansion_request(
+            "technical seo",
+            location_code=2840,
+            language_code="en",
+        ),
+        credentials=DataForSeoCredentials(
+            login="analyst@example.com",
+            password="dataforseo-secret",
+        ),
+        transport=transport,
+    )
+
+    assert sent["timeout"] == 60.0
+
+
+def test_execute_validated_dataforseo_request_uses_sixty_second_timeout() -> None:
+    sent: dict[str, object] = {}
+
+    def transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        sent.update(
+            {
+                "method": method,
+                "url": url,
+                "headers": headers,
+                "body": body,
+                "timeout": timeout,
+            }
+        )
+        return fixture_keyword_expansion_response("technical seo")
+
+    response = execute_validated_dataforseo_request(
+        "keyword_expansion",
+        build_keyword_expansion_request(
+            "technical seo",
+            location_code=2840,
+            language_code="en",
+        ),
+        credentials=DataForSeoCredentials("login", "password"),
+        transport=transport,
+    )
+
+    assert response["tasks"][0]["result"][0]["keyword"] == "technical seo"
+    assert sent["timeout"] == 60.0
 
 
 @pytest.mark.parametrize(

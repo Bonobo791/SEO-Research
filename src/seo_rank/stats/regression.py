@@ -26,9 +26,9 @@ SIMILARITY_SCORE_COLUMNS = {
     "gemini_doc_retrieval": "gemini_doc_retrieval_normalized_score",
     "gemini_semantic_similarity": "gemini_semantic_similarity_normalized_score",
 }
-BASELINE_FORMULA = "outcome ~ np.log(page_text_length + 1) + C(target_keyword_id)"
-SINGLE_KEYWORD_BASELINE_FORMULA = "outcome ~ np.log(page_text_length + 1)"
-REGRESSION_REQUIRED_COLUMNS = ("serp_rank", "page_text_length")
+BASELINE_FORMULA = "outcome ~ np.log(referring_domains_count + 1) + np.log(deprecated_html_tags + 1) + C(target_keyword_id)"
+SINGLE_KEYWORD_BASELINE_FORMULA = "outcome ~ np.log(referring_domains_count + 1) + np.log(deprecated_html_tags + 1)"
+REGRESSION_REQUIRED_COLUMNS = ("serp_rank", "referring_domains_count", "deprecated_html_tags")
 
 
 @dataclass(frozen=True)
@@ -604,5 +604,5 @@ def _public_baseline_formula(keyword_count: int) -> str:
 
 def _public_feature_formula(score_column: str, keyword_count: int) -> str:
     if keyword_count >= 2:
-        return f"outcome ~ {score_column} + np.log(page_text_length + 1) + C(target_keyword_id)"
-    return f"outcome ~ {score_column} + np.log(page_text_length + 1)"
+        return f"outcome ~ {score_column} + np.log(referring_domains_count + 1) + np.log(deprecated_html_tags + 1) + C(target_keyword_id)"
+    return f"outcome ~ {score_column} + np.log(referring_domains_count + 1) + np.log(deprecated_html_tags + 1)"

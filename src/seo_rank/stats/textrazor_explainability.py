@@ -490,5 +490,5 @@ def _multivariate_feature_formula(
 ) -> str:
     terms = " + ".join(score_columns)
     if keyword_count >= 2:
-        return f"outcome ~ {terms} + np.log(page_text_length + 1) + C(target_keyword_id)"
-    return f"outcome ~ {terms} + np.log(page_text_length + 1)"
+        return f"outcome ~ {terms} + np.log(referring_domains_count + 1) + np.log(deprecated_html_tags + 1) + C(target_keyword_id)"
+    return f"outcome ~ {terms} + np.log(referring_domains_count + 1) + np.log(deprecated_html_tags + 1)"

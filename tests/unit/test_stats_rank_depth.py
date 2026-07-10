@@ -56,6 +56,8 @@ def _depth_divergent_panel(*, keyword_count: int = 12) -> pl.DataFrame:
                     "title": f"title-{keyword_index}-{serp_rank}",
                     "description": f"description-{keyword_index}-{serp_rank}",
                     "page_text_length": 200 + serp_rank,
+                    "referring_domains_count": 200 + serp_rank,
+                    "deprecated_html_tags": serp_rank % 2 == 0,
                     "bge_normalized_score": similarity,
                     "gemini_doc_retrieval_normalized_score": similarity * 0.8,
                     "gemini_semantic_similarity_normalized_score": similarity * 0.6,

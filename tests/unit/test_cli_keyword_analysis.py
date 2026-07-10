@@ -26,6 +26,7 @@ def _analysis_mart_frame() -> pl.DataFrame:
                 "title": "title-1-1",
                 "description": "description-1-1",
                 "page_text_length": 123,
+                "referring_domains_count": 123,
                 "bge_raw_score": 0.9,
                 "bge_normalized_score": 0.9,
                 "bge_rank": 1,

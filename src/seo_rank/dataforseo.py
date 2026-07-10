@@ -428,7 +428,7 @@ def execute_dataforseo_request(
     *,
     credentials: DataForSeoCredentials,
     transport=None,
-    timeout: float = 30.0,
+    timeout: float = 60.0,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, object]:

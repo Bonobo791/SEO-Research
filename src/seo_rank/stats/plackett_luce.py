@@ -25,11 +25,16 @@ SIMILARITY_SCORE_COLUMNS = {
     "gemini_doc_retrieval": "gemini_doc_retrieval_normalized_score",
     "gemini_semantic_similarity": "gemini_semantic_similarity_normalized_score",
 }
-PLACKET_LUCE_REQUIRED_COLUMNS = ("serp_rank", "page_text_length")
+PL_CONTROL_COLUMNS = ("referring_domains_count", "deprecated_html_tags")
+PLACKET_LUCE_REQUIRED_COLUMNS = (
+    "serp_rank",
+    "referring_domains_count",
+    "deprecated_html_tags",
+)
 DEFAULT_MAX_SERP_RANK = 20
 HESSIAN_CONDITION_NUMBER_THRESHOLD = 100.0
 OPTIMIZER_GRADIENT_TOLERANCE = 1e-6
-FORMULA = "rank_ordered_logit ~ similarity + log(page_text_length + 1)"
+FORMULA = "rank_ordered_logit ~ similarity + log(referring_domains_count + 1) + log(deprecated_html_tags + 1)"
 FAMILY_PLACKETT_LUCE_OPTIMIZER_OPTIONS: dict[str, object] = {"maxiter": 50}
 
 
@@ -50,6 +55,8 @@ class PlackettLuceFit:
 
     backend: str
     score_column: str
+    fitted_control_columns: tuple[str, ...]
+    omitted_controls: tuple[dict[str, str], ...]
     model_data: pd.DataFrame
     choice_set_sizes: list[dict[str, object]]
     duplicate_serp_rank_keyword_count: int
@@ -175,16 +182,22 @@ def fit_plackett_luce_for_prepared_model_data(
         )
         return None
 
-    grouped, duplicate_serp_rank_keyword_count = _build_keyword_groups(
+    keyword_frames, duplicate_serp_rank_keyword_count = _build_keyword_frames(
         model_data,
         score_column,
         sorted_model_data=model_data,
     )
-    if not grouped:
+    if not keyword_frames:
         logger.debug("plackett-luce backend=%s skipped: no keyword groups", label)
         return None
 
-    fitted_model_data = pd.concat([group["frame"] for group in grouped], ignore_index=True)
+    fitted_model_data = pd.concat(keyword_frames, ignore_index=True)
+    fitted_control_columns, omitted_controls = _select_pl_controls(fitted_model_data)
+    grouped = _build_keyword_groups(
+        keyword_frames,
+        score_column,
+        fitted_control_columns,
+    )
 
     if max(group["choice_set_size"] for group in grouped) < 2:
         logger.debug("plackett-luce backend=%s skipped: choice set smaller than 2", label)
@@ -225,6 +238,8 @@ def fit_plackett_luce_for_prepared_model_data(
     return PlackettLuceFit(
         backend=label,
         score_column=score_column,
+        fitted_control_columns=fitted_control_columns,
+        omitted_controls=omitted_controls,
         model_data=fitted_model_data,
         choice_set_sizes=choice_set_sizes,
         duplicate_serp_rank_keyword_count=duplicate_serp_rank_keyword_count,
@@ -529,7 +544,6 @@ def summarize_plackett_luce_diagnostics_backends_from_fits(
 
 def _summarize_fit(fit: PlackettLuceFit) -> dict[str, object]:
     similarity_parameter_index = 0
-    length_parameter_index = 1
     similarity_raw_coefficient = float(fit.params[similarity_parameter_index])
     similarity_raw_standard_error = float(
         np.sqrt(max(fit.covariance[similarity_parameter_index, similarity_parameter_index], 0.0))
@@ -544,32 +558,32 @@ def _summarize_fit(fit: PlackettLuceFit) -> dict[str, object]:
     log_odds_standard_error = similarity_raw_standard_error * similarity_sd
     log_odds_confidence_interval = [float(bound * similarity_sd) for bound in similarity_confidence_interval]
 
-    log_length = np.log(fit.model_data["page_text_length"].astype(float) + 1.0)
-    log_length_sd = float(log_length.std(ddof=1))
-    length_raw_coefficient = float(fit.params[length_parameter_index])
-    length_raw_standard_error = float(
-        np.sqrt(max(fit.covariance[length_parameter_index, length_parameter_index], 0.0))
-    )
-    length_confidence_interval = _confidence_interval(
-        length_raw_coefficient,
-        length_raw_standard_error,
-        df=max(len(fit.choice_set_sizes) - 1, 1),
-    )
-    length_log_odds_per_1sd_log_length = length_raw_coefficient * log_length_sd
-    length_log_odds_per_1sd_log_length_confidence_interval = [
-        float(bound * log_length_sd) for bound in length_confidence_interval
-    ]
     convergence_confirmed = _convergence_confirmed(fit)
     choice_set_size_summary = _choice_set_size_summary(fit.choice_set_sizes)
     main_model: dict[str, object] = {
-        "formula": FORMULA,
+        "formula": _fitted_formula(fit.fitted_control_columns),
+        "omitted_controls": [dict(control) for control in fit.omitted_controls],
         "log_likelihood": float(fit.log_likelihood),
         "similarity_within_keyword_sd": similarity_sd,
-        "log_length_sd": log_length_sd,
-        "length_log_odds_per_1sd_log_length": length_log_odds_per_1sd_log_length,
-        "length_log_odds_per_1sd_log_length_confidence_interval": length_log_odds_per_1sd_log_length_confidence_interval,
         "convergence_confirmed": convergence_confirmed,
     }
+    for parameter_index, column in enumerate(fit.fitted_control_columns, start=1):
+        log_values = np.log(fit.model_data[column].astype(float) + 1.0)
+        log_sd = float(log_values.std(ddof=1))
+        raw_coefficient = float(fit.params[parameter_index])
+        raw_standard_error = float(
+            np.sqrt(max(fit.covariance[parameter_index, parameter_index], 0.0))
+        )
+        confidence_interval = _confidence_interval(
+            raw_coefficient,
+            raw_standard_error,
+            df=max(len(fit.choice_set_sizes) - 1, 1),
+        )
+        main_model[f"log_{column}_sd"] = log_sd
+        main_model[f"{column}_log_odds_per_1sd"] = raw_coefficient * log_sd
+        main_model[f"{column}_log_odds_per_1sd_confidence_interval"] = [
+            float(bound * log_sd) for bound in confidence_interval
+        ]
     main_model.update(
         {
             "log_odds_per_1sd": log_odds_per_1sd,
@@ -844,13 +858,13 @@ def _pl_signal_variance(model_data: pd.DataFrame, score_column: str) -> float:
     return float(within_keyword_sd_rms(usable, score_column))
 
 
-def _build_keyword_groups(
+def _build_keyword_frames(
     model_data: pd.DataFrame,
     score_column: str,
     *,
     sorted_model_data: pd.DataFrame | None = None,
-) -> tuple[list[dict[str, object]], int]:
-    groups: list[dict[str, object]] = []
+) -> tuple[list[pd.DataFrame], int]:
+    keyword_frames: list[pd.DataFrame] = []
     duplicate_serp_rank_keyword_count = 0
     if sorted_model_data is None:
         sorted_model_data = model_data.sort_values(
@@ -867,26 +881,64 @@ def _build_keyword_groups(
         if sorted_frame["serp_rank"].duplicated().any():
             duplicate_serp_rank_keyword_count += 1
             continue
-        features = _feature_matrix(sorted_frame, score_column)
+        keyword_frames.append(sorted_frame)
+    return keyword_frames, duplicate_serp_rank_keyword_count
+
+
+def _select_pl_controls(
+    model_data: pd.DataFrame,
+) -> tuple[tuple[str, ...], tuple[dict[str, str], ...]]:
+    fitted_controls: list[str] = []
+    omitted_controls: list[dict[str, str]] = []
+    for column in PL_CONTROL_COLUMNS:
+        log_values = np.log(model_data[column].to_numpy(dtype=float) + 1.0)
+        if np.ptp(log_values) == 0.0:
+            omitted_controls.append({"column": column, "reason": "constant"})
+        else:
+            fitted_controls.append(column)
+    return tuple(fitted_controls), tuple(omitted_controls)
+
+
+def _build_keyword_groups(
+    keyword_frames: Sequence[pd.DataFrame],
+    score_column: str,
+    control_columns: Sequence[str],
+) -> list[dict[str, object]]:
+    groups: list[dict[str, object]] = []
+    for keyword_frame in keyword_frames:
+        features = _feature_matrix(keyword_frame, score_column, control_columns)
         groups.append(
             {
-                "target_keyword_id": str(keyword_id),
-                "frame": sorted_frame,
+                "target_keyword_id": str(keyword_frame["target_keyword_id"].iloc[0]),
+                "frame": keyword_frame,
                 "features": features,
-                "choice_set_size": int(len(sorted_frame)),
+                "choice_set_size": int(len(keyword_frame)),
             }
         )
-    return groups, duplicate_serp_rank_keyword_count
+    return groups
 
 
-def _feature_matrix(frame: pd.DataFrame, score_column: str) -> np.ndarray:
+def _feature_matrix(
+    frame: pd.DataFrame,
+    score_column: str,
+    control_columns: Sequence[str],
+) -> np.ndarray:
     similarity_series = frame[score_column]
     if pd.api.types.is_bool_dtype(similarity_series):
         similarity = similarity_series.to_numpy(dtype=float)
     else:
         similarity = similarity_series.to_numpy(dtype=float)
-    length = np.log(frame["page_text_length"].to_numpy(dtype=float) + 1.0)
-    return np.column_stack([similarity, length])
+    columns = [similarity]
+    columns.extend(
+        np.log(frame[column].to_numpy(dtype=float) + 1.0)
+        for column in control_columns
+    )
+    return np.column_stack(columns)
+
+
+def _fitted_formula(control_columns: Sequence[str]) -> str:
+    terms = ["similarity", *(f"log({column} + 1)" for column in control_columns)]
+    return "rank_ordered_logit ~ " + " + ".join(terms)
 
 
 def _score_column_for_backend(backend: str) -> str:
@@ -902,7 +954,7 @@ def _maximize_log_likelihood(
     optimizer_options: dict[str, object] | None,
 ) -> tuple[np.ndarray, PlackettLuceOptimizerResult]:
     x0 = np.zeros(groups[0]["features"].shape[1], dtype=float)
-    options: dict[str, object] = {"maxiter": 1000}
+    options: dict[str, object] = {"maxiter": 1000, "xtol": 1e-12}
     if optimizer_options:
         options.update(optimizer_options)
     options.pop("gtol", None)

@@ -21,6 +21,7 @@ from seo_rank.stats.regression import (
     _fit_backend_regression_from_model_data,
     _parameter_confidence_interval,
     _parameter_value,
+    _prepare_regression_frame,
     fit_regression_for_score_column,
     fit_regression_backends,
     fit_backend_regression,
@@ -36,7 +37,8 @@ RESET_POWER = 2
 MIN_DF_RESID_FOR_RESET = RESET_POWER
 BREUSCH_PAGAN_P_VALUE_THRESHOLD = 0.05
 STUDENTIZED_RESIDUAL_THRESHOLD = 3.0
-MULTIVARIATE_LENGTH_TERM = "np.log(page_text_length + 1)"
+MULTIVARIATE_REFERRING_DOMAINS_TERM = "np.log(referring_domains_count + 1)"
+MULTIVARIATE_DEPRECATED_HTML_TAGS_TERM = "np.log(deprecated_html_tags + 1)"
 MULTIVARIATE_SCORE_COLUMNS = (
     "bge_normalized_score",
     "gemini_doc_retrieval_normalized_score",
@@ -245,7 +247,8 @@ def _prepare_multivariate_sensitivity_data(
     required_columns = [
         "target_keyword_id",
         "serp_rank",
-        "page_text_length",
+        "referring_domains_count",
+        "deprecated_html_tags",
         *[SIMILARITY_SCORE_COLUMNS[backend] for backend in active_backends],
     ]
     missing_columns = [column for column in required_columns if column not in analysis_mart.columns]
@@ -322,7 +325,8 @@ def _multivariate_vif_table(
     exog = np.asarray(fit.model.exog, dtype=float)
     selected_terms = [
         *[SIMILARITY_SCORE_COLUMNS[backend] for backend in active_backends],
-        MULTIVARIATE_LENGTH_TERM,
+        MULTIVARIATE_REFERRING_DOMAINS_TERM,
+        MULTIVARIATE_DEPRECATED_HTML_TAGS_TERM,
     ]
     selected_indices = [
         exog_names.index(term)
@@ -351,7 +355,14 @@ def _multivariate_formula(active_backends: Sequence[str]) -> str:
     score_terms = [SIMILARITY_SCORE_COLUMNS[backend] for backend in active_backends]
     return (
         "outcome ~ "
-        + " + ".join([*score_terms, MULTIVARIATE_LENGTH_TERM, "C(target_keyword_id)"])
+        + " + ".join(
+            [
+                *score_terms,
+                MULTIVARIATE_REFERRING_DOMAINS_TERM,
+                MULTIVARIATE_DEPRECATED_HTML_TAGS_TERM,
+                "C(target_keyword_id)",
+            ]
+        )
     )
 
 
@@ -381,8 +392,10 @@ def _next_multivariate_drop_backend(
 def _multivariate_term_kind(term: str) -> str:
     if term == "Intercept":
         return "intercept"
-    if term == MULTIVARIATE_LENGTH_TERM:
-        return "page_text_length"
+    if term == MULTIVARIATE_REFERRING_DOMAINS_TERM:
+        return "referring_domains_count"
+    if term == MULTIVARIATE_DEPRECATED_HTML_TAGS_TERM:
+        return "deprecated_html_tags"
     if term in MULTIVARIATE_SCORE_COLUMNS_TO_BACKEND:
         return "similarity_backend"
     if term.startswith("C(target_keyword_id)"):
@@ -464,9 +477,7 @@ def _summarize_backend_diagnostics_result(
     if fit is None:
         if score_column is None:
             score_column = _score_column_for_backend(backend)
-        model_frame = analysis_mart.filter(pl.col(score_column).is_not_null()).drop_nulls(
-            [score_column, "serp_rank", "page_text_length"]
-        )
+        model_frame = _prepare_regression_frame(analysis_mart, score_column)
         skipped_reason = _regression_skip_reason(model_frame)
         row_count = model_frame.height
         keyword_count = (

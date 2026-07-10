@@ -142,6 +142,8 @@ ANALYSIS_REQUIRED_COLUMNS = (
     "gemini_semantic_similarity_rank",
     "gemini_semantic_similarity_pct",
     "gemini_semantic_similarity_z",
+    "referring_domains_count",
+    "deprecated_html_tags",
     "schema_version",
 )
 
@@ -393,6 +395,8 @@ FEATURE_VALIDATION_RULES = {
             "gemini_semantic_similarity_rank": pl.Int64,
             "gemini_semantic_similarity_pct": pl.Float64,
             "gemini_semantic_similarity_z": pl.Float64,
+            "referring_domains_count": pl.Int64,
+            "deprecated_html_tags": pl.Boolean,
             "schema_version": pl.Utf8,
         },
         "unique_columns": ("serp_item_id",),
@@ -422,6 +426,7 @@ FEATURE_VALIDATION_RULES = {
             "gemini_semantic_similarity_normalized_score": (0, 1),
             "gemini_semantic_similarity_rank": (1, 20),
             "gemini_semantic_similarity_pct": (0, 1),
+            "referring_domains_count": (0, None),
         },
     },
 }
@@ -434,6 +439,10 @@ BACKLINKS_ANALYSIS_EXCLUDED_COLUMNS = {
     "canonical_url_hash",
     "url",
     "schema_version",
+    # Supplied by the base analysis mart as the robustness control; excluded here
+    # so the backlinks_analysis join does not duplicate it.
+    "referring_domains_count",
+    "deprecated_html_tags",
 }
 BACKLINKS_ANALYSIS_EXTRA_COLUMNS = tuple(
     column
@@ -473,6 +482,7 @@ ONPAGE_FEATURES_EXCLUDED_COLUMNS = {
     "response_id",
     "canonical_url_hash",
     "url",
+    "deprecated_html_tags",
     "schema_version",
 }
 ONPAGE_FEATURES_EXTRA_COLUMNS = tuple(
@@ -692,6 +702,8 @@ def build_feature_lazyframes(
         {
             "keyword_serp": keyword_serp,
             "page_features": page_features,
+            "backlinks": backlinks,
+            "onpage_signals": onpage_signals,
         }
     )
     backlinks_analysis = (
@@ -843,6 +855,12 @@ def build_analysis_mart(run_dir: Path) -> dict[str, object]:
         name: scan_curated_table(run_dir, name)
         for name in ("keyword_serp", "page_features", "passage_features", "domain_features")
     }
+    # Backlinks are optional per run; when present they supply the referring_domains_count
+    # robustness control joined into the analysis mart.
+    if (run_dir / "parquet" / "backlinks").exists():
+        feature_frames["backlinks"] = scan_curated_table(run_dir, "backlinks")
+    if (run_dir / "parquet" / "onpage_signals").exists():
+        feature_frames["onpage_signals"] = scan_curated_table(run_dir, "onpage_signals")
     analysis_frame = build_analysis_lazyframe(feature_frames)
     analysis_frame = validate_frame_contract(
         analysis_frame,
