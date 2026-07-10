@@ -17,7 +17,15 @@ from seo_rank.data.validate import (
     validate_materialized_frame_contract,
 )
 
-FEATURE_SCHEMA_VERSION = "feature_marts.v1"
+FEATURE_SCHEMA_VERSION = "feature_marts.v2"
+SITE_SCALE_COLUMNS = (
+    "images_size",
+    "scripts_size",
+    "stylesheets_size",
+    "total_transfer_size",
+    "total_dom_size",
+    "internal_links_count",
+)
 FEATURE_REQUIRED_COLUMNS = {
     "keyword_serp": (
         "run_id",
@@ -74,6 +82,7 @@ FEATURE_REQUIRED_COLUMNS = {
         "serp_item_count",
         "best_serp_rank",
         "worst_serp_rank",
+        "site_scale",
         "schema_version",
     ),
     "textrazor_page_metrics": (
@@ -145,6 +154,7 @@ ANALYSIS_REQUIRED_COLUMNS = (
     "deprecated_html_tags",
     "meta_keywords_to_content_consistency",
     "time_to_first_byte_ms",
+    "site_scale",
     "schema_version",
 )
 
@@ -271,6 +281,7 @@ FEATURE_VALIDATION_RULES = {
             "serp_item_count": pl.UInt32,
             "best_serp_rank": pl.Int64,
             "worst_serp_rank": pl.Int64,
+            "site_scale": pl.Float64,
             "schema_version": pl.Utf8,
         },
         "unique_columns": ("domain_feature_id",),
@@ -399,6 +410,7 @@ FEATURE_VALIDATION_RULES = {
             "deprecated_html_tags": pl.Boolean,
             "meta_keywords_to_content_consistency": pl.Float64,
             "time_to_first_byte_ms": pl.Int64,
+            "site_scale": pl.Float64,
             "schema_version": pl.Utf8,
         },
         "unique_columns": ("serp_item_id",),
@@ -570,6 +582,60 @@ FEATURE_VALIDATION_RULES["onpage_features"] = {
 }
 
 
+def build_site_scale(frame: pl.DataFrame | pl.LazyFrame) -> pl.LazyFrame:
+    """Build one standardized-mean site-scale value per run and hostname."""
+
+    lazy_frame = frame.lazy() if isinstance(frame, pl.DataFrame) else frame
+    page_medians = (
+        lazy_frame.group_by(["run_id", "domain", "canonical_url_hash"])
+        .agg(
+            [
+                pl.col(column).cast(pl.Float64).median().alias(column)
+                for column in SITE_SCALE_COLUMNS
+            ]
+        )
+    )
+    domain_medians = page_medians.group_by(["run_id", "domain"]).agg(
+        [pl.col(column).median().alias(column) for column in SITE_SCALE_COLUMNS]
+    )
+    logged = domain_medians.with_columns(
+        [
+            (pl.col(column) + 1.0).log().alias(f"__log_{column}")
+            for column in SITE_SCALE_COLUMNS
+        ]
+    )
+    z_scores = logged.with_columns(
+        [
+            pl.when(pl.col(column).is_null())
+            .then(None)
+            .when(
+                pl.col(f"__log_{column}").std(ddof=1).over("run_id").is_null()
+                | (pl.col(f"__log_{column}").std(ddof=1).over("run_id") == 0.0)
+            )
+            .then(0.0)
+            .otherwise(
+                (
+                    pl.col(f"__log_{column}")
+                    - pl.col(f"__log_{column}").mean().over("run_id")
+                )
+                / pl.col(f"__log_{column}").std(ddof=1).over("run_id")
+            )
+            .alias(f"__z_{column}")
+            for column in SITE_SCALE_COLUMNS
+        ]
+    )
+    complete = pl.all_horizontal(
+        [pl.col(column).is_not_null() for column in SITE_SCALE_COLUMNS]
+    )
+    return z_scores.with_columns(
+        pl.when(complete)
+        .then(pl.mean_horizontal([pl.col(f"__z_{column}") for column in SITE_SCALE_COLUMNS]))
+        .otherwise(None)
+        .cast(pl.Float64)
+        .alias("site_scale")
+    ).select(["run_id", "domain", "site_scale"])
+
+
 def build_feature_lazyframes(
     curated_frames: Mapping[str, pl.LazyFrame],
 ) -> dict[str, pl.LazyFrame]:
@@ -580,6 +646,15 @@ def build_feature_lazyframes(
     similarity_scores = curated_frames["similarity_scores"]
     backlinks = curated_frames["backlinks"]
     onpage_signals = curated_frames["onpage_signals"]
+    onpage_required_columns = CURATED_VALIDATION_RULES["onpage_signals"]["non_null_columns"]
+    onpage_signals = align_lazyframe_schema(
+        onpage_signals,
+        {
+            column: dtype
+            for column, dtype in CURATED_VALIDATION_RULES["onpage_signals"]["expected_schema"].items()
+            if column not in onpage_required_columns
+        },
+    )
 
     keyword_serp = (
         keywords.join(
@@ -661,10 +736,22 @@ def build_feature_lazyframes(
         .sort(["target_keyword_id", "passage_id"])
     )
 
-    domain_features = (
-        serp_items.with_columns(
-            pl.col("url").str.extract(r"^https?://([^/]+)", 1).alias("domain"),
+    serp_domains = serp_items.with_columns(
+        pl.col("url").str.extract(r"^https?://([^/]+)", 1).alias("domain"),
+    )
+    domain_site_scale = build_site_scale(
+        serp_domains.select(
+            ["run_id", "domain", "canonical_url_hash", "url", "target_keyword_id"]
+        ).join(
+            onpage_signals.select(
+                ["run_id", "target_keyword_id", "canonical_url_hash", "url", *SITE_SCALE_COLUMNS]
+            ),
+            on=["run_id", "target_keyword_id", "canonical_url_hash", "url"],
+            how="left",
         )
+    )
+    domain_features = (
+        serp_domains
         .group_by(["run_id", "target_keyword_id", "target_keyword", "domain"])
         .agg(
             [
@@ -686,6 +773,13 @@ def build_feature_lazyframes(
                 return_dtype=pl.Utf8,
             )
             .alias("domain_feature_id"),
+        )
+        .join(
+            domain_site_scale,
+            on=["run_id", "domain"],
+            how="left",
+        )
+        .with_columns(
             pl.lit(FEATURE_SCHEMA_VERSION).alias("schema_version"),
         )
         .select(
@@ -698,6 +792,7 @@ def build_feature_lazyframes(
                 "serp_item_count",
                 "best_serp_rank",
                 "worst_serp_rank",
+                "site_scale",
                 "schema_version",
             ]
         )
@@ -710,6 +805,7 @@ def build_feature_lazyframes(
             "page_features": page_features,
             "backlinks": backlinks,
             "onpage_signals": onpage_signals,
+            "domain_features": domain_features,
         }
     )
     backlinks_analysis = (
@@ -728,15 +824,6 @@ def build_feature_lazyframes(
         )
         .with_columns(pl.lit(FEATURE_SCHEMA_VERSION).alias("schema_version"))
         .sort(["target_keyword_id", "serp_rank", "canonical_url_hash"])
-    )
-    onpage_required_columns = CURATED_VALIDATION_RULES["onpage_signals"]["non_null_columns"]
-    onpage_signals = align_lazyframe_schema(
-        onpage_signals,
-        {
-            column: dtype
-            for column, dtype in CURATED_VALIDATION_RULES["onpage_signals"]["expected_schema"].items()
-            if column not in onpage_required_columns
-        },
     )
     onpage_features = (
         analysis_base.join(
@@ -778,7 +865,7 @@ REQUIRED_FEATURE_MARTS_FOR_ANALYSIS = (
 
 
 def ensure_feature_marts_for_analysis(run_dir: Path) -> None:
-    """Rebuild feature marts when a required partition is missing from the run tree."""
+    """Rebuild derived marts when partitions are missing or schema-stale."""
 
     run_json_path = Path(run_dir) / "run.json"
     if run_json_path.exists():
@@ -787,11 +874,29 @@ def ensure_feature_marts_for_analysis(run_dir: Path) -> None:
             return
 
     parquet_dir = Path(run_dir) / "parquet"
-    if all((parquet_dir / name).exists() for name in REQUIRED_FEATURE_MARTS_FOR_ANALYSIS):
+    feature_marts_stale = any(
+        not _dataset_matches_schema(parquet_dir / name, FEATURE_SCHEMA_VERSION)
+        for name in REQUIRED_FEATURE_MARTS_FOR_ANALYSIS
+    )
+    if not feature_marts_stale:
         return
     if not run_json_path.exists():
         return
     build_feature_marts(Path(run_dir))
+
+
+def _dataset_matches_schema(dataset_dir: Path, expected_version: str) -> bool:
+    files = sorted(dataset_dir.glob("part-*.parquet"))
+    if not files:
+        return False
+    try:
+        schema = pq.read_schema(files[0])
+        if "schema_version" not in schema.names:
+            return False
+        values = pq.read_table(files[0], columns=["schema_version"])["schema_version"].unique().to_pylist()
+    except (OSError, ValueError, KeyError):
+        return False
+    return values == [expected_version]
 
 
 def build_feature_marts(run_dir: Path) -> dict[str, object]:

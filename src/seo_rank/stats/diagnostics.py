@@ -27,7 +27,11 @@ from seo_rank.stats.regression import (
     fit_backend_regression,
 )
 from seo_rank.stats.families import SignalFamily, SignalFamilyRegistry, source_mart_for_family
-from seo_rank.stats.model_inputs import control_error_summary, validate_control_columns
+from seo_rank.stats.model_inputs import (
+    REQUIRED_CONTROL_COLUMNS,
+    control_error_summary,
+    validate_control_columns,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -38,16 +42,8 @@ RESET_POWER = 2
 MIN_DF_RESID_FOR_RESET = RESET_POWER
 BREUSCH_PAGAN_P_VALUE_THRESHOLD = 0.05
 STUDENTIZED_RESIDUAL_THRESHOLD = 3.0
-MULTIVARIATE_DEPRECATED_HTML_TAGS_TERM = "np.log(deprecated_html_tags + 1)"
-MULTIVARIATE_TIME_TO_FIRST_BYTE_TERM = "np.log(time_to_first_byte_ms + 1)"
-MULTIVARIATE_CONTROL_COLUMNS = (
-    "deprecated_html_tags",
-    "time_to_first_byte_ms",
-)
-MULTIVARIATE_CONTROL_TERMS = {
-    "deprecated_html_tags": MULTIVARIATE_DEPRECATED_HTML_TAGS_TERM,
-    "time_to_first_byte_ms": MULTIVARIATE_TIME_TO_FIRST_BYTE_TERM,
-}
+MULTIVARIATE_CONTROL_COLUMNS = REQUIRED_CONTROL_COLUMNS
+MULTIVARIATE_CONTROL_TERMS = {"site_scale": "site_scale"}
 MULTIVARIATE_SCORE_COLUMNS = (
     "bge_normalized_score",
     "gemini_doc_retrieval_normalized_score",
@@ -436,10 +432,8 @@ def _next_multivariate_drop_backend(
 def _multivariate_term_kind(term: str) -> str:
     if term == "Intercept":
         return "intercept"
-    if term == MULTIVARIATE_DEPRECATED_HTML_TAGS_TERM:
-        return "deprecated_html_tags"
-    if term == MULTIVARIATE_TIME_TO_FIRST_BYTE_TERM:
-        return "time_to_first_byte_ms"
+    if term == MULTIVARIATE_CONTROL_TERMS["site_scale"]:
+        return "site_scale"
     if term in MULTIVARIATE_SCORE_COLUMNS_TO_BACKEND:
         return "similarity_backend"
     if term.startswith("C(target_keyword_id)"):

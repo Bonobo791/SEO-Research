@@ -61,6 +61,7 @@ def _sample_plackett_luce_panel(
                     "referring_domains_count": referring_domains_count,
                     "deprecated_html_tags": (keyword_index + serp_rank) % 3 == 0,
                     "time_to_first_byte_ms": 100 + (keyword_index * 7) + serp_rank,
+                    "site_scale": (keyword_index * 0.1) + (serp_rank * 0.01),
                     "meta_keywords_to_content_consistency": 0.1 + (serp_rank * 0.05),
                     "bge_raw_score": similarity,
                     "bge_normalized_score": similarity,
@@ -199,7 +200,7 @@ def test_summarize_backend_plackett_luce_fits_rank_ordered_logit_with_clustered_
     assert summary["choice_set_size_summary"]["min"] == 5
     assert summary["choice_set_size_summary"]["max"] == 5
     assert summary["main_model"]["formula"] == (
-        "rank_ordered_logit ~ log(bge_normalized_score + 1) + log(deprecated_html_tags + 1) + log(time_to_first_byte_ms + 1)"
+        "rank_ordered_logit ~ log(bge_normalized_score + 1) + site_scale"
     )
     assert summary["main_model"]["omitted_controls"] == []
     assert summary["main_model"]["log_odds_per_1sd"] > 0
@@ -227,11 +228,8 @@ def test_plackett_luce_ignores_meta_keyword_control() -> None:
     assert fit is not None
     assert fit.params.shape == (2,)
     assert fit.information.shape == (2, 2)
-    assert summary["main_model"]["formula"] == "rank_ordered_logit ~ log(bge_normalized_score + 1) + log(time_to_first_byte_ms + 1)"
-    assert summary["main_model"]["omitted_controls"] == [
-        {"column": "deprecated_html_tags", "reason": "constant"},
-    ]
-    assert "deprecated_html_tags_log_odds_per_1sd" not in summary["main_model"]
+    assert summary["main_model"]["formula"] == "rank_ordered_logit ~ log(bge_normalized_score + 1) + site_scale"
+    assert summary["main_model"]["omitted_controls"] == []
 
 
 def test_plackett_luce_ignores_constant_meta_keyword_control() -> None:
@@ -243,9 +241,9 @@ def test_plackett_luce_ignores_constant_meta_keyword_control() -> None:
     summary = summarize_backend_plackett_luce(panel, backend="bge")
 
     assert fit is not None
-    assert fit.params.shape == (3,)
+    assert fit.params.shape == (2,)
     assert summary["main_model"]["formula"] == (
-        "rank_ordered_logit ~ log(bge_normalized_score + 1) + log(deprecated_html_tags + 1) + log(time_to_first_byte_ms + 1)"
+        "rank_ordered_logit ~ log(bge_normalized_score + 1) + site_scale"
     )
     assert summary["main_model"]["omitted_controls"] == []
 
@@ -255,23 +253,24 @@ def test_plackett_luce_omits_constant_control_but_keeps_latency_control() -> Non
         pl.lit(200).alias("referring_domains_count"),
         pl.lit(False).alias("deprecated_html_tags"),
         pl.lit(0.5).alias("meta_keywords_to_content_consistency"),
+        pl.lit(0.5).alias("site_scale"),
     )
 
     fit = fit_backend_plackett_luce(panel, backend="bge")
     summary = summarize_backend_plackett_luce(panel, backend="bge")
 
     assert fit is not None
-    assert fit.params.shape == (2,)
-    assert fit.information.shape == (2, 2)
-    assert summary["main_model"]["formula"] == "rank_ordered_logit ~ log(bge_normalized_score + 1) + log(time_to_first_byte_ms + 1)"
+    assert fit.params.shape == (1,)
+    assert fit.information.shape == (1, 1)
+    assert summary["main_model"]["formula"] == "rank_ordered_logit ~ log(bge_normalized_score + 1)"
     assert summary["main_model"]["omitted_controls"] == [
-        {"column": "deprecated_html_tags", "reason": "constant"},
+        {"column": "site_scale", "reason": "constant"},
     ]
 
 
 def test_plackett_luce_recomputes_omitted_controls_for_subset_refits() -> None:
     panel = _sample_plackett_luce_panel().with_columns(
-        (pl.col("serp_rank") == 1).alias("deprecated_html_tags"),
+        (pl.col("serp_rank") == 1).alias("site_scale"),
     )
     fit = fit_backend_plackett_luce(panel, backend="bge")
 
@@ -284,7 +283,7 @@ def test_plackett_luce_recomputes_omitted_controls_for_subset_refits() -> None:
     assert fit.omitted_controls == ()
     assert subset_fit is not None
     assert subset_fit.omitted_controls == (
-        {"column": "deprecated_html_tags", "reason": "constant"},
+        {"column": "site_scale", "reason": "constant"},
     )
 
 
@@ -292,27 +291,19 @@ def test_plackett_luce_logs_score_and_controls_in_feature_matrix() -> None:
     frame = pd.DataFrame(
         {
             "bge_normalized_score": [2.0, 3.0],
-            "deprecated_html_tags": [1.0, 2.0],
-            "time_to_first_byte_ms": [10.0, 20.0],
+            "site_scale": [1.0, 2.0],
         }
     )
 
     features = plackett_luce_module._feature_matrix(
         frame,
         "bge_normalized_score",
-        ("deprecated_html_tags", "time_to_first_byte_ms"),
+        ("site_scale",),
     )
 
     np.testing.assert_allclose(
         features,
-        np.log(
-            np.array(
-                [
-                    [3.0, 2.0, 11.0],
-                    [4.0, 3.0, 21.0],
-                ]
-            )
-        ),
+        np.array([[np.log(3.0), 1.0], [np.log(4.0), 2.0]]),
     )
 
 
@@ -418,7 +409,7 @@ def test_fit_backend_plackett_luce_treats_precision_loss_with_tiny_gradient_as_c
         / "analysis_mart"
         / "part-0.parquet"
         ).with_row_index("_row").with_columns(
-            (pl.col("_row") % 3 == 0).alias("deprecated_html_tags"),
+            (pl.col("_row") % 3 == 0).alias("site_scale"),
             pl.lit(0.5).alias("meta_keywords_to_content_consistency"),
             pl.lit(250).alias("time_to_first_byte_ms"),
         ).drop("_row")
@@ -604,7 +595,7 @@ def test_plackett_luce_reports_control_error_instead_of_omitting_null_control() 
         pl.when(pl.col("serp_rank") == 1)
         .then(None)
         .otherwise(pl.lit(250))
-        .alias("time_to_first_byte_ms"),
+        .alias("site_scale"),
     )
 
     summary = summarize_backend_plackett_luce(frame, backend="bge")
@@ -612,13 +603,13 @@ def test_plackett_luce_reports_control_error_instead_of_omitting_null_control() 
     assert summary["status"] == "error"
     assert summary["error_note"] == "required control data is incomplete; model not fit"
     assert summary["invalid_controls"] == [
-        {"column": "time_to_first_byte_ms", "reason": "missing_values"}
+        {"column": "site_scale", "reason": "missing_values"}
     ]
 
 
 def test_plackett_luce_keeps_signal_null_filter_local_to_that_backend() -> None:
     frame = _sample_plackett_luce_panel().with_columns(
-        pl.lit(250).alias("time_to_first_byte_ms"),
+        pl.lit(0.5).alias("site_scale"),
         pl.when(pl.col("serp_rank") == 1)
         .then(None)
         .otherwise(pl.col("bge_normalized_score"))

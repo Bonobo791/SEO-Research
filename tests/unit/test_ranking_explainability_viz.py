@@ -32,6 +32,7 @@ def _explainability_panel_frame() -> pl.DataFrame:
                     "referring_domains_count": 120 + (keyword_index * 3) + serp_rank,
                     "deprecated_html_tags": (keyword_index + serp_rank) % 3 == 0,
                     "meta_keywords_to_content_consistency": 0.1 + (serp_rank * 0.05),
+                    "site_scale": (keyword_index * 0.1) + (serp_rank * 0.01),
                     "bge_normalized_score": signal,
                     "gemini_doc_retrieval_normalized_score": signal - 0.1,
                     "gemini_semantic_similarity_normalized_score": signal - 0.2,

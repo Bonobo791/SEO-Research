@@ -43,6 +43,7 @@ def _textrazor_panel_frame() -> pl.DataFrame:
                     "deprecated_html_tags": (keyword_index + serp_rank) % 3 == 0,
                     "meta_keywords_to_content_consistency": 0.1 + (serp_rank * 0.05),
                     "time_to_first_byte_ms": 100 + serp_rank,
+                    "site_scale": (keyword_index * 0.1) + (serp_rank * 0.01),
                     "bge_raw_score": signal,
                     "bge_normalized_score": signal,
                     "gemini_doc_retrieval_raw_score": signal - 0.1,
@@ -71,6 +72,7 @@ def test_fit_multivariate_ranking_model_skips_when_design_matrix_is_column_rank_
             "page_text_length": [100, 200, 300, 400, 500, 600, 600],
             "referring_domains_count": [100, 200, 300, 400, 500, 600, 600],
             "deprecated_html_tags": [False, False, True, False, True, False, True],
+            "site_scale": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
             "meta_keywords_to_content_consistency": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
             "bge_normalized_score": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.6],
         }
@@ -110,6 +112,7 @@ def test_summarize_textrazor_ranking_explainability_computes_univariate_and_mult
     assert multivariate["row_count"] == panel.height
     assert multivariate["keyword_count"] == 10
     assert "meta_keywords_to_content_consistency" not in multivariate["feature_model"]["formula"]
+    assert "site_scale" in multivariate["feature_model"]["formula"]
     assert (
         multivariate["descriptive_fit_delta"]["adjusted_r_squared"] >= 0
     )

@@ -7,10 +7,7 @@ from collections.abc import Sequence
 import pandas as pd
 
 
-REQUIRED_CONTROL_COLUMNS = (
-    "deprecated_html_tags",
-    "time_to_first_byte_ms",
-)
+REQUIRED_CONTROL_COLUMNS = ("site_scale",)
 CONTROL_ERROR_NOTE = "required control data is incomplete; model not fit"
 
 

@@ -16,7 +16,11 @@ from seo_rank.stats.scale import within_keyword_sd_rms
 from seo_rank.stats.spec import AnalysisSpec
 from scipy import optimize, stats
 from scipy.special import logsumexp
-from seo_rank.stats.model_inputs import control_error_summary, validate_control_columns
+from seo_rank.stats.model_inputs import (
+    REQUIRED_CONTROL_COLUMNS,
+    control_error_summary,
+    validate_control_columns,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -26,10 +30,7 @@ SIMILARITY_SCORE_COLUMNS = {
     "gemini_doc_retrieval": "gemini_doc_retrieval_normalized_score",
     "gemini_semantic_similarity": "gemini_semantic_similarity_normalized_score",
 }
-PL_CONTROL_COLUMNS = (
-    "deprecated_html_tags",
-    "time_to_first_byte_ms",
-)
+PL_CONTROL_COLUMNS = REQUIRED_CONTROL_COLUMNS
 PLACKET_LUCE_REQUIRED_COLUMNS = (
     "serp_rank",
     "target_keyword_id",
@@ -585,8 +586,7 @@ def _summarize_fit(fit: PlackettLuceFit) -> dict[str, object]:
     }
     for parameter_index, column in enumerate(fit.fitted_control_columns, start=1):
         values = fit.model_data[column].astype(float)
-        transformed = np.log(values + 1.0)
-        spread = float(transformed.std(ddof=1))
+        spread = float(values.std(ddof=1))
         raw_coefficient = float(fit.params[parameter_index])
         raw_standard_error = float(
             np.sqrt(max(fit.covariance[parameter_index, parameter_index], 0.0))
@@ -596,7 +596,7 @@ def _summarize_fit(fit: PlackettLuceFit) -> dict[str, object]:
             raw_standard_error,
             df=max(len(fit.choice_set_sizes) - 1, 1),
         )
-        spread_key = f"log_{column}_sd"
+        spread_key = f"{column}_sd"
         main_model[spread_key] = spread
         main_model[f"{column}_log_odds_per_1sd"] = raw_coefficient * spread
         main_model[f"{column}_log_odds_per_1sd_confidence_interval"] = [
@@ -959,8 +959,7 @@ def _select_pl_controls(
             omitted_controls.append({"column": column, "reason": "missing_values"})
             continue
         values = model_data[column].to_numpy(dtype=float)
-        log_values = np.log(values + 1.0)
-        if np.ptp(log_values) == 0.0:
+        if np.ptp(values) == 0.0:
             omitted_controls.append({"column": column, "reason": "constant"})
         else:
             fitted_controls.append(column)
@@ -993,18 +992,12 @@ def _feature_matrix(
 ) -> np.ndarray:
     score = frame[score_column].to_numpy(dtype=float)
     columns = [np.log(score + 1.0)]
-    columns.extend(
-        np.log(frame[column].to_numpy(dtype=float) + 1.0)
-        for column in control_columns
-    )
+    columns.extend(frame[column].to_numpy(dtype=float) for column in control_columns)
     return np.column_stack(columns)
 
 
 def _fitted_formula(score_column: str, control_columns: Sequence[str]) -> str:
-    terms = [
-        f"log({score_column} + 1)",
-        *(f"log({column} + 1)" for column in control_columns),
-    ]
+    terms = [f"log({score_column} + 1)", *control_columns]
     return "rank_ordered_logit ~ " + " + ".join(terms)
 
 

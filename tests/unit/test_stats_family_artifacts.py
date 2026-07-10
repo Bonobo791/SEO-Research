@@ -39,6 +39,7 @@ def _combined_analysis_mart_frame() -> pl.DataFrame:
                     "referring_domains_count": 120 + (keyword_index * 3) + serp_rank,
                     "deprecated_html_tags": (keyword_index + serp_rank) % 3 == 0,
                     "meta_keywords_to_content_consistency": 0.5,
+                    "site_scale": (keyword_index * 0.1) + (serp_rank * 0.01),
                     "bge_raw_score": signal,
                     "bge_normalized_score": signal,
                     "gemini_doc_retrieval_raw_score": signal - 0.1,

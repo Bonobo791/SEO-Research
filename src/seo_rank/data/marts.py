@@ -4,11 +4,12 @@ from collections.abc import Mapping
 
 import polars as pl
 
-ANALYSIS_SCHEMA_VERSION = "analysis_mart.v6"
+ANALYSIS_SCHEMA_VERSION = "analysis_mart.v7"
 
 _DEPRECATED_HTML_TAGS_COLUMN = "deprecated_html_tags"
 _META_KEYWORDS_CONSISTENCY_COLUMN = "meta_keywords_to_content_consistency"
 _TIME_TO_FIRST_BYTE_COLUMN = "time_to_first_byte_ms"
+_SITE_SCALE_COLUMN = "site_scale"
 _ANALYSIS_JOIN_KEYS = ["run_id", "target_keyword_id", "canonical_url_hash", "url"]
 
 _BACKENDS = ("bge", "gemini_doc_retrieval", "gemini_semantic_similarity")
@@ -77,6 +78,7 @@ def build_analysis_lazyframe(feature_frames: Mapping[str, pl.LazyFrame]) -> pl.L
     frame = _attach_deprecated_html_tags(frame, feature_frames.get("onpage_signals"))
     frame = _attach_meta_keywords_consistency(frame, feature_frames.get("onpage_signals"))
     frame = _attach_time_to_first_byte(frame, feature_frames.get("onpage_signals"))
+    frame = _attach_site_scale(frame, feature_frames.get("domain_features"))
     return (
         frame
         .sort(["target_keyword_id", "serp_rank", "canonical_url_hash"])
@@ -128,4 +130,27 @@ def _attach_time_to_first_byte(
         onpage_signals.select([*_ANALYSIS_JOIN_KEYS, _TIME_TO_FIRST_BYTE_COLUMN]),
         on=_ANALYSIS_JOIN_KEYS,
         how="left",
+    )
+
+
+def _attach_site_scale(
+    frame: pl.LazyFrame, domain_features: pl.LazyFrame | None
+) -> pl.LazyFrame:
+    if domain_features is None or _SITE_SCALE_COLUMN not in domain_features.collect_schema():
+        return frame.with_columns(pl.lit(None).cast(pl.Float64).alias(_SITE_SCALE_COLUMN))
+    domain_lookup = (
+        domain_features.select(["run_id", "domain", _SITE_SCALE_COLUMN])
+        .unique(["run_id", "domain"])
+    )
+    return (
+        frame.with_columns(
+            pl.col("url").str.extract(r"^https?://([^/]+)", 1).alias("__domain")
+        )
+        .join(
+            domain_lookup,
+            left_on=["run_id", "__domain"],
+            right_on=["run_id", "domain"],
+            how="left",
+        )
+        .drop("__domain")
     )

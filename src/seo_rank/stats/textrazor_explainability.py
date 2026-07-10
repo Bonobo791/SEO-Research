@@ -497,12 +497,7 @@ def _multivariate_feature_formula(
     keyword_count: int,
     control_columns: Sequence[str],
 ) -> str:
-    control_terms = [
-        f"np.log({column} + 1)"
-        if column in {"deprecated_html_tags", "time_to_first_byte_ms"}
-        else column
-        for column in control_columns
-    ]
+    control_terms = list(control_columns)
     terms = " + ".join([*score_columns, *control_terms])
     if keyword_count >= 2:
         return f"outcome ~ {terms} + C(target_keyword_id)"

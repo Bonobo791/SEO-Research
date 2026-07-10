@@ -19,7 +19,11 @@ ONPAGE_FAMILY_KEYS = (
     "onpage_core_web_vitals",
     "onpage_technical_checks",
 )
-ONPAGE_SIGNAL_COLUMNS = frozenset(ONPAGE_FEATURES_EXTRA_COLUMNS) - {"onpage_signal_id"}
+ONPAGE_SIGNAL_COLUMNS = (
+    frozenset(ONPAGE_FEATURES_EXTRA_COLUMNS)
+    - {"onpage_signal_id"}
+    | {"deprecated_html_tags", "meta_keywords_to_content_consistency", "time_to_first_byte_ms"}
+)
 ONPAGE_CONTENT_QUALITY_COLUMNS = (
     "onpage_score",
     "plain_text_word_count",

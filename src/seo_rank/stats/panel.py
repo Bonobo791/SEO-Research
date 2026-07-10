@@ -20,6 +20,7 @@ _ANALYSIS_JOIN_KEYS = ("run_id", "target_keyword_id", "canonical_url_hash", "url
 _ANALYSIS_CONTROL_DTYPES = {
     "deprecated_html_tags": pl.Boolean,
     "time_to_first_byte_ms": pl.Int64,
+    "site_scale": pl.Float64,
 }
 
 SIMILARITY_RATE_COLUMNS = {

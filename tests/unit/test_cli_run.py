@@ -143,8 +143,9 @@ def test_run_writes_offline_json_and_markdown_artifacts(
         "live_bge": False,
         "live_gemini": False,
         "live_textrazor": False,
-        "refresh_textrazor": False,
-    }
+            "refresh_textrazor": False,
+            "domain_blocklist_path": None,
+        }
     assert payload["keywords"] == ["technical seo"]
     assert payload["run_id"] == "artifacts"
     assert "raw_provider_data" not in payload
@@ -1437,8 +1438,9 @@ def test_build_resumed_keyword_result_fetches_only_missing_onpage_urls(
         transport,
         progress=None,
         run_dir=None,
+        blocklist=None,
     ):
-        del target_keyword_arg, credentials, transport, progress, run_dir
+        del target_keyword_arg, credentials, transport, progress, run_dir, blocklist
         fetched_urls.extend(urls)
         return [
             {**fixture_onpage_instant_pages_response(url), "url": url}
@@ -1556,8 +1558,9 @@ def test_build_resumed_keyword_result_refetches_empty_stored_onpage_response(
         transport,
         progress=None,
         run_dir=None,
+        blocklist=None,
     ):
-        del target_keyword_arg, credentials, transport, progress, run_dir
+        del target_keyword_arg, credentials, transport, progress, run_dir, blocklist
         fetched_urls.extend(urls)
         return [
             {**fixture_onpage_instant_pages_response(url), "url": url}

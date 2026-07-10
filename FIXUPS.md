@@ -1,3 +1,26 @@
+# CRITICAL BUGS
+
+
+ - Critical: Live provider runs fabricate similarity fields unless both scorers are enabled. src/seo_rank/cli.py:2711 starts from deterministic fixture BGE/Gemini scores.
+      - --live-providers: all three similarity fields are fixture-derived.
+      - --live-providers --live-bge: BGE is real; both Gemini fields remain fixture-derived.
+      - --live-providers --live-gemini: Gemini fields are real; BGE remains fixture-derived.
+      - Only both flags produce real values for all three fields.
+
+  - Critical: Live Gemini explicitly writes a fixture BGE score into its result at src/seo_rank/gemini_embeddings.py:102. It is overwritten only if live BGE subsequently runs.
+  - High: Stored-run replay fabricates missing page text rather than treating it as unavailable. src/seo_rank/cli.py:1442 calls fixture_page_text_response() when replay is non-live, then feeds that text into downstream outputs.
+  - High: --live-textrazor-only builds the entire DataForSEO/SERP/page-text/similarity result from fixtures, then adds real TextRazor data. src/seo_rank/cli.py:2327 calls the offline builder directly.
+  - High: The one-off analysis script substitutes fixture BGE scores if live BGE cannot load or fails. analysis/gemini_nwh_similarity.py:397 and analysis/gemini_nwh_similarity.py:693. It then prints them as BGE results at
+    analysis/gemini_nwh_similarity.py:730.
+
+  - High: The normal CLI default is a fixture pipeline, not merely --dry-run: src/seo_rank/cli.py:238 selects offline execution whenever --live-providers is absent. src/seo_rank/cli.py:2153 injects fixture keyword expansion;
+    src/seo_rank/cli.py:2394, src/seo_rank/cli.py:2403, and src/seo_rank/cli.py:2438 inject fixture SERP, page text, and TextRazor metrics. Without --dry-run, it can proceed to statistical analysis.
+
+  - Medium: Static provider-shaped fixtures remain in src, including OnPage, backlinks, TextRazor, SERP, page text, and keyword expansion. Examples: src/seo_rank/dataforseo.py:955, src/seo_rank/dataforseo.py:1060, src/seo_rank/
+    dataforseo.py:1272, src/seo_rank/textrazor.py:266. The OnPage and backlinks helpers are currently test-only, but they still contain hard-coded provider metrics.
+
+
+
 # Small fixes backlog
 
 Tracked hardening and polish items surfaced during Phase 4.5 Slice 3 (lazy

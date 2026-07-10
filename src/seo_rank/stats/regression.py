@@ -12,7 +12,11 @@ import pandas as pd
 import statsmodels.formula.api as smf
 from scipy import stats
 from seo_rank.stats.families import SignalFamily, SignalFamilyRegistry, source_mart_for_family
-from seo_rank.stats.model_inputs import control_error_summary, validate_control_columns
+from seo_rank.stats.model_inputs import (
+    REQUIRED_CONTROL_COLUMNS,
+    control_error_summary,
+    validate_control_columns,
+)
 from seo_rank.stats.rank_depth import filter_panel_by_max_rank
 from seo_rank.stats.scale import within_keyword_sd_rms
 from seo_rank.stats.spec import AnalysisSpec
@@ -27,11 +31,8 @@ SIMILARITY_SCORE_COLUMNS = {
     "gemini_doc_retrieval": "gemini_doc_retrieval_normalized_score",
     "gemini_semantic_similarity": "gemini_semantic_similarity_normalized_score",
 }
-REGRESSION_CONTROL_COLUMNS = (
-    "deprecated_html_tags",
-    "time_to_first_byte_ms",
-)
-BASELINE_FORMULA = "outcome ~ np.log(deprecated_html_tags + 1) + np.log(time_to_first_byte_ms + 1) + C(target_keyword_id)"
+REGRESSION_CONTROL_COLUMNS = REQUIRED_CONTROL_COLUMNS
+BASELINE_FORMULA = "outcome ~ site_scale + C(target_keyword_id)"
 REGRESSION_REQUIRED_COLUMNS = ("serp_rank",)
 
 
@@ -680,9 +681,4 @@ def _public_feature_formula(
 
 
 def _regression_control_formula_terms(control_columns: Sequence[str]) -> str:
-    return " + ".join(
-        f"np.log({column} + 1)"
-        if column in {"deprecated_html_tags", "time_to_first_byte_ms"}
-        else column
-        for column in control_columns
-    )
+    return " + ".join(control_columns)
