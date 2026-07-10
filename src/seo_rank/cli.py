@@ -1698,6 +1698,16 @@ def run_manifest_is_dry_run(run_dir: Path) -> bool:
     return bool(run_payload.get("dry_run"))
 
 
+COMBINED_ANALYSIS_LOGGER = logging.getLogger("seo_rank.analyze.combined")
+# Root logging is unconfigured (defaults to WARNING), so mirror the textrazor
+# logger setup to surface combined-run INFO progress on stderr.
+_combined_log_handler = logging.StreamHandler(sys.stderr)
+_combined_log_handler.setFormatter(logging.Formatter("[seo-rank] %(message)s"))
+COMBINED_ANALYSIS_LOGGER.addHandler(_combined_log_handler)
+COMBINED_ANALYSIS_LOGGER.setLevel(logging.INFO)
+COMBINED_ANALYSIS_LOGGER.propagate = False
+
+
 def build_combined_analysis_run(
     source_run_dirs: Sequence[Path],
     output_dir: Path,
@@ -1710,6 +1720,12 @@ def build_combined_analysis_run(
             f"combined analysis output_dir must differ from source runs: {output_dir}"
         )
 
+    COMBINED_ANALYSIS_LOGGER.info(
+        "combining %d runs into %s: %s",
+        len(source_runs),
+        output_dir,
+        ", ".join(str(run_dir) for run_dir in source_runs),
+    )
     source_payloads = [load_run_payload(run_dir) for run_dir in source_runs]
     source_frames = {
         table_name: []
@@ -1722,6 +1738,7 @@ def build_combined_analysis_run(
 
     for run_dir in source_runs:
         if not run_manifest_is_combined(run_dir):
+            COMBINED_ANALYSIS_LOGGER.info("building analysis mart for source run %s", run_dir)
             ensure_feature_marts_for_analysis(run_dir)
             build_analysis_mart(run_dir)
 
@@ -1729,11 +1746,22 @@ def build_combined_analysis_run(
         source_frames["analysis_mart"].append((run_dir, analysis_frame))
         for keyword_id in analysis_frame.get_column("target_keyword_id").unique().to_list():
             source_keywords.setdefault(str(keyword_id), []).append(str(run_dir))
+        COMBINED_ANALYSIS_LOGGER.info(
+            "loaded analysis mart from %s: %d rows",
+            run_dir,
+            analysis_frame.height,
+        )
 
         for table_name in COMBINED_ANALYSIS_OPTIONAL_TABLES:
             frame = load_combined_source_table(run_dir, table_name, required=False)
             if frame is not None:
                 source_frames[table_name].append((run_dir, frame))
+                COMBINED_ANALYSIS_LOGGER.info(
+                    "loaded optional table %s from %s: %d rows",
+                    table_name,
+                    run_dir,
+                    frame.height,
+                )
 
     keyword_owner = {
         keyword_id: sources[-1]
@@ -1751,6 +1779,20 @@ def build_combined_analysis_run(
         source_runs,
         source_payloads,
     )
+    COMBINED_ANALYSIS_LOGGER.info(
+        "merged %d keywords (%d overlapping, last_run_wins)",
+        len(keyword_owner),
+        len(keyword_overlaps),
+    )
+    for keyword_id, overlap in keyword_overlaps.items():
+        COMBINED_ANALYSIS_LOGGER.info(
+            "keyword %s: kept %s, dropped %s",
+            keyword_id,
+            overlap["selected_run"],
+            ", ".join(overlap["dropped_runs"]),
+        )
+    for warning in compatibility_warnings:
+        COMBINED_ANALYSIS_LOGGER.warning("combined run %s", warning)
 
     reset_combined_output_dir(output_dir)
     dataset_catalog: dict[str, object] = {}
@@ -1765,6 +1807,11 @@ def build_combined_analysis_run(
             output_dir,
             table_name=table_name,
             frame=merged_frame,
+        )
+        COMBINED_ANALYSIS_LOGGER.info(
+            "wrote combined table %s: %d rows",
+            table_name,
+            merged_frame.height,
         )
 
     config = dict(_config_from_run_payload(source_payloads[-1]))
@@ -1793,6 +1840,7 @@ def build_combined_analysis_run(
         render_combined_analysis_report(combined_payload["combined_analysis"]),
         encoding="utf-8",
     )
+    COMBINED_ANALYSIS_LOGGER.info("combined run written to %s", output_dir)
     return output_dir
 
 
