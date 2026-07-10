@@ -602,7 +602,13 @@ def _parameter_value(result: RegressionResultsWrapper, parameter: str) -> float:
 
 def _parameter_standard_error(result: RegressionResultsWrapper, parameter: str) -> float:
     index = _parameter_index(result, parameter)
-    return float(np.asarray(result.bse)[index])
+    return float(_safe_covariance_standard_errors(result)[index])
+
+
+def _safe_covariance_standard_errors(result: RegressionResultsWrapper) -> np.ndarray:
+    covariance = np.asarray(result.cov_params(), dtype=float)
+    # Robust covariance estimates can be slightly indefinite for sparse clusters.
+    return np.sqrt(np.maximum(np.diag(covariance), 0.0))
 
 
 def _parameter_confidence_interval(
@@ -610,8 +616,17 @@ def _parameter_confidence_interval(
     parameter: str,
 ) -> list[float]:
     index = _parameter_index(result, parameter)
-    interval = result.conf_int(alpha=0.05)[index]
-    return [float(interval[0]), float(interval[1])]
+    coefficient = float(np.asarray(result.params)[index])
+    standard_error = float(_safe_covariance_standard_errors(result)[index])
+    critical_value = (
+        stats.t.ppf(0.975, result.df_resid)
+        if getattr(result, "use_t", True)
+        else stats.norm.ppf(0.975)
+    )
+    return [
+        float(coefficient - (critical_value * standard_error)),
+        float(coefficient + (critical_value * standard_error)),
+    ]
 
 
 def _parameter_p_value(result: RegressionResultsWrapper, parameter: str) -> float:

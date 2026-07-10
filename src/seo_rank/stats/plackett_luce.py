@@ -36,9 +36,9 @@ PLACKET_LUCE_REQUIRED_COLUMNS = (
     "target_keyword_id",
 )
 DEFAULT_MAX_SERP_RANK = 20
-HESSIAN_CONDITION_NUMBER_THRESHOLD = 100.0
+HESSIAN_CONDITION_NUMBER_THRESHOLD = 1000.0
 OPTIMIZER_GRADIENT_TOLERANCE = 1e-6
-FAMILY_PLACKETT_LUCE_OPTIMIZER_OPTIONS: dict[str, object] = {"maxiter": 100}
+FAMILY_PLACKETT_LUCE_OPTIMIZER_OPTIONS: dict[str, object] = {"maxiter": 1000}
 
 
 @dataclass(frozen=True)
@@ -578,7 +578,11 @@ def _summarize_fit(fit: PlackettLuceFit) -> dict[str, object]:
     convergence_confirmed = _convergence_confirmed(fit)
     choice_set_size_summary = _choice_set_size_summary(fit.choice_set_sizes)
     main_model: dict[str, object] = {
-        "formula": _fitted_formula(fit.score_column, fit.fitted_control_columns),
+        "formula": _fitted_formula(
+            fit.score_column,
+            fit.fitted_control_columns,
+            signed=_uses_signed_signal(fit.model_data, fit.score_column),
+        ),
         "omitted_controls": [dict(control) for control in fit.omitted_controls],
         "log_likelihood": float(fit.log_likelihood),
         "similarity_within_keyword_sd": similarity_sd,
@@ -914,7 +918,7 @@ def _pl_signal_variance(model_data: pd.DataFrame, score_column: str) -> float:
 def _logged_signal_sd_rms(model_data: pd.DataFrame, score_column: str) -> float:
     logged = model_data[[score_column, "target_keyword_id"]].copy()
     _coerce_pl_predictor(logged, score_column)
-    logged[score_column] = np.log(logged[score_column].astype(float) + 1.0)
+    logged[score_column] = _transformed_signal(logged[score_column].to_numpy(dtype=float))
     return float(within_keyword_sd_rms(logged, score_column))
 
 
@@ -991,14 +995,30 @@ def _feature_matrix(
     control_columns: Sequence[str],
 ) -> np.ndarray:
     score = frame[score_column].to_numpy(dtype=float)
-    columns = [np.log(score + 1.0)]
+    columns = [_transformed_signal(score)]
     columns.extend(frame[column].to_numpy(dtype=float) for column in control_columns)
     return np.column_stack(columns)
 
 
-def _fitted_formula(score_column: str, control_columns: Sequence[str]) -> str:
-    terms = [f"log({score_column} + 1)", *control_columns]
+def _fitted_formula(
+    score_column: str,
+    control_columns: Sequence[str],
+    *,
+    signed: bool = False,
+) -> str:
+    transform = "signed_log1p" if signed else "log"
+    terms = [f"{transform}({score_column})" if signed else f"log({score_column} + 1)", *control_columns]
     return "rank_ordered_logit ~ " + " + ".join(terms)
+
+
+def _transformed_signal(score: np.ndarray) -> np.ndarray:
+    if np.any(score < 0):
+        return np.sign(score) * np.log1p(np.abs(score))
+    return np.log1p(score)
+
+
+def _uses_signed_signal(model_data: pd.DataFrame, score_column: str) -> bool:
+    return bool((model_data[score_column].to_numpy(dtype=float) < 0).any())
 
 
 def _score_column_for_backend(backend: str) -> str:

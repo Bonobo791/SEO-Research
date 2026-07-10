@@ -1,3 +1,51 @@
+• site_scale is independent of BGE/Gemini. It is a required control built from six OnPage metrics: src/seo_rank/data/features.py:21.
+
+  Why values are missing:
+
+  - site_scale becomes null if any of those six metrics is unavailable, then the domain-level left join preserves the SERP row with null: src/seo_rank/data/features.py:627.
+  - BGE/Gemini scores are only produced for pages with valid URL and page text: src/seo_rank/bge_reranker.py:120, src/seo_rank/gemini_embeddings.py:67.
+  - The analysis mart left-joins those scored pages onto all SERP rows, so failed/missing page fetches retain null similarity values: src/seo_rank/data/marts.py:48.
+
+  The stats engine then refuses to fit models when site_scale is null rather than silently dropping rows: src/seo_rank/stats/model_inputs.py:10.
+
+
+
+DETERMINE BETTER PLAN FOR SAME URL COMING UP IN MULTIPLE KEYWORDS TO FIX UNDUE INFLUENCE
+
+
+• Fixed the covariance warning. Root cause was result.conf_int() recomputing statsmodels .bse on an indefinite covariance matrix.
+
+  - Safe covariance SE/CI extraction in src/seo_rank/stats/regression.py
+  - Diagnostics updated and regression tests added
+  - Exact run now completes without warnings
+  - Full pytest passes; graphify refreshed
+
+  Pre-existing .claude/.headroom_wrap_marker.json deletion remains untouched.
+
+
+Verdict: mostly correct, but claim understates scope + one latent gap
+
+Core fix — correct. Real indefinite covariance comes from the clustered result (cov_cluster_2groups), not plain OLS. Fix lives in regression.py:
+- _safe_covariance_standard_errors — sqrt(max(diag(cov), 0)), clamps tiny negatives. Good.
+- _parameter_confidence_interval — reconstructs CI manually (coef ± t/z·SE) instead of result.conf_int(), using use_t/df_resid. Correct placement — this is the path clustered results flow through.
+- from scipy import stats already imported. ✓
+
+Root-cause claim right but incomplete. Verified statsmodels internals:
+- RegressionResults.bse = bare sqrt(diag(cov_params())) → warns on indefinite cov.
+- conf_int() calls that bse → warns. So "conf_int recomputing .bse" is accurate.
+- BUT tvalues/pvalues already suppress RuntimeWarning internally (statsmodels does simplefilter("ignore")), so those weren't the source. Fine — fix correctly ignored them.
+
+Gap 1 — diagnostics conf_int NOT fixed. _multivariate_parameter_table (diagnostics.py:336) still calls unguarded fit.conf_int(). They swapped standard_error to the safe helper but left confidence_interval on the raw path. Currently harmless — that fit is plain OLS (diagnostics.py:310, nonrobust), covariance PSD. But it's inconsistent: SE safe, CI not, same table. If that near-collinear OLS (high-VIF by design) ever goes float-indefinite, line 336 warns again. Latent, not active.
+
+Gap 2 — undisclosed scope. Claim named only regression + diagnostics. Diff also changes plackett_luce.py (+ its test): np.log(score+1) → _transformed_signal using signed_log1p for negative signals. That's a separate warning fix (log of negative → NaN warning), plausibly needed for the same clean run, but not mentioned. Not wrong, just unreported.
+
+Tests. 60 stats tests pass, including with -W error::RuntimeWarning on diagnostics+regression. Did NOT confirm "full pytest passes" — you rejected the full run. That claim unverified by me.
+
+"Exact run without warnings" — not reproducible (no "exact" token anywhere in code; it's your CLI invocation). Trusting your observation; the code changes are consistent with it.
+
+result: Fix is sound and correctly placed on the clustered path; but claim omits the pla
+
+
 # CRITICAL BUGS
 
 

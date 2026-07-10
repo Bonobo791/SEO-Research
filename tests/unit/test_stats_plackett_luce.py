@@ -13,6 +13,7 @@ from seo_rank.stats.artifacts import _format_plackett_luce_lines, run_phase5_sta
 import seo_rank.stats.plackett_luce as plackett_luce_module
 from seo_rank.stats.plackett_luce import (
     fit_backend_plackett_luce,
+    fit_plackett_luce_for_score_column,
     summarize_backend_plackett_luce,
     summarize_plackett_luce_backends,
     summarize_plackett_luce_family,
@@ -304,6 +305,27 @@ def test_plackett_luce_logs_score_and_controls_in_feature_matrix() -> None:
     np.testing.assert_allclose(
         features,
         np.array([[np.log(3.0), 1.0], [np.log(4.0), 2.0]]),
+    )
+
+
+def test_plackett_luce_handles_signed_signal_without_nonfinite_features() -> None:
+    panel = _sample_plackett_luce_panel().with_columns(
+        pl.Series("signed_signal", np.linspace(-5.0, 5.0, 60)),
+    )
+
+    fit = fit_plackett_luce_for_score_column(
+        panel,
+        label="signed_signal",
+        score_column="signed_signal",
+    )
+
+    assert fit is not None
+    assert np.isfinite(fit.params).all()
+    assert np.isfinite(fit.information).all()
+    assert "signed_log1p(signed_signal)" in plackett_luce_module._fitted_formula(
+        "signed_signal",
+        fit.fitted_control_columns,
+        signed=True,
     )
 
 

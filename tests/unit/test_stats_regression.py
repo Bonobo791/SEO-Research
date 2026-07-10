@@ -1,7 +1,10 @@
 import json
 import logging
+import warnings
 from pathlib import Path
+from types import SimpleNamespace
 
+import numpy as np
 import pandas as pd
 import polars as pl
 import pytest
@@ -136,6 +139,24 @@ def _constant_similarity_keyword_regression_frame() -> pl.DataFrame:
                 }
             )
     return pl.DataFrame(rows)
+
+
+def test_parameter_standard_error_clamps_negative_covariance_without_warning() -> None:
+    result = SimpleNamespace(
+        model=SimpleNamespace(exog_names=["signal"]),
+        params=np.array([1.0]),
+        cov_params=lambda: np.array([[-1.0]]),
+        df_resid=10,
+        use_t=True,
+    )
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        standard_error = regression_module._parameter_standard_error(result, "signal")
+
+    assert caught == []
+    assert standard_error == 0.0
+    assert regression_module._parameter_confidence_interval(result, "signal") == [1.0, 1.0]
 
 
 def test_summarize_regression_for_boolean_onpage_predictor_uses_numeric_encoding() -> None:

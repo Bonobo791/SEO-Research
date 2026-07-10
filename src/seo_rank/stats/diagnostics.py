@@ -22,6 +22,7 @@ from seo_rank.stats.regression import (
     _parameter_confidence_interval,
     _parameter_value,
     _prepare_regression_frame,
+    _safe_covariance_standard_errors,
     fit_regression_for_score_column,
     fit_regression_backends,
     fit_backend_regression,
@@ -333,6 +334,7 @@ def _summarize_multivariate_sensitivity_fit(
 
 def _multivariate_parameter_table(fit) -> list[dict[str, object]]:
     conf_int = np.asarray(fit.conf_int())
+    standard_errors = _safe_covariance_standard_errors(fit)
     parameters: list[dict[str, object]] = []
     exog_names = list(fit.model.exog_names)
     for index, term in enumerate(exog_names):
@@ -340,7 +342,7 @@ def _multivariate_parameter_table(fit) -> list[dict[str, object]]:
             {
                 "term": term,
                 "estimate": _json_value(np.asarray(fit.params)[index]),
-                "standard_error": _json_value(np.asarray(fit.bse)[index]),
+                "standard_error": _json_value(standard_errors[index]),
                 "t_value": _json_value(np.asarray(fit.tvalues)[index]),
                 "p_value": _json_value(np.asarray(fit.pvalues)[index]),
                 "confidence_interval": [
