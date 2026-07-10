@@ -16,6 +16,10 @@ from tests.unit.test_stats_family_artifacts import (
     _combined_textrazor_frame,
 )
 
+pytestmark = pytest.mark.skip(
+    reason="Golden fixtures deferred until real site_scale data is available"
+)
+
 
 SIMILARITY_SCALES = {
     "bge": 4.0,
