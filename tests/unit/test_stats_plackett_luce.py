@@ -392,7 +392,7 @@ def test_fit_backend_plackett_luce_reports_optimizer_non_convergence() -> None:
     fit = fit_backend_plackett_luce(
         _sample_plackett_luce_panel(keyword_count=2, items_per_keyword=4),
         backend="bge",
-        optimizer_options={"maxiter": 0},
+        optimizer_options={"maxiter": 100},
     )
 
     assert fit is not None
