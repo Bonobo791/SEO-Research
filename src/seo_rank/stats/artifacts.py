@@ -53,6 +53,18 @@ def build_stats_output_metadata(spec: AnalysisSpec) -> Mapping[str, object]:
     }
 
 
+def _combined_analysis_metadata(run_dir: Path) -> Mapping[str, object] | None:
+    run_json_path = Path(run_dir) / "run.json"
+    try:
+        run_payload = json.loads(run_json_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    combined_analysis = run_payload.get("combined_analysis")
+    if not isinstance(combined_analysis, Mapping):
+        return None
+    return dict(combined_analysis)
+
+
 def _inference_mode_for_keyword_count(keyword_count: int) -> str:
     if keyword_count <= 0:
         return "skipped"
@@ -409,6 +421,10 @@ def build_stats_summary(
 ) -> dict[str, object]:
     primary_depth = spec.primary_rank_depth
     primary_bundle = rank_depth_bundles[primary_depth]
+    metadata = dict(build_stats_output_metadata(spec))
+    combined_analysis = _combined_analysis_metadata(result.run_dir)
+    if combined_analysis is not None:
+        metadata["combined_analysis"] = combined_analysis
     actionable_by_depth = {
         depth_key: bool(bundle["actionable_association"])
         for depth_key, bundle in rank_depth_bundles.items()
@@ -419,7 +435,7 @@ def build_stats_summary(
         "estimand_version": result.estimand_version,
         "primary_backend": result.primary_backend,
         "backend_order": list(result.backend_order),
-        "metadata": build_stats_output_metadata(spec),
+        "metadata": metadata,
         "primary_rank_depth": primary_depth,
         "confirmatory_rank_depths": list(spec.confirmatory_rank_depths),
         "rank_depths": {
@@ -456,12 +472,16 @@ def build_stats_diagnostics(
     primary_depth = spec.primary_rank_depth
     primary_diagnostics = diagnostics_by_depth.get(primary_depth, {})
     primary_bundle = rank_depth_bundles[primary_depth]
+    metadata = dict(build_stats_output_metadata(spec))
+    combined_analysis = _combined_analysis_metadata(result.run_dir)
+    if combined_analysis is not None:
+        metadata["combined_analysis"] = combined_analysis
     output: dict[str, object] = {
         "analysis_spec_version": result.analysis_spec_version,
         "estimand_version": result.estimand_version,
         "primary_backend": result.primary_backend,
         "backend_order": list(result.backend_order),
-        "metadata": build_stats_output_metadata(spec),
+        "metadata": metadata,
         "primary_rank_depth": primary_depth,
         "confirmatory_rank_depths": list(spec.confirmatory_rank_depths),
         "rank_depths": {
@@ -492,6 +512,19 @@ def build_stats_report(
     spec: AnalysisSpec,
 ) -> str:
     lines = ["# Phase 5 Stats", ""]
+    combined_analysis = _combined_analysis_metadata(result.run_dir)
+    if combined_analysis is not None:
+        lines.extend(["## Source runs", ""])
+        for run_dir in combined_analysis.get("source_runs", []):
+            lines.append(f"- {run_dir}")
+        lines.extend(["", "## Compatibility warnings", ""])
+        warnings = combined_analysis.get("compatibility_warnings", [])
+        if isinstance(warnings, list) and warnings:
+            for warning in warnings:
+                lines.append(f"- {warning}")
+        else:
+            lines.append("- none")
+        lines.append("")
 
     for depth_key in spec.confirmatory_rank_depths:
         bundle = rank_depth_bundles[depth_key]

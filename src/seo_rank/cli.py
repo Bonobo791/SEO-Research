@@ -91,12 +91,30 @@ LIVE_TEXTRAZOR_ENV_FLAG = "SEO_RANK_ENABLE_TEXTRAZOR"
 TEXTRAZOR_LOG_LEVEL_ENV_FLAG = "SEO_RANK_TEXTRAZOR_LOG_LEVEL"
 DEFAULT_DATAFORSEO_TRANSPORT = None
 DEFAULT_TEXTRAZOR_TRANSPORT = None
-DATAFORSEO_LIVE_REQUEST_TIMEOUT = 120.0
+DATAFORSEO_LIVE_REQUEST_TIMEOUT = 15.0
 DATAFORSEO_LOCATION_CODES = {
     "United States": 2840,
 }
 RAW_RESPONSE_SCHEMA_VERSION = "raw_responses.v1"
 RUN_CATALOG_SCHEMA_VERSION = "run_catalog.v1"
+COMBINED_ANALYSIS_REQUIRED_TABLES = ("analysis_mart",)
+COMBINED_ANALYSIS_OPTIONAL_TABLES = (
+    "textrazor_page_metrics",
+    "backlinks_analysis",
+    "onpage_features",
+)
+COMBINED_ANALYSIS_COMPATIBILITY_FIELDS = (
+    "depth",
+    "device",
+    "language",
+    "location",
+    "model_name",
+    "live_providers",
+    "live_bge",
+    "live_gemini",
+    "live_textrazor",
+    "skip_textrazor",
+)
 RAW_RESPONSE_SCHEMA = pa.schema(
     [
         ("run_id", pa.string()),
@@ -231,17 +249,31 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         if args.command == "normalize":
-            normalize_run(Path(args.run))
+            run_dir = Path(args.run)
+            ensure_command_supports_run_type(run_dir, command="normalize")
+            normalize_run(run_dir)
             return 0
 
         if args.command == "build-features":
-            build_feature_marts(Path(args.run))
+            run_dir = Path(args.run)
+            ensure_command_supports_run_type(run_dir, command="build-features")
+            build_feature_marts(run_dir)
             return 0
 
         if args.command == "analyze":
-            run_dir = Path(args.run)
-            ensure_feature_marts_for_analysis(run_dir)
-            build_analysis_mart(run_dir)
+            run_dirs = [Path(run_dir) for run_dir in args.run]
+            if len(run_dirs) > 1:
+                if args.output_dir is None:
+                    raise CliCommandError(
+                        "--output-dir is required when combining multiple runs"
+                    )
+                run_dir = build_combined_analysis_run(run_dirs, Path(args.output_dir))
+            else:
+                run_dir = run_dirs[0]
+
+            if not run_manifest_is_combined(run_dir):
+                ensure_feature_marts_for_analysis(run_dir)
+                build_analysis_mart(run_dir)
             if run_manifest_is_dry_run(run_dir):
                 if args.keyword:
                     emit_keyword_analysis(run_dir, args.keyword)
@@ -252,7 +284,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 1 if stats_result.hard_fail else 0
 
         if args.command == "replay":
-            replay_raw_response(Path(args.run), args.response_id)
+            run_dir = Path(args.run)
+            ensure_command_supports_run_type(run_dir, command="replay")
+            replay_raw_response(run_dir, args.response_id)
             return 0
     except STORAGE_COMMAND_EXCEPTIONS as error:
         print(error, file=sys.stderr)
@@ -325,7 +359,8 @@ def build_parser() -> argparse.ArgumentParser:
         "analyze",
         help="Materialize the analysis mart from feature marts",
     )
-    analyze.add_argument("--run", type=Path, required=True)
+    analyze.add_argument("--run", type=Path, action="append", required=True)
+    analyze.add_argument("--output-dir", type=Path)
     analyze.add_argument("--keyword")
 
     replay = subparsers.add_parser(
@@ -1525,6 +1560,19 @@ def scan_analysis_mart(run_dir: Path) -> pl.LazyFrame:
     return scan_curated_table(run_dir, "analysis_mart")
 
 
+def run_manifest_is_combined(run_dir: Path) -> bool:
+    try:
+        run_payload = load_run_payload(run_dir)
+    except (OSError, json.JSONDecodeError):
+        return False
+    return isinstance(run_payload.get("combined_analysis"), Mapping)
+
+
+def ensure_command_supports_run_type(run_dir: Path, *, command: str) -> None:
+    if run_manifest_is_combined(run_dir):
+        raise CliCommandError(f"{command} is not supported for combined run {run_dir}")
+
+
 def _load_textrazor_page_metrics_for_keyword_analysis(run_dir: Path) -> pl.DataFrame | None:
     textrazor_path = Path(run_dir) / "parquet" / "textrazor_page_metrics"
     if not textrazor_path.exists():
@@ -1648,6 +1696,281 @@ def run_manifest_is_dry_run(run_dir: Path) -> bool:
     if isinstance(config, Mapping):
         return bool(config.get("dry_run"))
     return bool(run_payload.get("dry_run"))
+
+
+def build_combined_analysis_run(
+    source_run_dirs: Sequence[Path],
+    output_dir: Path,
+) -> Path:
+    source_runs = [Path(run_dir) for run_dir in source_run_dirs]
+    resolved_sources = [run_dir.resolve() for run_dir in source_runs]
+    resolved_output = output_dir.resolve()
+    if any(source == resolved_output for source in resolved_sources):
+        raise CliCommandError(
+            f"combined analysis output_dir must differ from source runs: {output_dir}"
+        )
+
+    source_payloads = [load_run_payload(run_dir) for run_dir in source_runs]
+    source_frames = {
+        table_name: []
+        for table_name in (
+            *COMBINED_ANALYSIS_REQUIRED_TABLES,
+            *COMBINED_ANALYSIS_OPTIONAL_TABLES,
+        )
+    }
+    source_keywords: dict[str, list[str]] = {}
+
+    for run_dir in source_runs:
+        if not run_manifest_is_combined(run_dir):
+            ensure_feature_marts_for_analysis(run_dir)
+            build_analysis_mart(run_dir)
+
+        analysis_frame = load_combined_source_table(run_dir, "analysis_mart", required=True)
+        source_frames["analysis_mart"].append((run_dir, analysis_frame))
+        for keyword_id in analysis_frame.get_column("target_keyword_id").unique().to_list():
+            source_keywords.setdefault(str(keyword_id), []).append(str(run_dir))
+
+        for table_name in COMBINED_ANALYSIS_OPTIONAL_TABLES:
+            frame = load_combined_source_table(run_dir, table_name, required=False)
+            if frame is not None:
+                source_frames[table_name].append((run_dir, frame))
+
+    keyword_owner = {
+        keyword_id: sources[-1]
+        for keyword_id, sources in source_keywords.items()
+    }
+    keyword_overlaps = {
+        keyword_id: {
+            "selected_run": sources[-1],
+            "dropped_runs": sources[:-1],
+        }
+        for keyword_id, sources in source_keywords.items()
+        if len(sources) > 1
+    }
+    compatibility_warnings = build_combined_compatibility_warnings(
+        source_runs,
+        source_payloads,
+    )
+
+    reset_combined_output_dir(output_dir)
+    dataset_catalog: dict[str, object] = {}
+    for table_name, frames in source_frames.items():
+        merged_frame = merge_combined_table_frames(
+            frames,
+            keyword_owner=keyword_owner,
+        )
+        if merged_frame is None:
+            continue
+        dataset_catalog[table_name] = write_combined_dataset(
+            output_dir,
+            table_name=table_name,
+            frame=merged_frame,
+        )
+
+    config = dict(_config_from_run_payload(source_payloads[-1]))
+    config["dry_run"] = False
+    combined_payload = {
+        "run_id": output_dir.name,
+        "config": config,
+        "catalog": {
+            "schema_version": RUN_CATALOG_SCHEMA_VERSION,
+            "datasets": dataset_catalog,
+        },
+        "combined_analysis": {
+            "source_runs": [str(run_dir) for run_dir in source_runs],
+            "keyword_merge_policy": "last_run_wins",
+            "run_priority": "cli_order",
+            "compatibility_warnings": compatibility_warnings,
+            "keyword_overlaps": keyword_overlaps,
+        },
+    }
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "run.json").write_text(
+        json.dumps(combined_payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    (output_dir / "report.md").write_text(
+        render_combined_analysis_report(combined_payload["combined_analysis"]),
+        encoding="utf-8",
+    )
+    return output_dir
+
+
+def load_combined_source_table(
+    run_dir: Path,
+    table_name: str,
+    *,
+    required: bool,
+) -> pl.DataFrame | None:
+    table_path = Path(run_dir) / "parquet" / table_name
+    if not table_path.exists():
+        if required:
+            raise CliCommandError(f"Stored run {run_dir} is missing parquet/{table_name}")
+        return None
+    try:
+        frame = scan_curated_table(run_dir, table_name).collect()
+    except STORAGE_COMMAND_EXCEPTIONS as error:
+        raise CliCommandError(str(error)) from error
+    schema_version = unique_schema_version(frame, table_name=table_name, run_dir=run_dir)
+    if schema_version is None and required:
+        raise CliCommandError(f"Stored run {run_dir} is missing schema_version for {table_name}")
+    return frame
+
+
+def unique_schema_version(
+    frame: pl.DataFrame,
+    *,
+    table_name: str,
+    run_dir: Path,
+) -> str | None:
+    if "schema_version" not in frame.columns:
+        raise CliCommandError(
+            f"Stored run {run_dir} table {table_name} does not contain schema_version"
+        )
+    values = [value for value in frame.get_column("schema_version").unique().to_list() if value is not None]
+    if not values:
+        return None
+    if len(values) > 1:
+        raise CliCommandError(
+            f"Stored run {run_dir} table {table_name} has multiple schema_version values: {values}"
+        )
+    return str(values[0])
+
+
+def build_combined_compatibility_warnings(
+    source_run_dirs: Sequence[Path],
+    source_payloads: Sequence[Mapping[str, object]],
+) -> list[str]:
+    warnings: list[str] = []
+    for field in COMBINED_ANALYSIS_COMPATIBILITY_FIELDS:
+        by_run: dict[str, object] = {}
+        for run_dir, payload in zip(source_run_dirs, source_payloads, strict=True):
+            config = payload.get("config", {})
+            value = config.get(field) if isinstance(config, Mapping) else None
+            by_run[str(run_dir)] = value
+        serialized_values = {json.dumps(value, sort_keys=True) for value in by_run.values()}
+        if len(serialized_values) <= 1:
+            continue
+        warning = ", ".join(
+            f"{run_path}={value!r}"
+            for run_path, value in by_run.items()
+        )
+        warnings.append(f"config mismatch for {field}: {warning}")
+    return warnings
+
+
+def merge_combined_table_frames(
+    frames: Sequence[tuple[Path, pl.DataFrame]],
+    *,
+    keyword_owner: Mapping[str, str],
+) -> pl.DataFrame | None:
+    merged_frames: list[pl.DataFrame] = []
+    schema_versions: set[str] = set()
+    for run_dir, frame in frames:
+        schema_version = unique_schema_version(frame, table_name="merged", run_dir=run_dir)
+        if schema_version is not None:
+            schema_versions.add(schema_version)
+        if "target_keyword_id" not in frame.columns:
+            raise CliCommandError(
+                f"Stored run {run_dir} table does not contain target_keyword_id"
+            )
+        owned_keywords = [
+            keyword_id
+            for keyword_id, owner in keyword_owner.items()
+            if owner == str(run_dir)
+        ]
+        if not owned_keywords:
+            continue
+        filtered = frame.filter(pl.col("target_keyword_id").is_in(owned_keywords))
+        if filtered.is_empty():
+            continue
+        merged_frames.append(filtered)
+    if len(schema_versions) > 1:
+        raise CliCommandError(
+            f"Combined analysis requires matching schema versions, found {sorted(schema_versions)}"
+        )
+    if not merged_frames:
+        return None
+    merged = pl.concat(merged_frames, how="vertical_relaxed")
+    sort_columns = [
+        column
+        for column in (
+            "target_keyword_id",
+            "canonical_url_hash",
+            "serp_rank",
+            "serp_item_id",
+            "url",
+        )
+        if column in merged.columns
+    ]
+    if sort_columns:
+        merged = merged.sort(sort_columns)
+    return merged
+
+
+def reset_combined_output_dir(output_dir: Path) -> None:
+    # Synthetic combined-run dir is owned by this command; the output_dir ==
+    # source-run guard in build_combined_analysis_run runs before this, so a
+    # full clear is safe and also removes stray files from a prior table set.
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
+
+
+def write_combined_dataset(
+    output_dir: Path,
+    *,
+    table_name: str,
+    frame: pl.DataFrame,
+) -> dict[str, object]:
+    dataset_dir = output_dir / "parquet" / table_name
+    dataset_dir.mkdir(parents=True, exist_ok=True)
+    file_path = dataset_dir / "part-0.parquet"
+    frame.write_parquet(file_path, compression="zstd")
+    schema_version = unique_schema_version(frame, table_name=table_name, run_dir=output_dir)
+    return {
+        "schema_version": schema_version,
+        "row_count": frame.height,
+        "files": [file_path.relative_to(output_dir).as_posix()],
+        "file_checksums": {
+            file_path.relative_to(output_dir).as_posix(): hashlib.sha256(
+                file_path.read_bytes()
+            ).hexdigest()
+        },
+    }
+
+
+def render_combined_analysis_report(combined_analysis: Mapping[str, object]) -> str:
+    lines = [
+        "# Combined analysis",
+        "",
+        "## Source runs",
+    ]
+    for run_dir in combined_analysis.get("source_runs", []):
+        lines.append(f"- {run_dir}")
+    lines.extend(
+        [
+            "",
+            "## Merge policy",
+            f"- keyword_merge_policy: {combined_analysis.get('keyword_merge_policy')}",
+            f"- run_priority: {combined_analysis.get('run_priority')}",
+            "",
+            "## Compatibility warnings",
+        ]
+    )
+    warnings = combined_analysis.get("compatibility_warnings", [])
+    if isinstance(warnings, list) and warnings:
+        for warning in warnings:
+            lines.append(f"- {warning}")
+    else:
+        lines.append("- none")
+    return "\n".join(lines) + "\n"
+
+
+def _config_from_run_payload(payload: Mapping[str, object]) -> Mapping[str, object]:
+    config = payload.get("config", {})
+    if not isinstance(config, Mapping):
+        raise CliCommandError("Stored run payload is missing config")
+    return config
 
 
 def materialize_run_tree(

@@ -762,10 +762,15 @@ REQUIRED_FEATURE_MARTS_FOR_ANALYSIS = (
 def ensure_feature_marts_for_analysis(run_dir: Path) -> None:
     """Rebuild feature marts when a required partition is missing from the run tree."""
 
+    run_json_path = Path(run_dir) / "run.json"
+    if run_json_path.exists():
+        run_payload = json.loads(run_json_path.read_text(encoding="utf-8"))
+        if isinstance(run_payload.get("combined_analysis"), Mapping):
+            return
+
     parquet_dir = Path(run_dir) / "parquet"
     if all((parquet_dir / name).exists() for name in REQUIRED_FEATURE_MARTS_FOR_ANALYSIS):
         return
-    run_json_path = Path(run_dir) / "run.json"
     if not run_json_path.exists():
         return
     build_feature_marts(Path(run_dir))
