@@ -215,6 +215,7 @@ signal_families:
         - total_dom_size
 
 estimand:
+  # Control change: deprecated HTML tags replaced page-text length in the v1 adjustment set.
   outcome: -log(serp_rank)
   primary_metric: keyword_level_spearman_rho
   baseline_model: log(referring_domains_count + 1) + log(deprecated_html_tags + 1) + C(target_keyword_id)

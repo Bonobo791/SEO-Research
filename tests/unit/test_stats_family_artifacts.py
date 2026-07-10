@@ -393,6 +393,30 @@ def test_build_family_source_frames_loads_onpage_features_when_present(
     assert "onpage_score" in source_frames["onpage_features"].columns
 
 
+def test_build_family_source_frames_restores_missing_controls_from_analysis_mart(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "runs" / "run-1"
+    (run_dir / "parquet" / "backlinks_analysis").mkdir(parents=True)
+    analysis_mart = _combined_analysis_mart_frame()
+    legacy_backlinks = _combined_backlinks_analysis_frame().drop("deprecated_html_tags")
+    legacy_backlinks.write_parquet(
+        run_dir / "parquet" / "backlinks_analysis" / "part-0.parquet"
+    )
+
+    source_frames = build_family_source_frames(
+        run_dir,
+        analysis_mart=analysis_mart,
+        spec=load_analysis_spec(),
+    )
+
+    restored = source_frames["backlinks_analysis"]
+    assert "deprecated_html_tags" in restored.columns
+    assert restored.get_column("deprecated_html_tags").to_list() == analysis_mart.get_column(
+        "deprecated_html_tags"
+    ).to_list()
+
+
 def test_run_phase5_stats_marks_textrazor_family_blocks_skipped_on_hard_fail(
     tmp_path: Path,
 ) -> None:

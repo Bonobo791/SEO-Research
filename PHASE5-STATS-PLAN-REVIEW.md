@@ -142,12 +142,12 @@ family**. BH is only meaningful if the family is fixed before looking.
 ROADMAP mentions "baseline vs similarity-feature models" but ARCHITECTURE does not
 define the baseline.
 
-`analysis_mart` already includes `page_text_length`. Length correlates with both
-content quality signals and rank. Ignoring it **confounds similarity coefficients**.
+`analysis_mart` includes OnPage checks. Deprecated HTML tags are used as the
+adjustment control instead of page-text length for this implementation.
 
 **Recommendation — default adjustment set:**
 
-- `page_text_length` (or `log(page_text_length + 1)`).
+- `deprecated_html_tags` (modeled as `log(deprecated_html_tags + 1)`).
 - **Keyword fixed effects** in pooled regression (absorbs keyword difficulty).
 - Do **not** include URL fixed effects in v1 (collapses variation within keyword).
 
@@ -311,12 +311,12 @@ For implementation review. Adjust thresholds after golden fixtures.
 2. Summarize distribution of ρ across keywords (median, IQR, fraction positive).
 3. Apply BH across keywords **within backend** on two-sided correlation tests.
 4. Pooled regression (secondary):  
-   `-log(serp_rank) ~ normalized_similarity + log(page_text_length + 1) + C(target_keyword_id)`  
+   `-log(serp_rank) ~ normalized_similarity + log(deprecated_html_tags + 1) + C(target_keyword_id)`  
    with **cluster-robust SE** at `target_keyword_id`.
 
 ### Baseline
 
-- Pooled: `-log(serp_rank) ~ log(page_text_length + 1) + C(target_keyword_id)`  
+- Pooled: `-log(serp_rank) ~ log(deprecated_html_tags + 1) + C(target_keyword_id)`
   Compare adjusted R² or AIC to feature model (descriptive, not BH-adjusted).
 
 ### Diagnostics (pooled model only)

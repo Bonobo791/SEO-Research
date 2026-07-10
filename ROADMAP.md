@@ -137,9 +137,9 @@ Plackett-Luce analysis.
    - Do not BH-adjust diagnostics or regression coefficients.
 
 5. **[x] Slice 5 — Pooled regression (secondary)**
-   - Baseline: `-log(serp_rank) ~ log(page_text_length + 1) + C(target_keyword_id)`.
+   - Baseline: `-log(serp_rank) ~ log(deprecated_html_tags + 1) + C(target_keyword_id)`.
    - Feature: + one `*_normalized_score` at a time (univariate + keyword FE +
-     length); separate model per backend.
+     deprecated HTML tag control); separate model per backend.
    - Keyword-clustered robust SEs; never emit naive IID SEs in primary output.
    - **Effect size:** translate coefficient to approximate Δ rank per 1 SD
      similarity (document formula in spec).
@@ -718,8 +718,8 @@ onto `analysis_mart`. **Primary backend for proxy ladder:** `bge_normalized_scor
 | Method | Purpose | Notes |
 | ------ | ------- | ----- |
 | **NDCG@k** | Sort-by-metric vs Google order | Per keyword: treat signal as relevance (higher = better), compute NDCG@k vs `serp_rank`; macro mean/median across keywords. Default k = 10; configurable. |
-| **Incremental regression after BGE** | Explicit proxy test | Pooled OLS ladder with keyword FE + `log(page_text_length + 1)`: baseline → `+ bge_normalized_score` → `+ candidate signal(s)`. Report coefficient, p-value, Δ adjusted R² at each step; shrinkage after BGE ⇒ likely proxy. |
-| **Partial correlation** | Association net of similarity | Within-keyword or pooled partial ρ / partial regression of signal vs rank controlling for `bge_normalized_score` (and length). |
+| **Incremental regression after BGE** | Explicit proxy test | Pooled OLS ladder with keyword FE + `log(deprecated_html_tags + 1)`: baseline → `+ bge_normalized_score` → `+ candidate signal(s)`. Report coefficient, p-value, Δ adjusted R² at each step; shrinkage after BGE ⇒ likely proxy. |
+| **Partial correlation** | Association net of similarity | Within-keyword or pooled partial ρ / partial regression of signal vs rank controlling for `bge_normalized_score` and deprecated HTML tags. |
 | **Leave-one-keyword-out (LOKO)** | Stability | Recompute headline metrics (Spearman median, NDCG macro mean, incremental Δ R²) dropping one keyword at a time; flag dominant-keyword dependence. |
 | **Out-of-sample validation** | Generalization beyond fit sample | (a) **Keyword holdout:** seeded split by `target_keyword_id` (default 20% held out). (b) **Time-split:** compare metrics across two `run_id`s on overlapping keywords (exploratory). Label `exploratory` when K_train or K_test < 10. |
 | **Negative controls** | Falsification | Deliberately null or shuffled predictors (e.g. permuted signal within keyword) should show ρ ≈ 0, Δ R² ≈ 0; candidate must beat controls. |
@@ -810,9 +810,8 @@ dossier tests (exploratory appendix only).
 3. **[ ] Slice 3 — Partial correlation + subset analyses**
    - **Partial correlation** of each candidate vs rank controlling for BGE
      (and optionally length), within-keyword and pooled variants.
-   - **Same-length bins:** quantile or fixed-width bins on
-     `log(page_text_length + 1)`; re-run Spearman / NDCG within bins (primary
-     discriminant for char-normalized density vs raw counts).
+   - **Deprecated-tag strata:** re-run Spearman / NDCG within deprecated-tag
+     strata (primary discriminant for structural checks vs raw counts).
    - **Same-similarity bins:** bins on `bge_normalized_score`; re-test within
      bins (discriminating "same relevance, different rank" cases).
    - Tests: partial ρ drops when signal is pure function of BGE; subset slices

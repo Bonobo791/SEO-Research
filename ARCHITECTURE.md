@@ -596,7 +596,7 @@ with `bh_skipped_reason`. Do not BH-adjust diagnostic p-values.
 **Secondary estimand:** pooled regression on `-log(serp_rank)`:
 
 ```text
--log(serp_rank) ~ normalized_similarity + log(page_text_length + 1) + C(target_keyword_id)
+-log(serp_rank) ~ normalized_similarity + log(deprecated_html_tags + 1) + C(target_keyword_id)
 ```
 
 One univariate feature model per backend (not joint three-predictor as primary).
@@ -612,7 +612,7 @@ robustness refits, spec-driven PL thresholds) is **Phase 6.1** (`ROADMAP.md`).
 median |ρ| ≥ 0.25, ≥ 60% same-sign ρ, and BGE pooled 95% CI excludes 0 (thresholds
 in `analysis_spec.v1.yaml`, tune after golden fixtures).
 
-**Baseline (descriptive):** keyword FE + `log(page_text_length + 1)` only.
+**Baseline (descriptive):** keyword FE + `log(deprecated_html_tags + 1)` only.
 Compare adjusted R² or AIC to feature model; not BH-adjusted.
 
 **Multivariate sensitivity (not confirmatory, slice 7 shipped):** joint

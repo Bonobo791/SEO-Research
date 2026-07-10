@@ -40,6 +40,13 @@ from seo_rank.stats.spec import AnalysisSpec, load_analysis_spec
 
 logger = logging.getLogger(__name__)
 
+_ANALYSIS_JOIN_KEYS = ("run_id", "target_keyword_id", "canonical_url_hash", "url")
+_ANALYSIS_CONTROL_DTYPES = {
+    "referring_domains_count": pl.Int64,
+    "deprecated_html_tags": pl.Boolean,
+}
+_ANALYSIS_CONTROL_COLUMNS = tuple(_ANALYSIS_CONTROL_DTYPES)
+
 
 def build_stats_output_metadata(spec: AnalysisSpec) -> Mapping[str, object]:
     return {
@@ -105,7 +112,52 @@ def build_family_source_frames(
             spec=spec,
         ),
     }
+    for source_mart in ("backlinks_analysis", "onpage_features"):
+        source_frames[source_mart] = _restore_analysis_controls(
+            source_frames[source_mart],
+            analysis_mart,
+        )
     return source_frames
+
+
+def _restore_analysis_controls(
+    source_frame: pl.DataFrame,
+    analysis_mart: pl.DataFrame,
+) -> pl.DataFrame:
+    """Restore controls omitted by older optional family-mart schemas."""
+    if source_frame.is_empty():
+        return source_frame
+
+    missing = [
+        column
+        for column in _ANALYSIS_CONTROL_COLUMNS
+        if column not in source_frame.columns
+    ]
+    if not missing:
+        return source_frame
+
+    joinable = [
+        column
+        for column in missing
+        if column in analysis_mart.columns
+        and column not in source_frame.columns
+    ]
+    if joinable and all(key in source_frame.columns for key in _ANALYSIS_JOIN_KEYS):
+        source_frame = source_frame.join(
+            analysis_mart.select([*_ANALYSIS_JOIN_KEYS, *joinable]),
+            on=list(_ANALYSIS_JOIN_KEYS),
+            how="left",
+        )
+
+    remaining = [column for column in missing if column not in source_frame.columns]
+    if remaining:
+        source_frame = source_frame.with_columns(
+            [
+                pl.lit(None).cast(_ANALYSIS_CONTROL_DTYPES[column]).alias(column)
+                for column in remaining
+            ]
+        )
+    return source_frame
 
 
 def _load_textrazor_family_frame(

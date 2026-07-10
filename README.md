@@ -243,7 +243,7 @@ subsections, and `actionable_association_by_rank_depth`.
 **Robustness appendix (slices 7–8, primary depth `top_20` only):**
 
 - **Multivariate sensitivity (slice 7):** joint pooled OLS with all three
-  `*_normalized_score` predictors plus `log(page_text_length + 1)` and keyword
+  `*_normalized_score` predictors plus `log(deprecated_html_tags + 1)` and keyword
   fixed effects. Computes VIF; when any VIF exceeds the spec threshold (default
   5), drops backends in pre-registered order (Gemini Semantic Similarity → Gemini
   Doc Retrieval → keep BGE). Writes coefficients, VIF table, and drop log to
