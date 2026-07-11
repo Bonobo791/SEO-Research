@@ -101,7 +101,8 @@ The repository contains an **offline-verifiable CLI scaffold** (Phase 1 shipped)
   `python -m pytest tests/integration -m integration` with env gates; Phase 4.5
   Slice 7 shipped the round-trip regression sweep in `test_sdlc_docs.py`
 - **Product docs:** `ARCHITECTURE.md`, `GOALS.md`, `ROADMAP.md`, `README.md`,
-  `TESTING.md`
+  `TESTING.md`; shipped page-text retrieval contract in
+  `PAGE_TEXT_RETRIEVAL_PLAN.md`
 - **Not yet:** `--no-fail-on-guardrails` (Phase 5 slice 9 follow-up); TextRazor
   golden fixtures (slice 31)
 
@@ -126,6 +127,12 @@ remain open.
 - **Provider request boundaries (shipped):** DataForSEO keyword expansion,
   organic SERP, and page-text request specs; TextRazor parsed-text entity
   request specs; credential validation without secret values in errors.
+- **Page-text retrieval (shipped):** `classify_page_text_response()` outcomes
+  (`timeout`, `pool_related`, `javascript_disabled`, `usable`, `empty`,
+  `provider_failure`); staged live fetch in `fetch_page_text_for_urls()`
+  (baseline → JavaScript → browser); one-second `50402` retry and same-stage
+  `switch_pool` for pool-related failures; automatic non-usable re-fetch on
+  `--stored-run --live-providers` (`PAGE_TEXT_RETRIEVAL_PLAN.md`).
 - **Live-provider gate (shipped):** `--live-providers` requires
   `SEO_RANK_ENABLE_LIVE_PROVIDERS=1` in `.env` (loaded automatically) and provider
   credentials before executing the minimal live provider smoke path.
@@ -187,7 +194,10 @@ unfiltered summary plus dofollow-filtered summary, ~$0.04/target combined;
 batched writes per keyword to
 `raw_responses/endpoint=backlinks_summary` and
 `endpoint=backlinks_dofollow_summary`, dedupe on `(target_keyword, url, variant)`,
-with partial progress on mid-loop failure) → page text →
+with partial progress on mid-loop failure) → page text via staged
+`content_parsing/live` (`fetch_page_text_for_urls`: baseline → JavaScript →
+browser; stop when not `empty`/`javascript_disabled`; `50402` retry once;
+`switch_pool` once on pool-related failures) →
 optional TextRazor entities → page similarity (fixture
 by default; Gemini live under `--live-gemini`; BGE live under `--live-bge`) →
 grouped `keyword_results` in `run.json` + `report.md`.
@@ -203,6 +213,18 @@ downstream chain. Replay overlays CLI live-provider flags onto the stored
 config (`merge_stored_run_cli_overlay`); `--skip-textrazor` stays sticky and
 suppresses TextRazor even when the saved run had it enabled. `run --stored-run --live-textrazor-only` backfills live
 TextRazor entities from stored `page_text` without DataForSEO HTTP (slice 24).
+When the effective replay config enables `--live-providers`, stored `page_text`
+responses classified as non-usable are fetched again while usable rows are
+retained. This may issue billable DataForSEO page-text requests, potentially
+multiple per URL when staged rendering, timeout retry, or pool switching applies;
+the latest returned response replaces the prior non-usable row, so later replays
+retry rows that remain non-usable.
+Replacing page text invalidates cached similarity and TextRazor data for that
+URL. Similarity is rebuilt through the existing whole-keyword scorer while
+cached scores remain reusable for unchanged URLs. Stale TextRazor rows are
+removed and are regenerated only when `--live-textrazor` and its credential gate
+are active; live Gemini or TextRazor regeneration can add provider cost, while
+BGE regeneration adds local compute work.
 TextRazor-only ingestion writes the same `RAW_RESPONSE_SCHEMA` into the existing lake, partitioned only by `endpoint`.
 `analyze` backfills missing feature marts before writing `analysis_mart` and
 runs Phase 5 stats unless the run manifest is dry-run. After materialization,
@@ -922,6 +944,10 @@ before proceeding to Benjamini-Hochberg correction and run reporting.
 
 - Build as a CLI-first Python application.
 - Use DataForSEO as the canonical SERP and page-text source.
+- Live page text uses staged rendering (baseline → JavaScript → browser) with
+  deterministic outcome classification; retain only the winning/final response
+  per URL. Stored-run `--live-providers` re-fetches non-usable `page_text` rows
+  automatically (`PAGE_TEXT_RETRIEVAL_PLAN.md`).
 - Send DataForSEO parsed page text to TextRazor; do not send original URLs for
   entity extraction.
 - Keep direct page fetching out of v1.

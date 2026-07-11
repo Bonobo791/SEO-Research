@@ -2046,6 +2046,12 @@ with 8.3 and is a lower-priority cross-check.
 
 ## History
 
+- **Page-text staged retrieval shipped (2026-07):** `PAGE_TEXT_RETRIEVAL_PLAN.md`
+  slices 1–4 — `classify_page_text_response()`, staged
+  `fetch_page_text_for_urls()` (baseline → JavaScript → browser), `50402`
+  timeout retry + `switch_pool` recovery, and automatic non-usable
+  `page_text` re-fetch on `run --stored-run --live-providers` with similarity /
+  TextRazor invalidation for refreshed URLs. No new CLI flag.
 - Repository scaffold: `pyproject.toml`, `src/seo_rank/`, `tests/`.
 - **Phase 1 shipped:** offline CLI, DataForSEO/TextRazor fixtures, keyword/SERP/
   passage/similarity/entity normalization, `run.json` + `report.md`, unit tests,
@@ -2297,8 +2303,10 @@ with 8.3 and is a lower-priority cross-check.
   `pages.text`, raw HTML, and a fixed US English desktop request contract.
 - **Phase 4.76 Slice 1 shipped:** `build_page_text_request()` always emits the
   fixed US English desktop contract (`ip_pool_for_scan=us`,
-  `accept_language=en-US`, JS/rendering off, `store_raw_html=true`); the
-  `--javascript-parsing` CLI knob was removed.
+  `accept_language=en-US`, baseline JS/rendering off, `store_raw_html=true`); the
+  `--javascript-parsing` CLI knob was removed. Later staged retrieval (2026-07)
+  escalates rendering on empty / JavaScript-disabled outcomes without changing
+  that baseline contract or restoring a CLI toggle.
 - **Phase 4.76 Slice 3 shipped:** curated `page_content_fields` now materialize
   one row per decoded `content_parsing/live` field with stable ids and JSON
   path metadata while leaving aggregate `pages.text` unchanged.

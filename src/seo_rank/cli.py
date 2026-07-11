@@ -741,6 +741,9 @@ def expand_stored_run(
     stored_serp_statuses = load_stored_serp_statuses(stored_run)
     stored_keyword_results = load_stored_keyword_results_by_keyword(stored_payload)
     raw_response_records = load_raw_response_records(stored_run)
+    stored_entities_present = any(
+        record.get("endpoint") == "entities" for record in raw_response_records
+    )
     raw_response_index = group_raw_response_records_by_keyword(raw_response_records)
     network_calls = list(
         stored_payload.get("network_calls", [])
@@ -849,6 +852,15 @@ def expand_stored_run(
         progress=progress,
         raw_response_records=raw_response_records,
     )
+    if stored_entities_present and not any(
+        record.get("endpoint") == "entities" for record in raw_response_records
+    ):
+        entities_partition = (
+            stored_run / "parquet" / "raw_responses" / "endpoint=entities"
+        )
+        if entities_partition.exists():
+            shutil.rmtree(entities_partition)
+            refresh_run_json_raw_response_catalog(stored_run)
     materialize_run_tree(
         stored_run,
         progress=progress,
@@ -1409,19 +1421,27 @@ def build_resumed_keyword_result(
         if isinstance(url, str):
             existing_page_text_by_url[url] = response
 
-    missing_urls = [
+    page_text_urls_to_fetch = {
         str(result["url"])
         for result in serp_results
         if str(result["url"]) not in existing_page_text_by_url
-    ]
-    if missing_urls and progress is not None:
+        or (
+            config.live_providers
+            and classify_page_text_response(
+                existing_page_text_by_url[str(result["url"])]
+            )
+            != "usable"
+        )
+    }
+    if page_text_urls_to_fetch and progress is not None:
         progress.keyword_log(
             target_keyword,
             f"page text ({len(serp_results)} urls)",
         )
+    refreshed_page_text_urls: set[str] = set()
     for result in serp_results:
         url = str(result["url"])
-        if url in existing_page_text_by_url:
+        if url not in page_text_urls_to_fetch:
             continue
         if blocklist.is_blocked(url):
             continue
@@ -1440,6 +1460,7 @@ def build_resumed_keyword_result(
         else:
             response = fixture_page_text_response(url, target_keyword)
         existing_page_text_by_url[url] = response
+        refreshed_page_text_urls.add(url)
 
     page_text_responses = [
         existing_page_text_by_url[str(result["url"])]
@@ -1465,11 +1486,51 @@ def build_resumed_keyword_result(
         if not isinstance(response_body_bytes, (bytes, bytearray)):
             continue
         response = json.loads(bytes(response_body_bytes).decode("utf-8"))
+        response_url = extract_response_url(response)
+        if not isinstance(response_url, str) or response_url in refreshed_page_text_urls:
+            continue
         textrazor_responses.append(response)
         textrazor_entities.extend(
             annotate_target_keyword(entity, target_keyword)
-            for entity in normalize_textrazor_response(response, url=str(response["url"]))
+            for entity in normalize_textrazor_response(response, url=response_url)
         )
+    textrazor_credentials = (
+        live_context.get("textrazor_credentials") if live_context is not None else None
+    )
+    if config.live_textrazor and isinstance(
+        textrazor_credentials, TextRazorCredentials
+    ):
+        refreshed_textrazor_pages = pages_missing_textrazor(
+            [
+                annotate_target_keyword(page_text, target_keyword)
+                for page_text in parsed_pages
+                if page_text.get("url") in refreshed_page_text_urls
+            ]
+        )
+        if refreshed_textrazor_pages and progress is not None:
+            progress.keyword_log(
+                target_keyword,
+                f"textrazor entities ({len(refreshed_textrazor_pages)} pages)",
+            )
+        refreshed_textrazor_responses = fetch_textrazor_entities_for_pages(
+            refreshed_textrazor_pages,
+            credentials=textrazor_credentials,
+            transport=DEFAULT_TEXTRAZOR_TRANSPORT,
+        )
+        if refreshed_textrazor_responses:
+            network_calls.append("textrazor.entities")
+        for response in refreshed_textrazor_responses:
+            response_url = extract_response_url(response)
+            if not isinstance(response_url, str):
+                continue
+            textrazor_responses.append(response)
+            textrazor_entities.extend(
+                annotate_target_keyword(entity, target_keyword)
+                for entity in normalize_textrazor_response(
+                    response,
+                    url=response_url,
+                )
+            )
 
     stored_page_similarity = []
     if stored_keyword_result is not None:
@@ -1479,10 +1540,12 @@ def build_resumed_keyword_result(
                 score
                 for score in stored_page_similarity_value
                 if isinstance(score, Mapping)
+                and score.get("url") not in refreshed_page_text_urls
             ]
 
     if (
         stored_keyword_result is not None
+        and not refreshed_page_text_urls
         and page_similarity_is_complete(stored_page_similarity, serp_results)
         and len(page_text_responses) == len(serp_results)
     ):

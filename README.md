@@ -1,149 +1,224 @@
 # SEO-Research
 
-Python CLI research scaffold for SEO ranking research across DataForSEO/TextRazor signals
-analysis.
+Python CLI (`seo-rank`) for SEO ranking research across DataForSEO, TextRazor,
+BGE, and Gemini signals. Runs write a Parquet lake under `runs/{run_id}/`
+(or `--output-dir`). Progress goes to **stderr** (`[seo-rank]` prefix); stdout
+stays clean for piping.
 
 ## What works today
 
-Offline `seo-rank run` expands a seed keyword from fixtures, loops over every
-capped cluster keyword, normalizes SERP rows and passages, computes fixture
-page-level **BGE**, **Gemini Doc Retrieval**, and **Gemini Semantic Similarity**
-scores, and writes JSON and Markdown artifacts with **no network calls**. Provider
-request builders and credential validators are available for offline
-verification. The CLI also has a non-default `--live-providers` gate,
-standard-library HTTP clients, env-gated live DataForSEO and TextRazor paths,
-and env-gated live Gemini (`gemini-embedding-2`) and BGE (FlagEmbedding on CUDA)
-page scoring.
+Offline `seo-rank run` expands a seed from fixtures, scores pages with fixture
+**BGE**, **Gemini Doc Retrieval**, and **Gemini Semantic Similarity**, and
+writes JSON/Markdown/Parquet with **no network calls**. Opt-in `--live-providers`
+gates live DataForSEO (SERP, staged page text, OnPage; backlinks behind
+`--live-backlinks`), plus optional live TextRazor / Gemini / BGE. After raw
+artifacts, `run` chains normalize → build-features → analyze → Phase 5 stats
+unless `--dry-run` (stats skipped via `run_manifest_is_dry_run()`). The same
+stats path runs from `materialize_run_tree()`.
 
-Long runs print **progress to stderr** (`[seo-rank]` prefix): run phase, per-keyword
-steps (SERP, page text, similarity, optional TextRazor/Gemini/BGE), a keyword
-progress bar, and artifact writes. Stdout stays clean for piping.
+## Commands by use case
 
-### Recommended workflows
+Copy `.env.example` to `.env` for live work. The CLI and pytest load `.env`
+automatically (no `source`). Each command extends the same run tree under
+`runs/{run_id}/`.
 
-Use these commands in order. Each step reads or extends the same run tree under
-`runs/{run_id}/` (or `--output-dir`).
+### Offline / fixtures
 
-| Goal | Command |
-|------|---------|
-| **Fast local smoke** (default: 1 keyword, fixtures, no network) | `seo-rank run --seed "technical seo" --dry-run` |
-| **Full offline cluster** (25 keywords from fixtures) | `seo-rank run --seed "technical seo" --dry-run --keyword-limit 25` |
-| **Materialize curated Parquet tables** | `seo-rank normalize --run runs/RUN_ID` |
-| **Build feature marts** | `seo-rank build-features --run runs/RUN_ID` |
-| **Analysis mart + stats** | `seo-rank analyze --run runs/RUN_ID` |
-| **Combine stored runs** | `seo-rank analyze --run runs/A --run runs/B --output-dir runs/combined` |
-| **Re-run stats only** (after mart exists) | `seo-rank analyze --run runs/RUN_ID` (exit `1` on guardrail hard-fail) |
-| **Inspect one keyword row** | `seo-rank analyze --run runs/RUN_ID --keyword "technical seo"` |
-| **Resume stored run in place** | `seo-rank run --seed "technical seo" --stored-run runs/RUN_ID` |
-| **Backfill live TextRazor on stored run** | `seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-textrazor-only` |
-| **Backfill DataForSEO backlinks on stored run** | `seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-providers --live-backlinks` |
-| **Backfill DataForSEO OnPage on stored run** | Same as backlinks backfill (`--live-providers --live-backlinks` fetches missing `onpage_instant_pages` rows) |
-| **Brand-new run with live TextRazor only** | `seo-rank run --seed "technical seo" --live-textrazor-only --output-dir runs/demo` |
-| **Expand existing run in place** | `seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --keyword-limit 25` |
-| **Audit one raw HTTP response** | `seo-rank replay --run runs/RUN_ID --response-id RESPONSE_ID` |
-| **Live provider smoke** (DataForSEO; optional Gemini/BGE/TextRazor) | See [Live providers](#live-providers) below |
-
-**Fresh data**
+**Fresh data** (1 keyword smoke):
 
 ```bash
+seo-rank run --seed "technical seo" --dry-run
 seo-rank run --seed "technical seo" --dry-run --output-dir artifacts
 ```
 
-**Resume stored run in place**
+**Full offline cluster** (25 fixture keywords):
+
+```bash
+seo-rank run --seed "technical seo" --dry-run --keyword-limit 25
+seo-rank run --seed "technical seo" --dry-run --keyword-limit 25 --depth 3 --skip-textrazor
+```
+
+| Flag | Role |
+|------|------|
+| `--dry-run` | Fixture/offline run; skips Phase 5 stats |
+| `--keyword-limit` | Max cluster keywords (default `1`) |
+| `--depth` | Max organic SERP rows (default `20`) |
+| `--skip-textrazor` | Skip TextRazor entities |
+| `--output-dir` | Run root (default `runs/{run_id}`) |
+
+### Resume and expand stored runs
+
+**Resume stored run in place** (reuse raw responses; backfill missing work;
+re-materialize downstream):
 
 ```bash
 seo-rank run --seed "technical seo" --stored-run runs/RUN_ID
 ```
 
-This resumes stored runs in place, reuses existing raw responses and completed
-measurements, and only backfills missing keywords or backend scores before the
-downstream chain is re-materialized. When the stored run already contains more
-keywords than the current `--keyword-limit`, the CLI expands the limit to match
-the stored keyword count. Pair it with a higher `--keyword-limit` to extend the
-original seed in place.
+Use `--stored-run` to resume stored runs in place. It reuses existing raw responses
+and completed measurements. If the stored run has more keywords than the current
+`--keyword-limit`, the CLI expands the limit to match.
 
-**Expand existing run**
+**Expand existing run** (raise the keyword cap on the same tree):
 
 ```bash
 seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --keyword-limit 25
 ```
 
-**Backfill live TextRazor on a stored run** (no DataForSEO network; requires
-`SEO_RANK_ENABLE_TEXTRAZOR=1` and `TEXTRAZOR_API_KEY` in `.env`):
+| Flag | Role |
+|------|------|
+| `--stored-run` | Resume/expand in place |
+| `--keyword-limit` | Raise to grow the cluster |
+| `--skip-textrazor` | Sticky on replay: suppresses TextRazor even if the saved run had it on |
+
+### Live DataForSEO
+
+Requires `SEO_RANK_ENABLE_LIVE_PROVIDERS=1`, `DATAFORSEO_LOGIN`,
+`DATAFORSEO_PASSWORD`.
+
+**Live smoke** (DataForSEO live; fixture similarity):
+
+```bash
+seo-rank run --seed "technical seo" --live-providers --output-dir artifacts
+```
+
+**Live + Gemini / BGE / TextRazor**:
+
+```bash
+# .env: SEO_RANK_ENABLE_GEMINI=1, GEMINI_API_KEY
+seo-rank run --seed "technical seo" --live-providers --live-gemini
+
+# .env: SEO_RANK_ENABLE_BGE=1 + CUDA
+seo-rank run --seed "technical seo" --live-providers --live-bge
+
+# .env: SEO_RANK_ENABLE_TEXTRAZOR=1, TEXTRAZOR_API_KEY
+seo-rank run --seed "technical seo" --live-providers --live-textrazor
+```
+
+| Flag | Env gate | Role |
+|------|----------|------|
+| `--live-providers` | `SEO_RANK_ENABLE_LIVE_PROVIDERS` | Live DataForSEO: expansion, SERP, staged page text, OnPage |
+| `--live-backlinks` | same | Also fetch missing backlinks summaries |
+| `--live-bge` | `SEO_RANK_ENABLE_BGE` | Live BGE rerank (CUDA) |
+| `--live-gemini` | `SEO_RANK_ENABLE_GEMINI` | Live Gemini embeddings |
+| `--live-textrazor` | `SEO_RANK_ENABLE_TEXTRAZOR` | Live TextRazor entities |
+
+With `--live-providers` only, backlinks stay off until `--live-backlinks`.
+Optional live scorers are skipped unless their flags are passed. Page-text
+crawls use a fixed US English desktop contract; rendering escalates baseline →
+JS → browser on empty / JavaScript-disabled content (`PAGE_TEXT_RETRIEVAL_PLAN.md`).
+`--location` / `--language` still apply to expansion and SERP only.
+
+**Removed flags:** `--javascript-parsing` was dropped; argparse rejects it.
+
+### Stored-run backfills (live overlays)
+
+CLI live flags overlay onto the saved config for this invocation
+(`merge_stored_run_cli_overlay`), even when the stored run was created offline.
+
+**Re-fetch non-usable stored page text**
+
+There is **no** `--refresh-page-text` (or similar) CLI flag. Classification
+decides what to re-pull: on `--stored-run --live-providers`, every stored
+`page_text` row that is not `usable` is fetched again through staged retrieval
+(baseline → JavaScript → browser, plus `50402` retry and `switch_pool`). Usable
+rows are kept. A later replay retries any row that remains non-usable.
+
+```bash
+# Re-pull non-usable page text only (fixture similarity; TextRazor rows for
+# refreshed URLs are dropped, not regenerated)
+seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-providers
+
+# Same re-pull, then regenerate TextRazor for refreshed URLs
+seo-rank run --seed "technical seo" --stored-run runs/RUN_ID \
+  --live-providers --live-textrazor
+
+# Same re-pull with live similarity for refreshed URLs
+seo-rank run --seed "technical seo" --stored-run runs/RUN_ID \
+  --live-providers --live-gemini --live-bge
+
+# Full content-derived refresh after page-text replacement
+seo-rank run --seed "technical seo" --stored-run runs/RUN_ID \
+  --live-providers --live-textrazor --live-gemini --live-bge
+```
+
+| Flag | Required? | Role in page-text re-pull |
+|------|-----------|---------------------------|
+| `--stored-run` | yes | Resume the existing lake in place |
+| `--live-providers` | yes | Enables live DataForSEO; triggers non-usable `page_text` re-fetch |
+| `--live-textrazor` | no | After a URL's page text is replaced, drop stale `entities` and regenerate with live TextRazor (needs `SEO_RANK_ENABLE_TEXTRAZOR` + `TEXTRAZOR_API_KEY`) |
+| `--live-gemini` | no | Recompute Gemini scores for refreshed URLs (needs `SEO_RANK_ENABLE_GEMINI` + `GEMINI_API_KEY`) |
+| `--live-bge` | no | Recompute BGE scores for refreshed URLs (needs `SEO_RANK_ENABLE_BGE` + CUDA) |
+| `--skip-textrazor` | — | Sticky on replay: keeps TextRazor off even if the saved run had it enabled |
+
+Without `--live-textrazor`, stale TextRazor rows for refreshed URLs are removed
+and not regenerated. Without `--live-gemini` / `--live-bge`, similarity for
+those URLs is rebuilt with fixture scorers. Billable DataForSEO page-text
+requests are issued only for non-usable rows; staged rendering, timeout retry,
+and pool switching can add attempts per URL. See `PAGE_TEXT_RETRIEVAL_PLAN.md`.
+
+**Backfill DataForSEO backlinks on a stored run** (also fetches missing
+`endpoint=onpage_instant_pages` rows):
+
+```bash
+seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-providers --live-backlinks
+```
+
+Only missing SERP URLs are requested. Backlinks: two `backlinks/summary/live`
+calls per URL (unfiltered + dofollow). OnPage: one `on_page/instant_pages/live`
+call per URL. Raw partitions:
+`backlinks_summary`, `backlinks_dofollow_summary`, `onpage_instant_pages`.
+
+**Backfill live TextRazor on a stored run** (no DataForSEO HTTP):
 
 ```bash
 seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-textrazor-only
+seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-textrazor-only --refresh-textrazor
 ```
 
-Pass `--refresh-textrazor` to replace existing `endpoint=entities` rows for the
-same `(target_keyword, url)` keys. If the stored run already had TextRazor
-enabled, `--skip-textrazor` still wins during replay and keeps TextRazor off
-for that invocation.
+Requires `SEO_RANK_ENABLE_TEXTRAZOR=1` and `TEXTRAZOR_API_KEY`. Mutually
+exclusive with `--live-providers` and `--skip-textrazor`. Pass
+`--refresh-textrazor` to replace existing `endpoint=entities` rows for the same
+`(target_keyword, url)`.
 
-**Backfill DataForSEO backlinks on a stored run** (requires
-`SEO_RANK_ENABLE_LIVE_PROVIDERS=1` and DataForSEO credentials in `.env`):
-
-```bash
-seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-providers --live-backlinks
-```
-
-Pass `--live-providers --live-backlinks` on replay even when the stored run was created offline:
-the CLI overlays live-provider flags onto the saved config for this invocation
-(`merge_stored_run_cli_overlay`); `--skip-textrazor` stays sticky and suppresses
-TextRazor even when the stored run had it enabled. Only missing SERP URL
-backlink summaries are fetched via DataForSEO `backlinks/summary/live` (two
-calls per URL: unfiltered summary plus dofollow-filtered summary); existing raw
-rows are kept. Each keyword batch persists to
-`parquet/raw_responses/endpoint=backlinks_summary/` and
-`endpoint=backlinks_dofollow_summary/` (dedupe on `(target_keyword, url, variant)`),
-including partial progress when a later URL in the same batch fails; survives
-later provider failures before `run.json` is written. Curated rows materialize in
-`parquet/backlinks/` on normalize (`dofollow_backlinks_count` is null when the
-dofollow variant is missing; `backlinks_metrics_complete` flags paired rows).
-`build-features` materializes `parquet/backlinks_analysis/` (panel grain plus
-backlinks count columns) for the `backlinks_counts` signal family in analyze.
-
-**Backfill DataForSEO OnPage signals on a stored run** (same live-provider gate
-and credentials as backlinks):
-
-```bash
-seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-providers --live-backlinks
-```
-
-OnPage uses the same missing-URL overlay as backlinks: only SERP URLs without a
-usable `endpoint=onpage_instant_pages` row are fetched. One synchronous
-`on_page/instant_pages/live` call per URL (JavaScript rendering, resource loading,
-and micromarkup validation on the same request). Raw rows land in
-`parquet/raw_responses/endpoint=onpage_instant_pages/` (dedupe on
-`(target_keyword, url)`). Normalize materializes curated
-`parquet/onpage_signals/` (score, technical checks, readability, CWV timing,
-transfer size, micromarkup summary). `build-features` materializes
-`parquet/onpage_features/` at the `analysis_mart` panel grain for three
-`onpage_metric` signal families in analyze (`onpage_content_quality`,
-`onpage_core_web_vitals`, `onpage_technical_checks`). Legacy run trees created
-before Phase 7.1 Slice 8 get `onpage_features` rebuilt automatically when
-`run.json` exists (`ensure_feature_marts_for_analysis()` in analyze and the
-stats path).
-
-TextRazor responses are stored under `raw_responses/endpoint=entities`, use
-`provider=textrazor`, and share the same `RAW_RESPONSE_SCHEMA` as the other
-raw-response rows. Normalization also materializes `parquet/entities/` (entity
-mentions) and `parquet/textrazor_page_metrics_curated/` (one aggregated row per
-`target_keyword × SERP URL`). The feature mart
-`parquet/textrazor_page_metrics/` feeds Phase 5 TextRazor signal families; the
-similarity `analysis_mart` stays similarity-only. Curated and feature marts
-include `textrazor_page_metrics_complete` when upstream extractor sections were
-fully present.
-
-**Brand-new run with live TextRazor only** uses offline DataForSEO fixtures for
-keyword expansion, SERP, and page text, then calls live TextRazor for entities.
-No DataForSEO HTTP and no `dataforseo.*` entries in `network_calls`:
+**Brand-new run with live TextRazor only** (fixture DataForSEO structure + live
+entities; no `dataforseo.*` in `network_calls`):
 
 ```bash
 seo-rank run --seed "technical seo" --live-textrazor-only --output-dir runs/demo
 ```
 
-**Typical offline research path:**
+TextRazor rows land in `raw_responses/endpoint=entities` with
+`provider=textrazor` under the shared `RAW_RESPONSE_SCHEMA`. Normalize writes
+`parquet/entities/` and `parquet/textrazor_page_metrics_curated/`; the feature
+mart `parquet/textrazor_page_metrics/` feeds Phase 5 TextRazor families.
+
+### Lake pipeline (existing run tree)
+
+`seo-rank run` already chains these after raw artifacts. Use them on an
+existing tree when you need a single layer:
+
+```bash
+seo-rank normalize --run runs/RUN_ID
+seo-rank build-features --run runs/RUN_ID
+seo-rank analyze --run runs/RUN_ID
+```
+
+| Goal | Command |
+|------|---------|
+| Curated Parquet tables | `seo-rank normalize --run runs/RUN_ID` |
+| Feature marts | `seo-rank build-features --run runs/RUN_ID` |
+| Analysis mart + Phase 5 stats | `seo-rank analyze --run runs/RUN_ID` |
+| Re-run stats only | `seo-rank analyze --run runs/RUN_ID` (exit `1` on guardrail hard-fail) |
+| Inspect one keyword | `seo-rank analyze --run runs/RUN_ID --keyword "technical seo"` |
+| Combine stored runs | `seo-rank analyze --run runs/A --run runs/B --output-dir runs/combined` |
+
+`analyze` backfills missing feature marts (including `backlinks_analysis` and
+`onpage_features` when upstream data allows). Exit codes: `0` success; `1`
+guardrail hard-fail on non–dry-run; `2` missing data / unknown `--keyword`.
+Multi-`--run` combine requires `--output-dir`.
+
+Typical offline research path:
 
 ```bash
 seo-rank run --seed "technical seo" --dry-run --keyword-limit 25
@@ -152,208 +227,107 @@ seo-rank build-features --run runs/RUN_ID
 seo-rank analyze --run runs/RUN_ID
 ```
 
-`analyze` backfills missing feature marts automatically (including
-`backlinks_analysis` and `onpage_features` when curated upstream tables or
-`run.json` allow rebuild). On non–dry-run runs it
-also writes `runs/{run_id}/stats/` (`stats_summary.json`, `stats_diagnostics.json`,
-`stats_report.md`) and exits `1` when guardrails hard-fail (stderr message only;
-no traceback). `--dry-run` runs skip Phase 5 stats via `run_manifest_is_dry_run()`.
-The same stats path runs from `seo-rank run` after `materialize_run_tree()`.
-When the post-run materialization chain finishes, the CLI syncs TextRazor entity
-confidence and relevance from `textrazor_page_metrics` into `run.json`
-`page_similarity` and refreshes `report.md` so page-level reports show TextRazor
-scores alongside the three similarity backends.
+### Audit and tests
 
-### What `seo-rank run` executes
+```bash
+seo-rank replay --run runs/RUN_ID --response-id RESPONSE_ID
+python -m pytest
+python -m pytest tests/integration -m integration   # opt-in; needs SEO_RANK_RUN_LIVE_INTEGRATION=1
+```
 
-On every `run` (offline or live), per expanded cluster keyword:
+Storage commands exit `2` on missing run data or unknown ids (stderr only).
+
+---
+
+## What `seo-rank run` executes
+
+Per expanded cluster keyword:
 
 1. SERP normalization (top *N* organic rows, default 20)
-2. DataForSEO `backlinks/summary/live` — **two calls per SERP URL** when `--live-providers --live-backlinks`
-   are on (unfiltered summary plus dofollow-filtered summary; ~$0.04
-   per target for both calls combined); incremental raw-lake persistence to
-   `endpoint=backlinks_summary` and `endpoint=backlinks_dofollow_summary`;
-   curated `backlinks` on normalize
-3. DataForSEO `on_page/instant_pages/live` — **one call per SERP URL** when live
-   providers are on; incremental persistence to `endpoint=onpage_instant_pages`;
-   curated `onpage_signals` on normalize; feature mart `onpage_features` on
-   `build-features` / analyze
-4. Page text from fixtures or DataForSEO `content_parsing/live`
+2. Backlinks (`--live-providers --live-backlinks`): two calls per SERP URL →
+   `endpoint=backlinks_summary` / `backlinks_dofollow_summary`
+3. OnPage (live providers on): one call per SERP URL →
+   `endpoint=onpage_instant_pages` → curated `onpage_signals` →
+   `onpage_features` (`onpage_content_quality`, `onpage_core_web_vitals`,
+   `onpage_technical_checks`)
+4. Page text (fixtures or staged `content_parsing/live`: baseline → JS →
+   browser; `50402` retry; `switch_pool` on pool failures)
 5. Passage splitting
-6. **Passage-level similarity features** — max/mean cosine per URL from deterministic
-   fixture embeddings (`compute_page_similarity_features`)
-7. **Page-level similarity scores** — three backends per URL (`compute_page_similarity_scores`
-   or live overrides below)
-8. TextRazor page metrics (fixture unless `--live-providers --live-textrazor`):
-   one call per parsed SERP URL with extractors
-   `entities,topics,categories,entailments,words,relations,properties,nounPhrases`
-9. Artifacts: `run.json`, `report.md`, `parquet/raw_responses/`, curated tables,
-   feature marts, `analysis_mart`, and Phase 5 stats unless `--dry-run` is set
+6. Passage-level similarity features
+7. Page-level similarity scores (three backends)
+8. TextRazor page metrics (fixture unless `--live-textrazor` / textrazor-only)
+9. Artifacts: `run.json`, `report.md`, Parquet lake, Phase 5 stats (not on
+   `--dry-run`)
 
-`seo-rank run` now performs the full postprocessing chain after writing raw
-artifacts. Use `--stored-run runs/RUN_ID` to resume stored runs in place,
-reusing existing raw responses and completed measurements while backfilling
-missing keywords or backend scores before the downstream chain is
-re-materialized. `--dry-run` still skips Phase 5 stats.
+After materialization, TextRazor confidence/relevance from
+`textrazor_page_metrics` sync into `run.json` `page_similarity` and
+`report.md`.
 
-By default, keyword expansion keeps **one** cluster keyword (the seed). Pass
-`--keyword-limit 25` for the full fixture expansion set used in lake round-trip
-tests.
+## Ranking signal backends
 
-### Ranking signal backends (fixture vs live)
+All three backends always appear in JSON/Markdown. Default runs use fixture
+scorers in `similarity.py` (pipeline shape / tests, not production retrieval).
 
-All three page-level backends are always emitted in JSON/Markdown. Default and
-live runs without optional flags use **deterministic fixture scorers** in
-`similarity.py` (hash-style embeddings and a stand-in BGE formula). They are
-for pipeline shape and tests, not production-grade retrieval.
+| Backend | JSON key | Default | Live override |
+|---------|----------|---------|---------------|
+| BGE cross-encoder | `bge` | Fixture | `--live-providers --live-bge` |
+| Gemini Doc Retrieval | `gemini_doc_retrieval` | Fixture | `--live-providers --live-gemini` |
+| Gemini Semantic Similarity | `gemini_semantic_similarity` | Fixture | same `--live-gemini` |
 
-| Backend | JSON key | Default `run` | Live override |
-|---------|----------|---------------|---------------|
-| BGE cross-encoder rerank | `bge` | Fixture formula | `--live-providers --live-bge` loads `BAAI/bge-reranker-v2-m3` (CUDA) |
-| Gemini Doc Retrieval | `gemini_doc_retrieval` | Fixture cosine | `--live-providers --live-gemini` (`gemini-embedding-2`, asymmetric query/doc) |
-| Gemini Semantic Similarity | `gemini_semantic_similarity` | Fixture cosine | same `--live-gemini` flag (symmetric sentence-similarity task) |
+Live BGE merges real scores over base rows; it does not replace Gemini columns.
+Retrieve-then-rerank is not implemented (`ROADMAP.md`).
 
-With `--live-providers` only, DataForSEO stays live for keyword expansion, SERP,
-page text, and OnPage; backlinks stay off until `--live-backlinks` is set. Live
-BGE **merges** real rerank scores over the base page-similarity rows; it does
-not replace Gemini columns.
+## `seo-rank analyze` and Phase 5 stats
 
-Retrieve-then-rerank (BM25 + bi-encoder recall, then BGE) is **not** implemented;
-see `ROADMAP.md` (BGE hybrid / retrieve-then-rerank backlog).
+`analyze` writes `parquet/analysis_mart/` (SERP rank, three similarity scores,
+page text length). TextRazor metrics stay in separate marts
+(`textrazor_page_metrics_curated`, `textrazor_page_metrics`) with
+`textrazor_page_metrics_complete`. It does not re-fetch pages or re-embed.
 
-### `seo-rank analyze` today
+Stats (guardrails, Spearman, pooled OLS, page-level Plackett-Luce summaries) run
+at four confirmatory rank depths (`top_20`, `top_10`, `top_5`, `top_3`) for every
+registered signal family into `runs/{run_id}/stats/`, including nested
+`rank_depths` / `rank_depths.*.families` in `stats_summary.json` and
+`stats_diagnostics.json`, four `## Rank depth:` report sections, and
+`actionable_association_by_rank_depth`.
 
-`analyze` writes `parquet/analysis_mart/` (SERP rank plus the three primary
-backend score columns and page text length). TextRazor page metrics live in separate marts
-(`textrazor_page_metrics_curated`, `textrazor_page_metrics`) at the same URL
-grain; they are not columns on `analysis_mart` today. The curated and feature
-marts include `textrazor_page_metrics_complete` so incomplete upstream
-extractor coverage is visible instead of silent zeros. If feature marts are
-missing, it materializes them first from the curated tables. It does **not**
-re-fetch pages or re-run embeddings. The stats path runs guardrails, Spearman
-summaries, pooled regression summaries, and page-level Plackett-Luce summaries
-at four confirmatory rank depths (`top_20`, `top_10`, `top_5`, `top_3`) for
-every registered signal family (similarity backends, TextRazor page-signal
-families, the `backlinks_counts` family on `backlinks_analysis`, and three
-OnPage families on `onpage_features`) into `runs/{run_id}/stats/`, including nested `rank_depths` and
-`rank_depths.*.families` in `stats_summary.json` and
-`stats_diagnostics.json`, four `## Rank depth:` sections with `### Families`
-subsections, and `actionable_association_by_rank_depth`.
+**Robustness appendix (primary depth `top_20` only):**
 
-**Robustness appendix (slices 7–8, primary depth `top_20` only):**
+- **### Robustness** (slice 7): multivariate VIF sensitivity; drop order Gemini
+  Semantic Similarity → Gemini Doc Retrieval → keep BGE.
+- **### Influence robustness** (slice 8): Cook's D refit; `influential_rows_rate`
+  warn guardrail.
 
-- **Multivariate sensitivity (slice 7):** joint pooled OLS with all three
-  `*_normalized_score` predictors plus `log(deprecated_html_tags + 1)`,
-  `log(time_to_first_byte_ms + 1)`, and keyword fixed effects.
-  Computes VIF; when any VIF exceeds the spec threshold (default
-  5), drops backends in pre-registered order (Gemini Semantic Similarity → Gemini
-  Doc Retrieval → keep BGE). Writes coefficients, VIF table, and drop log to
-  `rank_depths.top_20.multivariate_sensitivity` in `stats_diagnostics.json` and
-  a `### Robustness` section in `stats_report.md`. Not used for BH or
-  `actionable_association`.
-- **Influence robustness (slice 8):** for each backend pooled feature model,
-  refits excluding rows with Cook's D > 4/n and compares confirmatory vs
-  sensitivity coefficients in `rank_depths.*.regression.<backend>.influence_sensitivity`.
-  Surfaces `### Influence robustness` in `stats_report.md`. Warn guardrail
-  `influential_rows_rate` fires when the primary backend exceeds 5% influential
-  rows (threshold from `analysis_spec.v1.yaml`).
+Each depth reports `keyword_count` and `inference_mode` (`confirmatory` /
+`exploratory` / `underpowered`). Golden contracts:
+`tests/unit/test_stats_golden_fixtures.py`.
 
-Each depth and backend reports `keyword_count` and `inference_mode`
-(`confirmatory` when K ≥ 10, `exploratory` when 2 ≤ K < 10, `underpowered`
-when K = 1). Top-level summary fields mirror `rank_depths.top_20` for
-compatibility. Golden fixture and schema contracts for the stats JSON tree live
-in `tests/unit/test_stats_golden_fixtures.py` (slice 10). Passage-level
-Plackett-Luce remains deferred backlog work and is not wired into `analyze`
-today.
+## Flag reference (`seo-rank run`)
 
-### Standalone scripts
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `--seed` | *(required)* | Seed keyword |
+| `--location` | `United States` | Expansion/SERP location |
+| `--language` | `en` | Expansion/SERP language |
+| `--device` | `desktop` | `desktop` or `mobile` |
+| `--depth` | `20` | Max organic SERP rows |
+| `--keyword-limit` | `1` | Max cluster keywords |
+| `--output-dir` | `runs/{run_id}` | Run root |
+| `--model-name` | `fixture-similarity-v1` | Recorded in `run.json` |
+| `--dry-run` | off | Fixture/offline; skip Phase 5 stats |
+| `--skip-textrazor` | off | Skip TextRazor; sticky on stored-run replay |
+| `--stored-run` | — | Resume/expand; with `--live-providers`, re-fetch non-usable `page_text` |
+| `--live-providers` | off | Live DataForSEO + staged page text; on stored-run, also re-pulls non-usable `page_text` |
+| `--live-backlinks` | off | Live backlinks (needs `--live-providers`) |
+| `--live-backlinks-detail` | off | Also fetch backlinks detail (needs `--live-backlinks`) |
+| `--live-bge` | off | Live BGE; on page-text re-pull, recomputes BGE for refreshed URLs |
+| `--live-gemini` | off | Live Gemini; on page-text re-pull, recomputes Gemini for refreshed URLs |
+| `--live-textrazor` | off | Live TextRazor; on page-text re-pull, regenerates entities for refreshed URLs |
+| `--live-textrazor-only` | off | Live TextRazor without DataForSEO HTTP |
+| `--refresh-textrazor` | off | Replace existing `entities` rows when backfilling TextRazor |
+| `--domain-blocklist` | `domain_blocklist.txt` | Domains skipped for page text / backlinks / OnPage |
 
-`analysis/gemini_nwh_similarity.py` is a one-off experiment for a fixed keyword
-and hand-picked realtor homepage text blocks. It can call live Gemini and BGE when
-configured, and optionally requests extended TextRazor analysis (entities, topics,
-categories, relations, entailments, and more) per block. It is not part of the
-default CLI `run` flow.
-
-`analysis/textrazor_ranking_r2.py` measures how much similarity backends and
-TextRazor page metrics explain SERP rank on a completed run using pooled OLS
-adjusted R² (univariate per metric plus joint multivariate models). Requires
-`parquet/analysis_mart` and `parquet/textrazor_page_metrics` from a prior
-`seo-rank analyze` pass:
-
-```bash
-python analysis/textrazor_ranking_r2.py --run runs/RUN_ID
-python analysis/textrazor_ranking_r2.py --run runs/RUN_ID --depth top_10
-python analysis/textrazor_ranking_r2.py --run runs/RUN_ID --no-show
-```
-
-By default the script opens the curated final-model chart: it uses a matplotlib
-window when Tk/Qt is available, otherwise it opens the saved PNG in your default
-image viewer. Pass `--no-show` to skip display and only write the PNG.
-
-Writes `runs/{run_id}/stats/ranking_r2.json` with `similarity`, `textrazor`, a
-top-level `multivariate` block (all similarity + TextRazor predictors), and
-`multivariate_curated` (relation count, property count, entity relevance, Gemini
-semantic similarity). Also writes `stats/ranking_r2_curated_model.png` and
-`stats/ranking_r2_entity_relevance.png` — coefficient/fit charts for the curated
-model and the entity-relevance-only model.
-
-```bash
-python -m pytest
-seo-rank run --seed "technical seo" --dry-run
-seo-rank run --seed "technical seo" --dry-run --keyword-limit 25 --output-dir artifacts
-```
-
-### Live providers
-
-For live provider smoke tests, copy `.env.example` to `.env` in the project root
-and fill in real credentials. The CLI and pytest **load `.env` automatically**
-(project root is detected via `pyproject.toml`); you do not need to `source` it in
-the shell. Values in `.env` override conflicting shell exports. Live pytest
-smoke is **not** part of the default suite; run
-`python -m pytest tests/integration -m integration` only when
-`SEO_RANK_RUN_LIVE_INTEGRATION=1` and provider credentials are configured (see
-`TESTING.md`).
-
-Live-provider contract:
-
-- `--live-providers` always uses live DataForSEO.
-- `--live-bge` additionally enables live local BGE reranking and requires
-  `SEO_RANK_ENABLE_BGE=1` plus a CUDA GPU.
-- `--live-gemini` additionally enables Gemini live scoring and requires
-  `SEO_RANK_ENABLE_GEMINI=1` plus `GEMINI_API_KEY`.
-- `--live-textrazor` additionally enables live TextRazor entity extraction and
-  requires `SEO_RANK_ENABLE_TEXTRAZOR=1` plus `TEXTRAZOR_API_KEY`.
-- If an optional live flag is not passed, that provider is skipped.
-- `page_text` crawls always use the fixed US English desktop contract
-  (`ip_pool_for_scan: us`, `accept_language: en-US`, JS and browser rendering
-  off, `store_raw_html: true`). They do **not** follow `--location` /
-  `--language`. Keyword expansion and SERP still use those flags, so
-  `--language fr --location France` returns French SERPs but US-fetched page
-  HTML. Aligning page-crawl locale with SERP locale is **not supported** today.
-
-Example live smoke (DataForSEO only, fixture similarity):
-
-```bash
-# .env: SEO_RANK_ENABLE_LIVE_PROVIDERS=1, DATAFORSEO_LOGIN, DATAFORSEO_PASSWORD
-seo-rank run --seed "technical seo" --live-providers --output-dir artifacts
-```
-
-Example with live Gemini:
-
-```bash
-# .env: also SEO_RANK_ENABLE_GEMINI=1, GEMINI_API_KEY
-seo-rank run --seed "technical seo" --live-providers --live-gemini --output-dir artifacts
-```
-
-**Removed flags:** `--javascript-parsing` was dropped; argparse rejects it if
-scripts still pass it.
-
-### Storage layout 
-
-`seo-rank run` writes this layout under `runs/{run_id}/` when `--output-dir` is
-omitted. The command now chains raw artifact generation, normalization, feature
-materialization, `analysis_mart`, and Phase 5 stats. CLI subcommands still
-materialize layers in place on an existing run tree.
+## Storage layout
 
 ```text
 runs/{run_id}/
@@ -361,132 +335,59 @@ runs/{run_id}/
   report.md
   parquet/
     raw_responses/endpoint={keyword_expansion|serp|page_text|entities|backlinks_summary|backlinks_dofollow_summary|onpage_instant_pages}/part-*.parquet
-    keywords/part-*.parquet
-    serp_items/part-*.parquet
-    pages/part-*.parquet
-    passages/part-*.parquet
-    entities/part-*.parquet
-    backlinks/part-*.parquet
-    onpage_signals/part-*.parquet
-    textrazor_page_metrics_curated/part-*.parquet
-    similarity_scores/part-*.parquet
-    keyword_serp/part-*.parquet
-    page_features/part-*.parquet
-    passage_features/part-*.parquet
-    domain_features/part-*.parquet
-    backlinks_analysis/part-*.parquet
-    onpage_features/part-*.parquet
-    textrazor_page_metrics/part-*.parquet
-    analysis_mart/part-*.parquet
+    keywords/  serp_items/  pages/  passages/  entities/
+    backlinks/  onpage_signals/  textrazor_page_metrics_curated/  similarity_scores/
+    keyword_serp/  page_features/  passage_features/  domain_features/
+    backlinks_analysis/  onpage_features/  textrazor_page_metrics/  analysis_mart/
   stats/
-    stats_summary.json       # confirmatory summaries + nested rank_depths
-    stats_diagnostics.json   # pooled diagnostics, multivariate_sensitivity, influence_sensitivity
-    stats_report.md          # human-readable report (four rank-depth sections)
+    stats_summary.json
+    stats_diagnostics.json
+    stats_report.md
 ```
 
-### CLI reference
+Transforms use Polars LazyFrames until a boundary `collect(engine="streaming")`
+or `sink_parquet(..., compression="zstd")`. `raw_responses` is not joined in
+normal analysis; use `replay` to re-parse one body.
 
-All subcommands. Prefer the [recommended workflows](#recommended-workflows) above
-for day-to-day use.
+## Standalone scripts
 
-#### `seo-rank run`
+`analysis/gemini_nwh_similarity.py` — one-off block-scoring experiment (not
+part of default `run`).
 
-Fetch or fixture provider data, score pages, write `run.json`, `report.md`, and
-`parquet/raw_responses/`. Progress logs go to **stderr**.
-
-| Flag | Default | Purpose |
-|------|---------|---------|
-| `--seed` | *(required)* | Seed keyword for expansion |
-| `--location` | `United States` | DataForSEO location (name or numeric code) |
-| `--language` | `en` | Language code for expansion/SERP |
-| `--device` | `desktop` | `desktop` or `mobile` SERP |
-| `--depth` | `20` | Max organic SERP rows per keyword |
-| `--keyword-limit` | `1` | Max cluster keywords after expansion |
-| `--output-dir` | `runs/{run_id}` | Run root (content-addressed id when omitted) |
-| `--model-name` | `fixture-similarity-v1` | Recorded in `run.json` |
-| `--dry-run` | off | Mark run as fixture/offline in config |
-| `--skip-textrazor` | off | Skip TextRazor entities (offline and live); on stored-run replay, this stays sticky and suppresses TextRazor even if the saved run had it enabled |
-| `--stored-run` | — | Resume or expand the chain on an existing run tree in place |
-| `--live-providers` | off | Live DataForSEO (requires env gate) |
-| `--live-backlinks` | off | Live DataForSEO backlinks (requires `--live-providers`) |
-| `--live-bge` | off | Live BGE reranking (requires `--live-providers`) |
-| `--live-gemini` | off | Live Gemini embeddings (requires `--live-providers`) |
-| `--live-textrazor` | off | Live TextRazor (requires `--live-providers`) |
-| `--live-textrazor-only` | off | Live TextRazor without DataForSEO HTTP: brand-new runs use fixture expansion/SERP/page_text; with `--stored-run`, backfills entities from stored `page_text`. Requires `SEO_RANK_ENABLE_TEXTRAZOR=1`; mutually exclusive with `--live-providers` and `--skip-textrazor` |
-| `--refresh-textrazor` | off | Replace existing `endpoint=entities` rows when backfilling TextRazor |
+`analysis/textrazor_ranking_r2.py` — adjusted R² explainability on a completed
+run (`parquet/analysis_mart` + `parquet/textrazor_page_metrics`):
 
 ```bash
-# Offline defaults (1 keyword, progress on stderr)
-seo-rank run --seed "technical seo" --dry-run
-
-# Full fixture cluster
-seo-rank run --seed "technical seo" --dry-run --keyword-limit 25 --depth 3 --skip-textrazor
-
-# Explicit output directory
-seo-rank run --seed "technical seo" --dry-run --output-dir artifacts
-
-# Re-process stored lake and finish downstream layers (no network)
-seo-rank run --seed "technical seo" --stored-run runs/RUN_ID
+python analysis/textrazor_ranking_r2.py --run runs/RUN_ID
+python analysis/textrazor_ranking_r2.py --run runs/RUN_ID --depth top_10
+python analysis/textrazor_ranking_r2.py --run runs/RUN_ID --no-show
 ```
 
-#### Lake pipeline commands
-
-Materialize downstream layers on an existing run directory:
-
-```bash
-seo-rank normalize --run runs/RUN_ID      # raw_responses → curated tables
-seo-rank build-features --run runs/RUN_ID   # curated → feature marts
-seo-rank analyze --run runs/RUN_ID            # feature marts → analysis_mart (+ stats)
-seo-rank analyze --run runs/RUN_ID --keyword "technical seo"   # JSON rows for one keyword
-seo-rank analyze --run runs/A --run runs/B --output-dir runs/combined   # synthetic combined run
-```
-
-`analyze` exit codes: `0` on success (or dry-run manifest with optional
-`--keyword` emit); `1` when Phase 5 guardrails hard-fail on a non–dry-run run;
-`2` on missing run data or unknown `--keyword`.
-
-When you pass multiple `--run` values to `seo-rank analyze`, `--output-dir` is
-required, overlaps are resolved by CLI order, and the resulting combined run can
-be re-analyzed later without rebuilding feature marts.
-
-#### `seo-rank replay`
-
-Re-parse one stored raw response body (audit / debugging):
-
-```bash
-seo-rank replay --run runs/RUN_ID --response-id RESPONSE_ID
-```
-
-Storage commands exit `2` on missing run data or unknown `--keyword` / `--response-id`
-values (message on stderr, no traceback).
-
-All transforms use `pl.scan_parquet()` and return `pl.LazyFrame` until a command
-boundary calls `collect(engine="streaming")` or `sink_parquet(..., compression="zstd")`.
-`raw_responses` is not joined in normal analysis; use `replay` to re-parse one
-response.
+Writes `stats/ranking_r2.json`, `stats/ranking_r2_curated_model.png`, and
+`stats/ranking_r2_entity_relevance.png`.
 
 ## Repository layout
 
 | Path | Purpose |
 |------|---------|
-| `src/seo_rank/` | CLI, provider boundaries, `progress.py` (stderr run logging) |
-| `src/seo_rank/data/` | Polars lake transforms: `scans`, `normalize`, `ranks`, `features`, `marts`, `validate` |
-| `src/seo_rank/stats/` | Phase 5 observational analysis (`spec`, `families`, `panel`, `rank_depth`, `spearman`, `regression`, `plackett_luce`, `diagnostics`, `scale`, `textrazor_explainability`, `ranking_explainability_viz`, `artifacts`) |
-| `tests/unit/` | pytest unit tests |
-| `ARCHITECTURE.md` | Product architecture, data flow, planned pipeline |
+| `src/seo_rank/` | CLI, providers, `progress.py` |
+| `src/seo_rank/data/` | Polars lake: `scans`, `normalize`, `ranks`, `features`, `marts`, `validate` |
+| `src/seo_rank/stats/` | Phase 5 analysis package |
+| `tests/unit/` | Unit tests |
+| `ARCHITECTURE.md` | Architecture and data flow |
 | `GOALS.md` | Active-scope contract |
-| `FIXUPS.md` | Slice-scoped small fixes backlog |
+| `FIXUPS.md` | Small-fixes backlog |
 | `ROADMAP.md` | Backlog and history |
-| `analysis/gemini_nwh_similarity.py` | Standalone Gemini/BGE/TextRazor block-scoring experiment |
-| `analysis/textrazor_ranking_r2.py` | Standalone similarity + TextRazor adjusted R² ranking explainability script (writes `stats/ranking_r2.json` and PNG charts) |
+| `PAGE_TEXT_RETRIEVAL_PLAN.md` | Staged page-text retrieval (shipped) |
 | `TESTING.md` | Verification contract |
+| `analysis/` | Standalone scripts above |
 
 ## Documentation
 
-- Architecture and planned pipeline: `ARCHITECTURE.md`
+- Architecture: `ARCHITECTURE.md`
 - Active scope: `GOALS.md`
 - Backlog: `ROADMAP.md`
 - Testing: `TESTING.md`
 - Process: `AGENTS.md`, `SDLC.md`
 
-Verification: `python -m pytest` (unit tests; live integration is opt-in — see `TESTING.md`)
+Verification: `python -m pytest` (live integration opt-in — see `TESTING.md`).

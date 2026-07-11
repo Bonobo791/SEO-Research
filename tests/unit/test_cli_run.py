@@ -18,6 +18,7 @@ from seo_rank.dataforseo import fixture_keyword_expansion_response
 from seo_rank.dataforseo import fixture_page_text_response
 from seo_rank.dataforseo import fixture_onpage_instant_pages_response
 from seo_rank.dataforseo import fixture_serp_response
+from seo_rank.dataforseo import extract_response_url
 from seo_rank.dataforseo import onpage_instant_pages_response_is_usable
 from seo_rank.domain_blocklist import DomainBlocklist
 from seo_rank.cli import RAW_RESPONSE_SCHEMA
@@ -2075,6 +2076,188 @@ def test_build_resumed_keyword_result_stages_missing_page_text(
     ] == [(False, False), (True, False), (True, True)]
 
 
+@pytest.mark.parametrize("live_textrazor", [False, True], ids=["drop", "regenerate"])
+def test_build_resumed_keyword_result_refetches_nonusable_stored_page_text(
+    tmp_path: Path,
+    monkeypatch,
+    live_textrazor: bool,
+) -> None:
+    from seo_rank.cli import build_resumed_keyword_result
+
+    target_keyword = "technical seo"
+    usable_url = "https://example.com/technical-seo/1"
+    stale_url = "https://example.com/technical-seo/2"
+    serp_response = fixture_serp_response(target_keyword)
+    usable_response = fixture_page_text_response(usable_url, target_keyword)
+    replacement_response = fixture_page_text_response(stale_url, target_keyword)
+    config = RunConfig(
+        seed=target_keyword,
+        location="United States",
+        language="en",
+        device="desktop",
+        depth=2,
+        keyword_limit=1,
+        output_dir=tmp_path / "artifacts",
+        model_name="fixture-similarity-v1",
+        dry_run=False,
+        skip_textrazor=not live_textrazor,
+        live_providers=True,
+        live_textrazor=live_textrazor,
+    )
+    requested_urls: list[str] = []
+    textrazor_requested_urls: list[str] = []
+
+    def transport(*, body: bytes, **_: object) -> dict[str, object]:
+        request = json.loads(body.decode("utf-8"))[0]
+        requested_urls.append(request["url"])
+        assert request["url"] == stale_url
+        return replacement_response
+
+    monkeypatch.setattr("seo_rank.cli.DEFAULT_DATAFORSEO_TRANSPORT", transport)
+    monkeypatch.setattr(
+        "seo_rank.cli.fetch_onpage_signals_for_urls",
+        lambda *args, **kwargs: [],
+    )
+
+    def fetch_textrazor(pages, **_: object) -> list[dict[str, object]]:
+        textrazor_requested_urls.extend(str(page["url"]) for page in pages)
+        return [
+            {
+                **fixture_entity_response(str(page["url"]), "replacement page text"),
+                "target_keyword": target_keyword,
+            }
+            for page in pages
+        ]
+
+    monkeypatch.setattr(
+        "seo_rank.cli.fetch_textrazor_entities_for_pages",
+        fetch_textrazor,
+    )
+
+    def raw_record(
+        *,
+        endpoint: str,
+        response: dict[str, object],
+        response_url: str,
+        provider: str = "dataforseo",
+    ) -> dict[str, object]:
+        return build_raw_response_record(
+            config.output_dir.name,
+            endpoint=endpoint,
+            provider=provider,
+            response={**response, "url": response_url},
+            target_keyword=target_keyword,
+            request_metadata={"target_keyword": target_keyword, "url": response_url},
+            recorded_at="2026-07-11T12:00:00+00:00",
+        )
+
+    def cached_score(url: str, value: float) -> dict[str, object]:
+        return {
+            "url": url,
+            "page_similarity": {
+                backend: {"raw_score": value, "normalized_score": value}
+                for backend in (
+                    "bge",
+                    "gemini_doc_retrieval",
+                    "gemini_semantic_similarity",
+                )
+            },
+        }
+
+    stored_keyword_result = {
+        "page_similarity": [
+            cached_score(usable_url, 0.11),
+            cached_score(stale_url, 0.22),
+        ],
+        "similarity_features": [
+            {
+                "url": stale_url,
+                "target_keyword": target_keyword,
+                "passage_count": 999,
+            }
+        ],
+    }
+
+    live_context = {
+        "credentials": type(
+            "LiveCredentials",
+            (),
+            {"dataforseo": DataForSeoCredentials("login", "password")},
+        )(),
+        "live_bge_enabled": False,
+        "bge_reranker": None,
+        "gemini_api_key": None,
+        "textrazor_credentials": TextRazorCredentials(api_key="textrazor-secret")
+        if live_textrazor
+        else None,
+        "location_code": 2840,
+    }
+    network_calls: list[str] = []
+
+    result = build_resumed_keyword_result(
+        config,
+        target_keyword=target_keyword,
+        stored_keyword_result=stored_keyword_result,
+        raw_keyword_records={
+            "serp": [
+                raw_record(
+                    endpoint="serp",
+                    response=serp_response,
+                    response_url=usable_url,
+                )
+            ],
+            "page_text": [
+                raw_record(
+                    endpoint="page_text",
+                    response=usable_response,
+                    response_url=usable_url,
+                ),
+                raw_record(
+                    endpoint="page_text",
+                    response=_empty_page_text_response(stale_url),
+                    response_url=stale_url,
+                ),
+            ],
+            "entities": [
+                raw_record(
+                    endpoint="entities",
+                    response=fixture_entity_response(usable_url, "usable stored text"),
+                    response_url=usable_url,
+                    provider="textrazor",
+                ),
+                raw_record(
+                    endpoint="entities",
+                    response=fixture_entity_response(stale_url, "stale stored text"),
+                    response_url=stale_url,
+                    provider="textrazor",
+                ),
+            ],
+        },
+        live_context=live_context,
+        network_calls=network_calls,
+    )
+
+    assert requested_urls == [stale_url]
+    assert result["raw_provider_data"]["dataforseo"]["page_text"] == [
+        {**usable_response, "url": usable_url},
+        replacement_response,
+    ]
+    scores_by_url = {score["url"]: score for score in result["page_similarity"]}
+    assert scores_by_url[usable_url]["page_similarity"]["bge"]["raw_score"] == 0.11
+    assert scores_by_url[stale_url]["page_similarity"]["bge"]["raw_score"] != 0.22
+    assert all(feature.get("passage_count") != 999 for feature in result["similarity_features"])
+    assert [
+        response["url"]
+        for response in result["raw_provider_data"]["textrazor"]["entities"]
+    ] == ([usable_url, stale_url] if live_textrazor else [usable_url])
+    assert textrazor_requested_urls == ([stale_url] if live_textrazor else [])
+    assert network_calls == (
+        ["dataforseo.page_text", "textrazor.entities"]
+        if live_textrazor
+        else ["dataforseo.page_text"]
+    )
+
+
 def test_build_resumed_keyword_result_refetches_empty_stored_onpage_response(
     tmp_path: Path,
     monkeypatch,
@@ -2325,6 +2508,149 @@ def test_run_stored_run_expands_existing_tree_in_place(
     assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 7
     assert payload["catalog"]["datasets"]["keyword_serp"]["row_count"] == 3
     assert payload["catalog"]["datasets"]["analysis_mart"]["row_count"] == 3
+    assert (output_dir / "stats" / "stats_summary.json").exists()
+
+
+def test_run_stored_run_live_providers_refetches_nonusable_page_text_in_place(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    target_keyword = "technical seo"
+    usable_url = "https://example.com/technical-seo/1"
+    stale_url = "https://example.com/technical-seo/2"
+    monkeypatch.setenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", "1")
+    monkeypatch.setenv("DATAFORSEO_LOGIN", "analyst@example.com")
+    monkeypatch.setenv("DATAFORSEO_PASSWORD", "dataforseo-secret")
+
+    assert (
+        main(
+            [
+                "run",
+                "--seed",
+                target_keyword,
+                "--depth",
+                "2",
+                "--output-dir",
+                str(output_dir),
+                "--dry-run",
+                "--skip-textrazor",
+            ]
+        )
+        == 0
+    )
+
+    page_text_path = (
+        output_dir / "parquet" / "raw_responses" / "endpoint=page_text" / "part-0.parquet"
+    )
+    page_text_table = pq.ParquetFile(page_text_path).read()
+    original_rows = page_text_table.to_pylist()
+
+    def response_url(row: dict[str, object]) -> str | None:
+        response = json.loads(bytes(row["response_body_bytes"]).decode("utf-8"))
+        return extract_response_url(response)
+
+    original_usable_body = next(
+        bytes(row["response_body_bytes"])
+        for row in original_rows
+        if response_url(row) == usable_url
+    )
+    stale_record = build_raw_response_record(
+        output_dir.name,
+        endpoint="page_text",
+        provider="dataforseo",
+        response={**_empty_page_text_response(stale_url), "url": stale_url},
+        target_keyword=target_keyword,
+        request_metadata={"target_keyword": target_keyword, "url": stale_url},
+        recorded_at="2026-07-11T12:00:00+00:00",
+    )
+    pq.write_table(
+        pa.Table.from_pylist(
+            [
+                row
+                for row in original_rows
+                if response_url(row) == usable_url
+            ]
+            + [stale_record],
+            schema=page_text_table.schema,
+        ),
+        page_text_path,
+    )
+    entities_path = (
+        output_dir / "parquet" / "raw_responses" / "endpoint=entities"
+    )
+    rewrite_endpoint_partition(
+        output_dir,
+        "entities",
+        [
+            build_raw_response_record(
+                output_dir.name,
+                endpoint="entities",
+                provider="textrazor",
+                response=fixture_entity_response(stale_url, "stale stored text"),
+                target_keyword=target_keyword,
+                request_metadata={"target_keyword": target_keyword, "url": stale_url},
+                recorded_at="2026-07-11T12:00:00+00:00",
+            )
+        ],
+    )
+
+    page_text_requested_urls: list[str] = []
+
+    def dataforseo_transport(*, url: str, body: bytes, **_: object) -> dict[str, object]:
+        request = json.loads(body.decode("utf-8"))[0]
+        if url.endswith("/on_page/content_parsing/live"):
+            page_text_requested_urls.append(request["url"])
+            return fixture_page_text_response(request["url"], target_keyword)
+        if url.endswith("/on_page/instant_pages"):
+            return fixture_onpage_instant_pages_response(request["url"])
+        raise AssertionError(f"unexpected DataForSEO URL: {url}")
+
+    monkeypatch.setattr("seo_rank.cli.DEFAULT_DATAFORSEO_TRANSPORT", dataforseo_transport)
+
+    assert (
+        main(
+            [
+                "run",
+                "--seed",
+                target_keyword,
+                "--stored-run",
+                str(output_dir),
+                "--live-providers",
+                "--skip-textrazor",
+            ]
+        )
+        == 0
+    )
+
+    assert page_text_requested_urls == [stale_url]
+    refreshed_rows = pq.ParquetFile(page_text_path).read().to_pylist()
+    refreshed_bodies = {
+        response_url(row): bytes(row["response_body_bytes"])
+        for row in refreshed_rows
+    }
+    assert refreshed_bodies[usable_url] == original_usable_body
+    assert json.loads(refreshed_bodies[stale_url].decode("utf-8")) == fixture_page_text_response(
+        stale_url,
+        target_keyword,
+    )
+
+    payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
+    assert not entities_path.exists()
+    assert all(
+        "endpoint=entities" not in file_path
+        for file_path in payload["catalog"]["datasets"]["raw_responses"]["files"]
+    )
+    assert payload["catalog"]["datasets"]["entities"]["row_count"] == 0
+    stale_page_scores = next(
+        score["page_similarity"]
+        for score in payload["page_similarity"]
+        if score["url"] == stale_url
+    )
+    assert "textrazor_entity_confidence_score" not in stale_page_scores
+    assert "textrazor_entity_relevance_score" not in stale_page_scores
+    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 6
+    assert payload["catalog"]["datasets"]["analysis_mart"]["row_count"] == 2
     assert (output_dir / "stats" / "stats_summary.json").exists()
 
 

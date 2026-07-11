@@ -59,7 +59,7 @@ placeholders only.
 
 | Test file | What it verifies |
 |-----------|------------------|
-| `test_cli_run.py` | CLI writes grouped per-keyword artifacts, including BGE, Gemini Doc Retrieval, and Gemini Semantic Similarity rows; run-scoped `raw_responses` Parquet + `run.json` catalog metadata; offline TextRazor include/skip; TextRazor entity confidence/relevance in `report.md`; TextRazor-only flags (`--live-textrazor-only`, `--refresh-textrazor`), env gates, and mutual-exclusion errors; explicit live-provider gates; DataForSEO `backlinks/summary/live` two-call raw persistence (separate summary/dofollow partitions, batched per keyword, partial progress on mid-loop failure, stored-run backfill, survives later provider failure); stored-run CLI overlay (`merge_stored_run_cli_overlay`, sticky `--skip-textrazor`, offline stored run + `--live-providers` backfill); stored-run partial resume/backfill, stale SERP refresh, and no-op replay coverage; opt-in live Gemini, BGE, and TextRazor orchestration |
+| `test_cli_run.py` | CLI writes grouped per-keyword artifacts, including BGE, Gemini Doc Retrieval, and Gemini Semantic Similarity rows; run-scoped `raw_responses` Parquet + `run.json` catalog metadata; offline TextRazor include/skip; TextRazor entity confidence/relevance in `report.md`; TextRazor-only flags (`--live-textrazor-only`, `--refresh-textrazor`), env gates, and mutual-exclusion errors; explicit live-provider gates; DataForSEO `backlinks/summary/live` two-call raw persistence (separate summary/dofollow partitions, batched per keyword, partial progress on mid-loop failure, stored-run backfill, survives later provider failure); stored-run CLI overlay (`merge_stored_run_cli_overlay`, sticky `--skip-textrazor`, offline stored run + `--live-providers` backfill); staged page-text retrieval (`fetch_page_text_for_urls`: baseline → JS → browser, `50402` retry, `switch_pool`, non-usable stored-run re-fetch); stored-run partial resume/backfill, stale SERP refresh, and no-op replay coverage; opt-in live Gemini, BGE, and TextRazor orchestration |
 | `test_run_progress.py` | `seo-rank run` stderr progress: run phases, per-keyword substeps, progress bar, artifact-write logs |
 | `test_cli_surfaces.py` | Phase 4.5 storage CLI: subcommand parser wiring, `normalize` / `build-features` / `analyze` / `replay` dispatch, missing feature-mart backfill on `analyze`, `run --stored-run` routing, exit code `2` on storage errors and unknown keyword/response |
 | `test_run_normalize.py` | Stored `raw_responses` normalize into curated Parquet tables (including `similarity_scores` copied from `run.json` `page_similarity`, `page_content_fields`, `backlinks` from paired `backlinks/summary/live` responses, and `textrazor_page_metrics_curated` from TextRazor page-metrics responses) via lazy scan + batch UDFs; TextRazor entailment scores above 1.0 validate; dataset-name validation errors; refresh the run catalog |
@@ -407,6 +407,25 @@ exist.
   missing meta columns and asserts `build_feature_marts()` backfills nulls instead
   of raising `ColumnNotFoundError`
   (`test_build_feature_marts_legacy_onpage_signals_backfills_missing_meta_columns`).
+
+## Shipped tests — page-text staged retrieval (2026-07)
+
+Contract: `PAGE_TEXT_RETRIEVAL_PLAN.md` (slices 1–4 shipped).
+
+- **Outcome classifier** — `tests/unit/test_dataforseo_requests.py`
+  (`test_classify_page_text_response_*`) pins usable / empty /
+  `javascript_disabled` / timeout / pool_related / provider_failure precedence
+  and ignores pool/JS markers inside page body vs status fields.
+- **Request shapes** — same file covers baseline vs JS vs browser
+  `build_page_text_request()` bodies and `switch_pool`.
+- **Staged fetch + recovery** — `tests/unit/test_cli_run.py`
+  (`test_fetch_page_text_for_urls_*`) covers stop-after-usable at each stage,
+  exhaustion retaining the browser response, terminal outcomes at baseline,
+  `50402` one-second retry, and `switch_pool` after unreachable.
+- **Stored-run backfill** — `test_build_resumed_keyword_result_refetches_nonusable_stored_page_text`
+  and `test_run_stored_run_live_providers_refetches_nonusable_page_text_in_place`
+  prove usable rows are kept, non-usable rows are replaced, and downstream
+  materialization runs after replay.
 
 ## Shipped tests — Phase 7.1 slice 17 (Jul 2026)
 

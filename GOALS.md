@@ -16,8 +16,9 @@ Phase 6 is planned future work for workflow-integrity guardrails and is not
 part of the active Phase 5 delivery contract unless explicitly retargeted.
 
 Prior shipped work (Phase 4.77 adapter schema validation, Phase 4.76 structured
-`content_parsing/live` capture, the run-scoped Parquet lake, page-level
-similarity) is documented in `ROADMAP.md` § History.
+`content_parsing/live` capture, staged page-text retrieval with stored-run
+non-usable backfill (`PAGE_TEXT_RETRIEVAL_PLAN.md`), the run-scoped Parquet lake,
+page-level similarity) is documented in `ROADMAP.md` § History.
 Completed: Phase 4.77 is recorded there as shipped work.
 
 ### Phase 5 objective

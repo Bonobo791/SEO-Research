@@ -45,6 +45,7 @@ python -m pytest tests/integration -m integration
 | Fast smoke (1 keyword, fixtures, no network) | `seo-rank run --seed "technical seo" --dry-run` |
 | Full offline cluster (25 keywords) | `seo-rank run --seed "technical seo" --dry-run --keyword-limit 25` |
 | Resume stored run in place | `seo-rank run --seed "technical seo" --stored-run runs/RUN_ID` |
+| Re-fetch non-usable stored page text | `seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-providers` |
 | Backfill TextRazor only | `seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-textrazor-only` |
 | Backfill DataForSEO backlinks | `seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-providers --live-backlinks` |
 | Materialize downstream layers | `seo-rank normalize --run runs/RUN_ID` then `seo-rank build-features --run runs/RUN_ID` then `seo-rank analyze --run runs/RUN_ID` |
@@ -58,6 +59,7 @@ python -m pytest tests/integration -m integration
 - **Progress goes to stderr** — `[seo-rank]` prefix on stderr; stdout stays clean for piping.
 - **`--dry-run` skips Phase 5 stats** via `run_manifest_is_dry_run()`. Fixture/offline runs do not produce `stats_*` artifacts.
 - **`--skip-textrazor` is sticky** on stored-run replay — it suppresses TextRazor even if the saved run had it enabled.
+- **Non-usable `page_text` re-fetches automatically** on `--stored-run --live-providers` — no extra flag; usable rows are kept; refreshed URLs invalidate cached similarity and TextRazor (`PAGE_TEXT_RETRIEVAL_PLAN.md`).
 - **`raw_responses` is excluded from analytical joins** — only used for `seo-rank replay` and explicit re-normalization. Do not join on it in stats or features code.
 - **Polars LazyFrame throughout** — all transforms use `pl.scan_parquet()` and return `pl.LazyFrame`. Only `collect(engine="streaming")` or `sink_parquet(compression="zstd")` at boundaries.
 - **Validation before every mart write** — `validate.py` schema/key/null/range checks run before `sink_parquet`. Tests assert this.

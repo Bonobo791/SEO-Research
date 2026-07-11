@@ -66,6 +66,7 @@ def test_readme_documents_cli_capabilities() -> None:
 def test_stored_run_docs_describe_partial_resume_and_current_suite_status() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     architecture = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
+    page_text_plan = (ROOT / "PAGE_TEXT_RETRIEVAL_PLAN.md").read_text(encoding="utf-8")
     testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
     roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
 
@@ -73,6 +74,10 @@ def test_stored_run_docs_describe_partial_resume_and_current_suite_status() -> N
     assert "reuses existing raw responses" in readme
     assert "`--stored-run` resumes partial runs in place" in architecture
     assert "refreshes only missing work" in architecture
+    assert "may issue billable DataForSEO page-text requests" in architecture
+    assert "invalidates cached similarity and TextRazor data" in architecture
+    assert "latest fetched response replaces the stored non-usable row" in page_text_plan
+    assert "Cached similarity and TextRazor rows are content-derived" in page_text_plan
     assert "tests/unit" in testing
     assert "does not collect live integration" in testing
     assert "resumes from the saved raw lake" in roadmap
