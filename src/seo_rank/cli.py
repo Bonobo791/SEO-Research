@@ -8,6 +8,7 @@ import os
 import re
 import sys
 import shutil
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
@@ -47,6 +48,7 @@ from seo_rank.dataforseo import (
     build_page_text_request,
     build_serp_request,
     classify_page_text_response,
+    page_text_response_is_pool_related,
     execute_dataforseo_request,
     fixture_keyword_expansion_response,
     fixture_page_text_response,
@@ -2884,6 +2886,30 @@ def execute_validated_dataforseo_request(
     return validate_dataforseo_response(endpoint, response)
 
 
+def execute_validated_dataforseo_request_with_timeout_retry(
+    endpoint: str,
+    request,
+    *,
+    credentials: DataForSeoCredentials,
+    transport,
+    sleep=time.sleep,
+) -> dict[str, object]:
+    """Execute a validated DataForSEO request, retrying exactly once after a
+    one-second pause when any task fails with a 50402 provider timeout.
+
+    Only the final response is returned; the retryable first response is dropped.
+    """
+    response = execute_validated_dataforseo_request(
+        endpoint, request, credentials=credentials, transport=transport
+    )
+    if find_skippable_onpage_task_status(response) is not None:
+        sleep(1.0)
+        response = execute_validated_dataforseo_request(
+            endpoint, request, credentials=credentials, transport=transport
+        )
+    return response
+
+
 BACKLINKS_VARIANT_REQUEST_BUILDERS = {
     BACKLINKS_QUERY_SUMMARY: build_backlinks_summary_request,
     BACKLINKS_QUERY_DOFOLLOW: build_backlinks_dofollow_summary_request,
@@ -2948,8 +2974,14 @@ def fetch_page_text_for_urls(
     credentials: DataForSeoCredentials,
     transport,
     blocklist: DomainBlocklist | None = None,
+    sleep=time.sleep,
 ) -> list[dict[str, object]]:
-    """Fetch page text with progressively more capable rendering when needed."""
+    """Fetch page text with progressively more capable rendering when needed.
+
+    Each attempt retries once on a 50402 provider timeout. When the final
+    response is pool-related (access denied, geo/location, or unreachable), one
+    additional same-rendering request is issued with ``switch_pool=True``.
+    """
 
     responses: list[dict[str, object]] = []
     for url in urls:
@@ -2961,7 +2993,7 @@ def fetch_page_text_for_urls(
                 (True, False),
                 (True, True),
             ):
-                response = execute_validated_dataforseo_request(
+                response = execute_validated_dataforseo_request_with_timeout_retry(
                     "page_text",
                     build_page_text_request(
                         url,
@@ -2970,7 +3002,21 @@ def fetch_page_text_for_urls(
                     ),
                     credentials=credentials,
                     transport=transport,
+                    sleep=sleep,
                 )
+                if page_text_response_is_pool_related(response):
+                    response = execute_validated_dataforseo_request_with_timeout_retry(
+                        "page_text",
+                        build_page_text_request(
+                            url,
+                            enable_javascript=enable_javascript,
+                            enable_browser_rendering=enable_browser_rendering,
+                            switch_pool=True,
+                        ),
+                        credentials=credentials,
+                        transport=transport,
+                        sleep=sleep,
+                    )
                 if classify_page_text_response(response) not in {
                     "empty",
                     "javascript_disabled",
@@ -3079,6 +3125,7 @@ def fetch_onpage_signals_for_urls(
     progress: RunProgress | None = None,
     run_dir: Path | None = None,
     blocklist: DomainBlocklist | None = None,
+    sleep=time.sleep,
 ) -> list[dict[str, object]]:
     """Fetch OnPage instant_pages signals for each URL in ``urls``.
 
@@ -3086,9 +3133,41 @@ def fetch_onpage_signals_for_urls(
     live API call per entry in ``urls`` without deduplicating the sequence.
     Callers (live-run wiring in Phase 7.1 slice 4) must pass each URL at most
     once per ``target_keyword`` to avoid duplicate live calls.
+
+    A 50402 provider timeout is retried once; a terminal 50402 keeps its final
+    response in the returned list and raw records (no OnPage signal, no
+    blocklist entry). Transport-unreachable errors still blocklist and skip.
     """
     responses: list[dict[str, object]] = []
     new_records: list[dict[str, object]] = []
+
+    def record_response(request, response_with_url: dict[str, object], url: str) -> None:
+        if run_dir is None:
+            return
+        request_body = request.body[0]
+        new_records.append(
+            build_raw_response_record(
+                run_dir.name,
+                endpoint=ONPAGE_INSTANT_PAGES_ENDPOINT,
+                provider="dataforseo",
+                response=response_with_url,
+                target_keyword=target_keyword,
+                request_metadata={
+                    "target_keyword": target_keyword,
+                    "url": url,
+                    "enable_javascript": request_body["enable_javascript"],
+                    "enable_browser_rendering": request_body[
+                        "enable_browser_rendering"
+                    ],
+                    "load_resources": request_body["load_resources"],
+                    "validate_micromarkup": request_body["validate_micromarkup"],
+                    "accept_language": request_body["accept_language"],
+                    "browser_preset": request_body["browser_preset"],
+                },
+                recorded_at=datetime.now(UTC).isoformat(),
+            )
+        )
+
     try:
         for url in urls:
             if blocklist is not None and blocklist.is_blocked(url):
@@ -3100,11 +3179,12 @@ def fetch_onpage_signals_for_urls(
                 )
             request = build_onpage_instant_pages_request(url)
             try:
-                response = execute_validated_dataforseo_request(
+                response = execute_validated_dataforseo_request_with_timeout_retry(
                     ONPAGE_INSTANT_PAGES_ENDPOINT,
                     request,
                     credentials=credentials,
                     transport=transport,
+                    sleep=sleep,
                 )
             except DataForSeoClientError as error:
                 if blocklist is not None and is_domain_unreachable_error(error):
@@ -3115,6 +3195,7 @@ def fetch_onpage_signals_for_urls(
                     )
                     continue
                 raise
+            response_with_url = {**response, "url": url}
             skippable = find_skippable_onpage_task_status(response)
             if skippable is not None:
                 status_code, status_message = skippable
@@ -3126,44 +3207,16 @@ def fetch_onpage_signals_for_urls(
                     status_code,
                     status_message,
                 )
-                if blocklist is not None:
-                    blocklist.record(
-                        url,
-                        keyword=target_keyword,
-                        reason=f"onpage-{status_code}",
-                    )
+                responses.append(response_with_url)
+                record_response(request, response_with_url, url)
                 continue
             raise_for_failed_dataforseo_tasks(
                 ONPAGE_INSTANT_PAGES_ENDPOINT,
                 response,
                 target_keyword=target_keyword,
             )
-            response_with_url = {**response, "url": url}
             responses.append(response_with_url)
-            if run_dir is not None:
-                request_body = request.body[0]
-                new_records.append(
-                    build_raw_response_record(
-                        run_dir.name,
-                        endpoint=ONPAGE_INSTANT_PAGES_ENDPOINT,
-                        provider="dataforseo",
-                        response=response_with_url,
-                        target_keyword=target_keyword,
-                        request_metadata={
-                            "target_keyword": target_keyword,
-                            "url": url,
-                            "enable_javascript": request_body["enable_javascript"],
-                            "enable_browser_rendering": request_body[
-                                "enable_browser_rendering"
-                            ],
-                            "load_resources": request_body["load_resources"],
-                            "validate_micromarkup": request_body["validate_micromarkup"],
-                            "accept_language": request_body["accept_language"],
-                            "browser_preset": request_body["browser_preset"],
-                        },
-                        recorded_at=datetime.now(UTC).isoformat(),
-                    )
-                )
+            record_response(request, response_with_url, url)
     finally:
         if run_dir is not None and new_records:
             persist_onpage_raw_responses(run_dir, new_records)

@@ -109,6 +109,16 @@ def test_build_page_text_request_uses_content_parsing_endpoint(
     ]
 
 
+def test_build_page_text_request_switch_pool_toggles_body_flag() -> None:
+    default_request = build_page_text_request("https://example.com/technical-seo/1")
+    assert default_request.body[0]["switch_pool"] is False
+
+    switched_request = build_page_text_request(
+        "https://example.com/technical-seo/1", switch_pool=True
+    )
+    assert switched_request.body[0]["switch_pool"] is True
+
+
 def test_execute_dataforseo_request_logs_response_metadata(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

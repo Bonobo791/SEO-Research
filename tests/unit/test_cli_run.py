@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import shutil
 from pathlib import Path
 
@@ -17,6 +18,8 @@ from seo_rank.dataforseo import fixture_keyword_expansion_response
 from seo_rank.dataforseo import fixture_page_text_response
 from seo_rank.dataforseo import fixture_onpage_instant_pages_response
 from seo_rank.dataforseo import fixture_serp_response
+from seo_rank.dataforseo import onpage_instant_pages_response_is_usable
+from seo_rank.domain_blocklist import DomainBlocklist
 from seo_rank.cli import RAW_RESPONSE_SCHEMA
 from seo_rank.cli import build_raw_response_record
 from seo_rank.cli import build_live_payload
@@ -198,6 +201,7 @@ def test_fetch_page_text_for_urls_stops_after_usable_baseline_response() -> None
 def test_fetch_page_text_for_urls_keeps_terminal_outcomes_at_the_baseline() -> None:
     url = "https://example.com/timeout"
     request_bodies: list[dict[str, object]] = []
+    sleeps: list[float] = []
     timeout_response = {
         "tasks": [
             {
@@ -217,11 +221,147 @@ def test_fetch_page_text_for_urls_keeps_terminal_outcomes_at_the_baseline() -> N
         [url],
         credentials=DataForSeoCredentials(login="user", password="pass"),
         transport=transport,
+        sleep=sleeps.append,
     ) == [timeout_response]
+    assert sleeps == [1.0]
+    assert all(body["switch_pool"] is False for body in request_bodies)
     assert [
         (body["enable_javascript"], body["enable_browser_rendering"])
         for body in request_bodies
-    ] == [(False, False)]
+    ] == [(False, False), (False, False)]
+
+
+def test_fetch_page_text_for_urls_retries_task_timeout_before_success() -> None:
+    url = "https://example.com/slow"
+    request_bodies: list[dict[str, object]] = []
+    sleeps: list[float] = []
+    responses = iter(
+        [
+            {
+                "tasks": [
+                    {"status_code": 50402, "status_message": "Timeout", "result": []}
+                ]
+            },
+            fixture_page_text_response(url, "technical seo"),
+        ]
+    )
+
+    def transport(*, body: bytes, **_: object) -> dict[str, object]:
+        request_bodies.append(json.loads(body.decode("utf-8"))[0])
+        return next(responses)
+
+    assert fetch_page_text_for_urls(
+        "technical seo",
+        [url],
+        credentials=DataForSeoCredentials(login="user", password="pass"),
+        transport=transport,
+        sleep=sleeps.append,
+    ) == [fixture_page_text_response(url, "technical seo")]
+    assert sleeps == [1.0]
+    assert [
+        (body["enable_javascript"], body["enable_browser_rendering"], body["switch_pool"])
+        for body in request_bodies
+    ] == [(False, False, False), (False, False, False)]
+
+
+def test_fetch_page_text_for_urls_switches_pool_after_unreachable() -> None:
+    url = "https://example.com/blocked"
+    request_bodies: list[dict[str, object]] = []
+    sleeps: list[float] = []
+    pool_response = {
+        "tasks": [
+            {
+                "data": {"url": url},
+                "status_code": 20000,
+                "status_message": "Ok.",
+                "result": [{"items": [], "crawl_status": "unreachable"}],
+            }
+        ]
+    }
+    responses = iter([pool_response, fixture_page_text_response(url, "technical seo")])
+
+    def transport(*, body: bytes, **_: object) -> dict[str, object]:
+        request_bodies.append(json.loads(body.decode("utf-8"))[0])
+        return next(responses)
+
+    assert fetch_page_text_for_urls(
+        "technical seo",
+        [url],
+        credentials=DataForSeoCredentials(login="user", password="pass"),
+        transport=transport,
+        sleep=sleeps.append,
+    ) == [fixture_page_text_response(url, "technical seo")]
+    assert sleeps == []
+    assert [
+        (body["enable_javascript"], body["enable_browser_rendering"], body["switch_pool"])
+        for body in request_bodies
+    ] == [(False, False, False), (False, False, True)]
+
+
+@pytest.mark.parametrize("switched_kind", ["empty", "javascript_disabled"])
+def test_fetch_page_text_for_urls_advances_stage_after_empty_switched_pool_response(
+    switched_kind: str,
+) -> None:
+    url = "https://example.com/render-after-pool-switch"
+    request_bodies: list[dict[str, object]] = []
+    pool_response = {
+        "tasks": [
+            {
+                "data": {"url": url},
+                "status_code": 20000,
+                "status_message": "Ok.",
+                "result": [{"items": [], "crawl_status": "unreachable"}],
+            }
+        ]
+    }
+    switched_response = (
+        _empty_page_text_response(url, crawl_status="switched pool remained empty")
+        if switched_kind == "empty"
+        else _javascript_disabled_page_text_response(url)
+    )
+    final_response = fixture_page_text_response(url, "technical seo")
+    responses = iter([pool_response, switched_response, final_response])
+
+    def transport(*, body: bytes, **_: object) -> dict[str, object]:
+        request_bodies.append(json.loads(body.decode("utf-8"))[0])
+        return next(responses)
+
+    assert fetch_page_text_for_urls(
+        "technical seo",
+        [url],
+        credentials=DataForSeoCredentials(login="user", password="pass"),
+        transport=transport,
+        sleep=lambda _seconds: None,
+    ) == [final_response]
+    assert [
+        (body["enable_javascript"], body["enable_browser_rendering"], body["switch_pool"])
+        for body in request_bodies
+    ] == [
+        (False, False, False),
+        (False, False, True),
+        (True, False, False),
+    ]
+
+
+def test_fetch_page_text_for_urls_does_not_retry_immediate_success() -> None:
+    url = "https://example.com/fast"
+    sleeps: list[float] = []
+    calls = 0
+
+    def transport(*, body: bytes, **_: object) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        return fixture_page_text_response(url, "technical seo")
+
+    fetch_page_text_for_urls(
+        "technical seo",
+        [url],
+        credentials=DataForSeoCredentials(login="user", password="pass"),
+        transport=transport,
+        sleep=sleeps.append,
+    )
+    assert sleeps == []
+    assert calls == 1
 
 
 def test_run_without_output_dir_writes_stable_default_run_directory(
@@ -1358,7 +1498,7 @@ def test_fetch_onpage_signals_for_urls_persists_partial_progress_on_mid_loop_fai
     assert persisted_urls == {urls[0], urls[1]}
 
 
-def test_fetch_onpage_signals_for_urls_skips_target_page_timeout(
+def test_fetch_onpage_signals_for_urls_retains_target_page_timeout(
     tmp_path: Path,
 ) -> None:
     run_dir = tmp_path / "artifacts"
@@ -1393,15 +1533,19 @@ def test_fetch_onpage_signals_for_urls_skips_target_page_timeout(
             }
         return fixture_onpage_instant_pages_response(target_url)
 
+    sleeps: list[float] = []
     responses = fetch_onpage_signals_for_urls(
         "technical seo",
         urls,
         credentials=DataForSeoCredentials("login", "password"),
         transport=dataforseo_transport,
         run_dir=run_dir,
+        sleep=sleeps.append,
     )
 
-    assert [response["url"] for response in responses] == [urls[0], urls[2]]
+    assert sleeps == [1.0]
+    assert [response["url"] for response in responses] == urls
+    assert not onpage_instant_pages_response_is_usable(responses[1])
 
     onpage_path = (
         run_dir
@@ -1415,7 +1559,138 @@ def test_fetch_onpage_signals_for_urls_skips_target_page_timeout(
         json.loads(str(row["request_metadata_json"]))["url"]
         for row in pq.ParquetFile(onpage_path).read().to_pylist()
     }
-    assert persisted_urls == {urls[0], urls[2]}
+    assert persisted_urls == set(urls)
+
+
+def test_fetch_onpage_signals_for_urls_retries_task_timeout_before_success(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "artifacts"
+    url = "https://example.com/technical-seo/1"
+    sleeps: list[float] = []
+    responses = iter(
+        [
+            {
+                "status_code": 20000,
+                "tasks": [
+                    {
+                        "id": "fixture-onpage-instant-pages-timeout",
+                        "status_code": 50402,
+                        "status_message": "Target page took too long to respond.",
+                        "result": None,
+                    }
+                ],
+            },
+            fixture_onpage_instant_pages_response(url),
+        ]
+    )
+
+    def dataforseo_transport(*, body: bytes, **_: object) -> dict[str, object]:
+        del body
+        return next(responses)
+
+    result = fetch_onpage_signals_for_urls(
+        "technical seo",
+        [url],
+        credentials=DataForSeoCredentials("login", "password"),
+        transport=dataforseo_transport,
+        run_dir=run_dir,
+        sleep=sleeps.append,
+    )
+
+    assert sleeps == [1.0]
+    assert [response["url"] for response in result] == [url]
+    assert onpage_instant_pages_response_is_usable(result[0])
+
+
+def test_fetch_onpage_signals_for_urls_retains_terminal_timeout_without_blocklisting(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    run_dir = tmp_path / "artifacts"
+    blocklist_path = tmp_path / "domain_blocklist.txt"
+    blocklist = DomainBlocklist.load(blocklist_path)
+    url = "https://example.com/technical-seo/1"
+    sleeps: list[float] = []
+    timeout_response = {
+        "status_code": 20000,
+        "tasks": [
+            {
+                "id": "fixture-onpage-instant-pages-timeout",
+                "status_code": 50402,
+                "status_message": "Target page took too long to respond.",
+                "result": None,
+            }
+        ],
+    }
+
+    def dataforseo_transport(*, body: bytes, **_: object) -> dict[str, object]:
+        del body
+        return timeout_response
+
+    with caplog.at_level(logging.WARNING, logger="seo_rank.dataforseo.onpage"):
+        result = fetch_onpage_signals_for_urls(
+            "technical seo",
+            [url],
+            credentials=DataForSeoCredentials("login", "password"),
+            transport=dataforseo_transport,
+            run_dir=run_dir,
+            blocklist=blocklist,
+            sleep=sleeps.append,
+        )
+
+    assert sleeps == [1.0]
+    assert [response["url"] for response in result] == [url]
+    assert not onpage_instant_pages_response_is_usable(result[0])
+    assert "Skipping onpage_instant_pages" in caplog.text
+
+    onpage_path = (
+        run_dir
+        / "parquet"
+        / "raw_responses"
+        / "endpoint=onpage_instant_pages"
+        / "part-0.parquet"
+    )
+    assert onpage_path.exists()
+    persisted_urls = {
+        json.loads(str(row["request_metadata_json"]))["url"]
+        for row in pq.ParquetFile(onpage_path).read().to_pylist()
+    }
+    assert persisted_urls == {url}
+
+    assert not blocklist.is_blocked(url)
+    assert not DomainBlocklist.load(blocklist_path).is_blocked(url)
+
+
+def test_fetch_onpage_signals_for_urls_raises_on_non_timeout_task_failure(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "artifacts"
+    url = "https://example.com/technical-seo/1"
+
+    def dataforseo_transport(*, body: bytes, **_: object) -> dict[str, object]:
+        del body
+        return {
+            "status_code": 20000,
+            "tasks": [
+                {
+                    "id": "fixture-onpage-instant-pages-error",
+                    "status_code": 40501,
+                    "status_message": "Internal Error.",
+                    "result": None,
+                }
+            ],
+        }
+
+    with pytest.raises(DataForSeoClientError):
+        fetch_onpage_signals_for_urls(
+            "technical seo",
+            [url],
+            credentials=DataForSeoCredentials("login", "password"),
+            transport=dataforseo_transport,
+            run_dir=run_dir,
+            sleep=lambda _seconds: None,
+        )
 
 
 def test_build_live_payload_includes_backlinks_in_raw_provider_data(

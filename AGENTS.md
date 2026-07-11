@@ -2,7 +2,13 @@
 
 ## What this is
 
-Python CLI (`seo-rank`) for research-grade SEO ranking similarity analysis using DataForSEO, TextRazor, BGE, and Gemini backends. Parquet lake under `runs/` (gitignored). Phase 5 statistical analysis is the active scope (`GOALS.md`).
+Python CLI (`seo-rank`) for research-grade SEO ranking analysis using DataForSEO, TextRazor, BGE, and Gemini backends. Parquet lake under `runs/` (gitignored). Phase 5 statistical analysis is the active scope (`GOALS.md`).
+
+## Agent Operating Modes
+
+- **Caveman:** Use `/caveman full` for progress and handoff messages. Keep wording terse, but preserve technical details, commands, and error text.
+- **Ponytail:** Use `/ponytail full` when planning or changing code. Reuse existing helpers, prefer the smallest working diff, and skip speculative abstractions.
+- **Serena:** Activate the `SEO-Research` project from `.serena/project.yml` before code work. Prefer Serena semantic search and symbol tools for navigation and edits; use file-based patches for Markdown or other non-symbolic files.
 
 ## Before Every Task
 

@@ -290,6 +290,7 @@ def build_page_text_request(
     *,
     enable_javascript: bool = False,
     enable_browser_rendering: bool = False,
+    switch_pool: bool = False,
 ) -> ProviderRequest:
     """Build a DataForSEO parsed page text request without executing it."""
 
@@ -300,7 +301,7 @@ def build_page_text_request(
         body=[
             {
                 "url": url,
-                "switch_pool": False,
+                "switch_pool": switch_pool,
                 "ip_pool_for_scan": "us",
                 "enable_browser_rendering": enable_browser_rendering,
                 "enable_javascript": enable_javascript,
@@ -563,13 +564,7 @@ def classify_page_text_response(response: Mapping[str, object]) -> str:
     ):
         return _PAGE_TEXT_TIMEOUT
 
-    statuses = [task.get("status_message") for task in tasks]
-    statuses.extend(result.get("crawl_status") for result in results)
-    if any(
-        marker in _normalized_status(status)
-        for status in statuses
-        for marker in _POOL_RELATED_MARKERS
-    ):
+    if page_text_response_is_pool_related(response):
         return _PAGE_TEXT_POOL_RELATED
 
     for result in results:
@@ -596,6 +591,30 @@ def classify_page_text_response(response: Mapping[str, object]) -> str:
     if tasks and all(_is_success_status(task, fallback=top_level_success) for task in tasks):
         return _PAGE_TEXT_EMPTY
     return _PAGE_TEXT_PROVIDER_FAILURE
+
+
+def page_text_response_is_pool_related(response: Mapping[str, object]) -> bool:
+    """Return True if a page-text response carries an access-denied, geo/location,
+    or unreachable pool marker.
+
+    Used for the switch_pool recovery decision, which must consider pool reasons
+    even when the response is also a task-level timeout — unlike
+    ``classify_page_text_response``, which reports ``timeout`` first.
+    """
+    tasks = response.get("tasks", [])
+    tasks = [task for task in tasks if isinstance(task, Mapping)] if isinstance(tasks, list) else []
+    statuses: list[object] = [task.get("status_message") for task in tasks]
+    for task in tasks:
+        result = task.get("result")
+        if isinstance(result, list):
+            statuses.extend(
+                item.get("crawl_status") for item in result if isinstance(item, Mapping)
+            )
+    return any(
+        marker in _normalized_status(status)
+        for status in statuses
+        for marker in _POOL_RELATED_MARKERS
+    )
 
 
 def _normalized_status(value: object) -> str:
