@@ -225,3 +225,7 @@ node_modules
 .venv_probe
 graphify-out
 .headroom
+ponytail
+serena-guard
+ponytail/
+serena-guard/
