@@ -17,7 +17,7 @@ from seo_rank.data.validate import (
     validate_materialized_frame_contract,
 )
 
-FEATURE_SCHEMA_VERSION = "feature_marts.v2"
+FEATURE_SCHEMA_VERSION = "feature_marts.v3"
 SITE_SCALE_COLUMNS = (
     "images_size",
     "scripts_size",
@@ -636,6 +636,35 @@ def build_site_scale(frame: pl.DataFrame | pl.LazyFrame) -> pl.LazyFrame:
     ).select(["run_id", "domain", "site_scale"])
 
 
+def build_analysis_panel_keyword_serp(
+    keyword_serp: pl.LazyFrame,
+    page_features: pl.LazyFrame,
+    domain_features: pl.LazyFrame,
+) -> pl.LazyFrame:
+    """Keep only URL keys with scored pages and a usable domain control."""
+
+    join_keys = ["run_id", "target_keyword_id", "canonical_url_hash", "url"]
+    scored_urls = page_features.select(join_keys).unique(join_keys)
+    scaled_domains = (
+        domain_features.select(["run_id", "domain", "site_scale"])
+        .filter(pl.col("site_scale").is_not_null())
+        .unique(["run_id", "domain"])
+    )
+    return (
+        keyword_serp.join(scored_urls, on=join_keys, how="inner")
+        .with_columns(
+            pl.col("url").str.extract(r"^https?://([^/]+)", 1).alias("__domain")
+        )
+        .join(
+            scaled_domains,
+            left_on=["run_id", "__domain"],
+            right_on=["run_id", "domain"],
+            how="inner",
+        )
+        .drop(["__domain", "site_scale"])
+    )
+
+
 def build_feature_lazyframes(
     curated_frames: Mapping[str, pl.LazyFrame],
 ) -> dict[str, pl.LazyFrame]:
@@ -798,10 +827,15 @@ def build_feature_lazyframes(
         )
         .sort(["target_keyword_id", "domain"])
     )
+    analysis_keyword_serp = build_analysis_panel_keyword_serp(
+        keyword_serp,
+        page_features,
+        domain_features,
+    )
 
     analysis_base = build_analysis_lazyframe(
         {
-            "keyword_serp": keyword_serp,
+            "keyword_serp": analysis_keyword_serp,
             "page_features": page_features,
             "backlinks": backlinks,
             "onpage_signals": onpage_signals,
@@ -844,7 +878,7 @@ def build_feature_lazyframes(
     )
 
     return {
-        "keyword_serp": keyword_serp,
+        "keyword_serp": analysis_keyword_serp,
         "page_features": page_features,
         "passage_features": passage_features,
         "domain_features": domain_features,

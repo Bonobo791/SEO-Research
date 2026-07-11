@@ -470,6 +470,38 @@ def execute_dataforseo_request(
 
     if not isinstance(response, dict):
         raise DataForSeoClientError("DataForSEO response was not a JSON object")
+    tasks = response.get("tasks")
+    tasks = tasks if isinstance(tasks, list) else []
+    task_status_codes = [
+        task.get("status_code")
+        for task in tasks
+        if isinstance(task, Mapping)
+    ]
+    task_status_messages = [
+        task.get("status_message")
+        for task in tasks
+        if isinstance(task, Mapping) and task.get("status_message")
+    ]
+    result_counts = [
+        len(task.get("result") or []) if isinstance(task.get("result"), list) else 0
+        for task in tasks
+        if isinstance(task, Mapping)
+    ]
+    request_target = None
+    if isinstance(request.body, list) and request.body and isinstance(request.body[0], Mapping):
+        request_target = request.body[0].get("url")
+        if request_target is None:
+            request_target = request.body[0].get("target") or request.body[0].get("keyword")
+    logger.info(
+        "DataForSEO response endpoint=%s target=%s status_code=%s "
+        "task_status_codes=%s task_status_messages=%s result_counts=%s",
+        request.path,
+        request_target,
+        response.get("status_code"),
+        task_status_codes,
+        task_status_messages,
+        result_counts,
+    )
     return response
 
 
@@ -1320,6 +1352,9 @@ def fixture_onpage_instant_pages_response(
                                     "description_length": 128,
                                     "internal_links_count": 98,
                                     "external_links_count": 7,
+                                    "images_size": 12_345,
+                                    "scripts_size": 23_456,
+                                    "stylesheets_size": 3_456,
                                     "follow": True,
                                     "duplicate_meta_tags": ["generator"],
                                     "htags": {

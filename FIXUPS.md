@@ -1,3 +1,50 @@
+The pre-analysis candidate set is the intersection of:
+
+  keyworded SERP rows ∩ scored pages ∩ domains with complete site_scale
+
+  The actual drop points are:
+
+   Stage                    What is removed                                                                                      Effect on final analysis                                                                           
+  ━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   Keyword expansion        Blank keywords, case-insensitive duplicates, and every keyword after --keyword-limit (default: 1)    Those keywords never get a SERP or analysis rows.
+  ───────────────────────  ───────────────────────────────────────────────────────────────────────────────────────────────────  ────────────────────────────────────────────────────────────────────────────────────────────────────
+   SERP normalization       Non-organic results; items missing an integer rank, string URL, or string title; results after       Those URLs never enter serp_items.
+                            --depth (default: 20)
+  ───────────────────────  ───────────────────────────────────────────────────────────────────────────────────────────────────  ────────────────────────────────────────────────────────────────────────────────────────────────────
+   Live domain blocklist    Listed domains are skipped for backlinks, OnPage, and page-text fetching. Unreachable domains and    The raw SERP remains, but no page/score is produced, so the final gate removes it. A domain
+                            OnPage 50402 are added to it.                                                                        blocked during backlinks or OnPage is also skipped by the later page-text fetch.
+  ───────────────────────  ───────────────────────────────────────────────────────────────────────────────────────────────────  ────────────────────────────────────────────────────────────────────────────────────────────────────
+   Raw normalization        Duplicate response_ids are reduced to the first record.                                              Duplicate raw responses do not reach curated tables.
+  ───────────────────────  ───────────────────────────────────────────────────────────────────────────────────────────────────  ────────────────────────────────────────────────────────────────────────────────────────────────────
+   Page normalization       Page-text responses with no URL, or with neither text nor HTML, are skipped; duplicate (run,         No pages row, so the URL cannot reach analysis.
+                            keyword, URL) pages keep the first.
+  ───────────────────────  ───────────────────────────────────────────────────────────────────────────────────────────────────  ────────────────────────────────────────────────────────────────────────────────────────────────────
+   Page score join          pages ⋈ similarity_scores is an inner join.                                                          A page without a score cannot reach analysis; in the normal path a missing score raises and aborts
+                                                                                                                                 materialization rather than silently producing a partial run.
+  ───────────────────────  ───────────────────────────────────────────────────────────────────────────────────────────────────  ────────────────────────────────────────────────────────────────────────────────────────────────────
+   Keyword/SERP join        keywords ⋈ serp_items is an inner join.                                                              A SERP response for a keyword absent from the normalized keyword list disappears.
+  ───────────────────────  ───────────────────────────────────────────────────────────────────────────────────────────────────  ────────────────────────────────────────────────────────────────────────────────────────────────────
+   Domain-control gate      site_scale is null unless all six controls have non-null domain medians: images_size,                This is the dominant final drop: every URL on an unscaled domain is excluded. One complete OnPage
+                            scripts_size, stylesheets_size, total_transfer_size, total_dom_size, internal_links_count. Then      observation can be sufficient for a domain; a missing OnPage result does not necessarily remove it
+                            keyword_serp inner-joins only non-null site_scale domains.                                           if other observations fill all six controls.
+  ───────────────────────  ───────────────────────────────────────────────────────────────────────────────────────────────────  ────────────────────────────────────────────────────────────────────────────────────────────────────
+   Combined-run mode        For overlapping target_keyword_ids, last_run_wins; earlier runs’ rows for that keyword are           Earlier-run observations are excluded before Phase 5 stats.
+                            filtered from every merged table.
+
+  The source locations are src/seo_rank/dataforseo.py:1013, src/seo_rank/cli.py:2563, src/seo_rank/data/normalize.py:974, src/seo_rank/data/features.py:639, and src/seo_rank/cli.py:1953.
+
+  Also dropped, but not from the core analysis-mart candidate set:
+
+  - Passages under five words.
+  - TextRazor submissions with blank/duplicate (keyword, URL) pages; malformed/duplicate entities.
+  - Page HTML rows without HTML, content-field rows without a URL.
+  - Backlink rows lacking a usable URL or summary response.
+  - Unusable, URL-less, duplicate, or item-less OnPage responses. These matter indirectly only if they leave a domain without a complete site_scale.
+
+  Backlinks and most optional OnPage fields otherwise use left joins and become null; they do not independently remove analysis rows.
+
+
+
 • site_scale is independent of BGE/Gemini. It is a required control built from six OnPage metrics: src/seo_rank/data/features.py:21.
 
   Why values are missing:
@@ -7,8 +54,12 @@
   - The analysis mart left-joins those scored pages onto all SERP rows, so failed/missing page fetches retain null similarity values: src/seo_rank/data/marts.py:48.
 
   The stats engine then refuses to fit models when site_scale is null rather than silently dropping rows: src/seo_rank/stats/model_inputs.py:10.
+• The feature layer now builds a common URL panel: only keyword/URL rows with page similarity scores and non-null domain site_scale are materialized downstream.
 
-
+  - Added key-aligned filtering in src/seo_rank/data/features.py:639 and bumped feature-mart version to force rebuilds.
+  - Completed OnPage fixture scale inputs and updated mart/round-trip tests and docs.
+  - Verified with full python -m pytest and refreshed graphify.
+  - Native Codex review was blocked by sandbox network restrictions; manual diff review and git diff --check passed.
 
 DETERMINE BETTER PLAN FOR SAME URL COMING UP IN MULTIPLE KEYWORDS TO FIX UNDUE INFLUENCE
 

@@ -66,6 +66,11 @@ def test_cli_round_trip_materializes_real_artifacts_without_network(
         "raw_responses",
     )
 
+    write_onpage_instant_pages_raw_row(
+        output_dir,
+        target_keyword="technical seo",
+        url="https://example.com/technical-seo/1",
+    )
     assert main(["normalize", "--run", str(output_dir)]) == 0
 
     normalized_payload = _read_run_payload(output_dir)

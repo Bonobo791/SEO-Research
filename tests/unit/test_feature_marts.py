@@ -14,7 +14,11 @@ from seo_rank.data.features import BACKLINKS_ANALYSIS_REQUIRED_COLUMNS
 from seo_rank.data.features import ONPAGE_FEATURES_BOUNDED_COLUMNS
 from seo_rank.data.features import ONPAGE_FEATURES_EXTRA_COLUMNS
 from seo_rank.data.features import ONPAGE_FEATURES_REQUIRED_COLUMNS
-from seo_rank.data.features import build_feature_marts, write_feature_dataset
+from seo_rank.data.features import (
+    build_analysis_panel_keyword_serp,
+    build_feature_marts,
+    write_feature_dataset,
+)
 from seo_rank.data.normalize import CURATED_VALIDATION_RULES
 from seo_rank.data.normalize import normalize_run
 from seo_rank.dataforseo import BACKLINKS_QUERY_SUMMARY
@@ -77,6 +81,56 @@ LEGACY_ONPAGE_META_COLUMNS = (
     "time_to_interactive_ms",
     "first_input_delay_ms",
 )
+
+
+def test_build_analysis_panel_keyword_serp_keeps_only_scored_urls_with_site_scale() -> None:
+    keyword_serp = pl.DataFrame(
+        [
+            {
+                "run_id": "run-1",
+                "target_keyword_id": "kw-1",
+                "canonical_url_hash": f"url-{index}",
+                "url": url,
+            }
+            for index, url in enumerate(
+                (
+                    "https://complete.example/1",
+                    "https://complete.example/2",
+                    "https://incomplete.example/1",
+                ),
+                start=1,
+            )
+        ]
+    ).lazy()
+    page_features = pl.DataFrame(
+        [
+            {
+                "run_id": "run-1",
+                "target_keyword_id": "kw-1",
+                "canonical_url_hash": f"url-{index}",
+                "url": url,
+            }
+            for index, url in (
+                (1, "https://complete.example/1"),
+                (3, "https://incomplete.example/1"),
+            )
+        ]
+    ).lazy()
+    domain_features = pl.DataFrame(
+        [
+            {"run_id": "run-1", "domain": "complete.example", "site_scale": 1.25},
+            {"run_id": "run-1", "domain": "incomplete.example", "site_scale": None},
+        ],
+        schema_overrides={"site_scale": pl.Float64},
+    ).lazy()
+
+    result = build_analysis_panel_keyword_serp(
+        keyword_serp,
+        page_features,
+        domain_features,
+    ).collect()
+
+    assert result["url"].to_list() == ["https://complete.example/1"]
 
 
 def test_build_feature_marts_materializes_lazy_joins_from_curated_tables(
@@ -216,7 +270,7 @@ def test_build_feature_marts_materializes_lazy_joins_from_curated_tables(
     assert run_json["catalog"]["datasets"]["onpage_features"]["row_count"] == 1
 
 
-def test_build_feature_marts_onpage_features_null_when_partition_missing(
+def test_build_feature_marts_excludes_urls_when_onpage_partition_is_missing(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -241,19 +295,16 @@ def test_build_feature_marts_onpage_features_null_when_partition_missing(
     normalize_run(output_dir)
     catalog = build_feature_marts(output_dir)
 
-    assert catalog["datasets"]["onpage_features"]["row_count"] == 1
+    assert catalog["datasets"]["keyword_serp"]["row_count"] == 0
+    assert catalog["datasets"]["onpage_features"]["row_count"] == 0
     onpage_features = ds.dataset(
         output_dir / "parquet" / "onpage_features",
         format="parquet",
     ).to_table().to_pylist()
-    row = onpage_features[0]
-    assert row["serp_rank"] == 1
-    assert row["onpage_score"] is None
-    assert row["onpage_signal_id"] is None
-    assert row["has_valid_structured_data"] is None
+    assert onpage_features == []
 
 
-def test_build_feature_marts_legacy_onpage_signals_backfills_missing_meta_columns(
+def test_build_feature_marts_excludes_legacy_onpage_rows_missing_scale_inputs(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -310,22 +361,8 @@ def test_build_feature_marts_legacy_onpage_signals_backfills_missing_meta_column
 
     catalog = build_feature_marts(output_dir)
 
-    assert catalog["datasets"]["onpage_features"]["row_count"] == 1
-    onpage_features = ds.dataset(
-        output_dir / "parquet" / "onpage_features",
-        format="parquet",
-    ).to_table().to_pylist()
-    row = onpage_features[0]
-    assert row["onpage_score"] == 85.5
-    assert row["title_length"] is None
-    assert row["follow"] is None
-    assert row["description_to_content_consistency"] is None
-    assert row["h1_count"] is None
-    assert row["has_og_tags"] is None
-    assert row["cache_control_ttl"] is None
-    assert row["click_depth"] is None
-    assert row["connection_time_ms"] is None
-    assert row["first_input_delay_ms"] is None
+    assert catalog["datasets"]["keyword_serp"]["row_count"] == 0
+    assert catalog["datasets"]["onpage_features"]["row_count"] == 0
 
 
 def test_onpage_features_bounded_columns_cover_all_numeric_non_key_columns() -> None:

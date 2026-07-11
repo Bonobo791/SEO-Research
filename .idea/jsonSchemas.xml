@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="JsonSchemaMappingsProjectConfiguration">
+    <state>
+      <map>
+        <entry key="Claude Code Settings">
+          <value>
+            <SchemaInfo>
+              <option name="name" value="Claude Code Settings" />
+              <option name="relativePathToSchema" value="https://www.schemastore.org/claude-code-settings.json" />
+              <option name="applicationDefined" value="true" />
+              <option name="patterns">
+                <list>
+                  <Item>
+                    <option name="path" value=".claude/settings.json" />
+                  </Item>
+                </list>
+              </option>
+            </SchemaInfo>
+          </value>
+        </entry>
+        <entry key="Codex">
+          <value>
+            <SchemaInfo>
+              <option name="name" value="Codex" />
+              <option name="relativePathToSchema" value="https://developers.openai.com/codex/config-schema.json" />
+              <option name="applicationDefined" value="true" />
+              <option name="patterns">
+                <list>
+                  <Item>
+                    <option name="path" value=".codex/config.toml" />
+                  </Item>
+                </list>
+              </option>
+            </SchemaInfo>
+          </value>
+        </entry>
+        <entry key="Codex Hooks">
+          <value>
+            <SchemaInfo>
+              <option name="name" value="Codex Hooks" />
+              <option name="relativePathToSchema" value="https://www.schemastore.org/codex-hooks.json" />
+              <option name="applicationDefined" value="true" />
+              <option name="patterns">
+                <list>
+                  <Item>
+                    <option name="path" value=".codex/hooks.json" />
+                  </Item>
+                </list>
+              </option>
+            </SchemaInfo>
+          </value>
+        </entry>
+      </map>
+    </state>
+  </component>
+</project>

@@ -283,7 +283,7 @@ runs/{run_id}/
 |-------|--------|----------|---------|
 | **Curated** | `keywords`, `serp_items`, `pages`, `page_content_fields`, `passages`, `entities`, `backlinks`, `onpage_signals`, `textrazor_page_metrics_curated`, `similarity_scores` | `normalize.py` | Parse `raw_responses` once into typed tables |
 | **Feature marts** | `keyword_serp`, `page_features`, `passage_features`, `domain_features`, `backlinks_analysis`, `onpage_features`, `textrazor_page_metrics` | `features.py` | Reusable similarity, ranking, backlinks, OnPage, and TextRazor page features |
-| **Analysis mart** | `analysis_mart` | `marts.py` | One row per `target_keyword × SERP URL` for Phase 5 |
+| **Analysis mart** | `analysis_mart` | `marts.py` | One row per scored `target_keyword × SERP URL` with usable `site_scale` for Phase 5 |
 
 ### Layer 1 — `raw_responses` (authoritative)
 
@@ -351,7 +351,7 @@ Derived from curated tables via `features.py`. Filter and select **before** join
 
 | Mart | Contents |
 |------|----------|
-| `keyword_serp` | Keyword × SERP grain with ranks and URL keys |
+| `keyword_serp` | Common scored URL panel at keyword × SERP grain with ranks and URL keys; excludes rows without page similarity or a usable `site_scale` |
 | `page_features` | Page-level similarity and text features |
 | `passage_features` | Passage-level features (Phase 5.5 expands scoring scope) |
 | `domain_features` | Domain-level aggregates (Phase 5.5 expands URL inventory) |
