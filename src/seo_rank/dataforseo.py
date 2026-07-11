@@ -16,6 +16,15 @@ RETRYABLE_HTTP_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 DEFAULT_MAX_ATTEMPTS = 3
 DEFAULT_RETRY_BACKOFF_SECONDS = 0.5
 
+_PAGE_TEXT_TIMEOUT = "timeout"
+_PAGE_TEXT_POOL_RELATED = "pool_related"
+_PAGE_TEXT_JAVASCRIPT_DISABLED = "javascript_disabled"
+_PAGE_TEXT_USABLE = "usable"
+_PAGE_TEXT_EMPTY = "empty"
+_PAGE_TEXT_PROVIDER_FAILURE = "provider_failure"
+_POOL_RELATED_MARKERS = ("access denied", "forbidden", "location", "geo", "unreachable")
+_JAVASCRIPT_DISABLED_MARKER = "javascript is disabled"
+
 DEFAULT_KEYWORD_LIMIT = 1
 DEFAULT_SERP_DEPTH = 20
 DATAFORSEO_BASE_URL = "https://api.dataforseo.com"
@@ -533,6 +542,83 @@ def validate_dataforseo_response(
     elif endpoint == "serp":
         _validate_serp_response(response)
     return response
+
+
+def classify_page_text_response(response: Mapping[str, object]) -> str:
+    tasks = response.get("tasks", [])
+    tasks = [task for task in tasks if isinstance(task, Mapping)] if isinstance(tasks, list) else []
+
+    results = [
+        result
+        for task in tasks
+        if isinstance(task.get("result"), list)
+        for result in task["result"]
+        if isinstance(result, Mapping)
+    ]
+    if any(task.get("status_code") == 50402 for task in tasks) or any(
+        _normalized_status(result.get("crawl_status")) == "timeout" for result in results
+    ):
+        return _PAGE_TEXT_TIMEOUT
+
+    statuses = [task.get("status_message") for task in tasks]
+    statuses.extend(result.get("crawl_status") for result in results)
+    if any(
+        marker in _normalized_status(status)
+        for status in statuses
+        for marker in _POOL_RELATED_MARKERS
+    ):
+        return _PAGE_TEXT_POOL_RELATED
+
+    for result in results:
+        items = result.get("items")
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, Mapping):
+                continue
+            if _contains_text(item.get("page_content"), _JAVASCRIPT_DISABLED_MARKER) or (
+                _JAVASCRIPT_DISABLED_MARKER
+                in _normalized_status(item.get("page_as_markdown"))
+            ):
+                return _PAGE_TEXT_JAVASCRIPT_DISABLED
+
+    page = parsed_page_text_details(response)
+    if any(
+        isinstance(page.get(field), str) and page[field].strip()
+        for field in ("text", "raw_html")
+    ):
+        return _PAGE_TEXT_USABLE
+
+    top_level_success = _is_success_status(response)
+    if tasks and all(_is_success_status(task, fallback=top_level_success) for task in tasks):
+        return _PAGE_TEXT_EMPTY
+    return _PAGE_TEXT_PROVIDER_FAILURE
+
+
+def _normalized_status(value: object) -> str:
+    return value.strip().casefold() if isinstance(value, str) else ""
+
+
+def _contains_text(value: object, marker: str) -> bool:
+    if isinstance(value, str):
+        return marker in value.casefold()
+    if isinstance(value, Mapping):
+        return any(_contains_text(nested, marker) for nested in value.values())
+    if isinstance(value, list):
+        return any(_contains_text(nested, marker) for nested in value)
+    return False
+
+
+def _is_success_status(
+    value: Mapping[str, object],
+    *,
+    fallback: bool = False,
+) -> bool:
+    status_code = value.get("status_code")
+    if isinstance(status_code, int):
+        return status_code == 20000
+    status_message = _normalized_status(value.get("status_message")).rstrip(".")
+    return status_message == "ok" if status_message else fallback
 
 
 def single_backlinks_task_result(body: Mapping[str, object]) -> Mapping[str, object]:

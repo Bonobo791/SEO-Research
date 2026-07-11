@@ -9,6 +9,7 @@ from seo_rank.dataforseo import (
     DataForSeoParseError,
     BACKLINKS_DOFOLLOW_FILTERS,
     BACKLINKS_QUERY_SUMMARY,
+    classify_page_text_response,
     build_backlinks_detail_request,
     decode_content_parsing_items,
     build_backlinks_dofollow_summary_request,
@@ -883,6 +884,187 @@ def test_validate_dataforseo_response_accepts_page_text_task_with_null_result() 
     }
 
     assert validate_dataforseo_response("page_text", response) is response
+
+
+@pytest.mark.parametrize(
+    "item",
+    [
+        {"page_content": {"main_topic": [{"primary_content": [{"text": "Body"}]}]}},
+        {"raw_html": "<main>Body</main>"},
+    ],
+)
+def test_classify_page_text_response_accepts_usable_text_or_html(
+    item: dict[str, object],
+) -> None:
+    response = {
+        "tasks": [
+            {
+                "status_code": 20000,
+                "status_message": "Ok.",
+                "result": [{"items": [item]}],
+            }
+        ]
+    }
+
+    assert classify_page_text_response(response) == "usable"
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        None,
+        [],
+        [{"items": None, "items_count": 0, "crawl_status": "Page content is empty"}],
+        [{"items": []}],
+        [{"items": [{"url": "https://example.com/empty"}]}],
+    ],
+)
+def test_classify_page_text_response_accepts_successful_empty_content(
+    result: object,
+) -> None:
+    response = {
+        "tasks": [
+            {
+                "status_code": 20000,
+                "status_message": "Ok.",
+                "result": result,
+            }
+        ]
+    }
+
+    assert classify_page_text_response(response) == "empty"
+
+
+def test_classify_page_text_response_detects_javascript_disabled() -> None:
+    response = {
+        "tasks": [
+            {
+                "status_code": 20000,
+                "result": [
+                    {
+                        "items": [
+                            {
+                                "page_content": {
+                                    "main_topic": [
+                                        {"primary_content": [{"text": "JavaScript IS DISABLED"}]}
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+
+    assert classify_page_text_response(response) == "javascript_disabled"
+
+
+@pytest.mark.parametrize(
+    "task",
+    [
+        {"status_code": 50402, "status_message": "Unreachable", "result": []},
+        {
+            "status_code": 40000,
+            "status_message": "Unreachable",
+            "result": [{"crawl_status": "TiMeOuT", "items": []}],
+        },
+    ],
+)
+def test_classify_page_text_response_prioritizes_timeout(
+    task: dict[str, object],
+) -> None:
+    response = {"tasks": [task]}
+
+    assert classify_page_text_response(response) == "timeout"
+
+
+@pytest.mark.parametrize(
+    "marker",
+    ["access denied", "forbidden", "location", "geo", "unreachable"],
+)
+def test_classify_page_text_response_detects_pool_related_statuses(marker: str) -> None:
+    response = {
+        "tasks": [
+            {
+                "status_code": 40000,
+                "status_message": f"Provider says {marker}",
+                "result": [],
+            }
+        ]
+    }
+
+    assert classify_page_text_response(response) == "pool_related"
+
+
+def test_classify_page_text_response_reads_pool_status_from_result() -> None:
+    response = {
+        "tasks": [
+            {
+                "status_code": 40000,
+                "status_message": "Crawl failed",
+                "result": [{"crawl_status": "Target is unreachable", "items": []}],
+            }
+        ]
+    }
+
+    assert classify_page_text_response(response) == "pool_related"
+
+
+def test_classify_page_text_response_ignores_pool_words_in_page_content() -> None:
+    response = {
+        "tasks": [
+            {
+                "status_code": 20000,
+                "status_message": "Ok.",
+                "result": [
+                    {
+                        "items": [
+                            {
+                                "page_content": {
+                                    "main_topic": [
+                                        {"primary_content": [{"text": "Geo location forbidden"}]}
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+
+    assert classify_page_text_response(response) == "usable"
+
+
+def test_classify_page_text_response_ignores_javascript_marker_in_raw_html() -> None:
+    response = {
+        "tasks": [
+            {
+                "status_code": 20000,
+                "status_message": "Ok.",
+                "result": [
+                    {"items": [{"raw_html": "<p>JavaScript is disabled</p>"}]}
+                ],
+            }
+        ]
+    }
+
+    assert classify_page_text_response(response) == "usable"
+
+
+def test_classify_page_text_response_marks_other_failures_terminal() -> None:
+    response = {
+        "tasks": [
+            {
+                "status_code": 40001,
+                "status_message": "Authentication failed",
+                "result": [],
+            }
+        ]
+    }
+
+    assert classify_page_text_response(response) == "provider_failure"
 
 
 def test_validate_dataforseo_response_rejects_unknown_endpoint() -> None:
