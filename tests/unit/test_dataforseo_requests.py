@@ -79,8 +79,19 @@ def test_build_serp_request_uses_organic_advanced_endpoint_with_depth() -> None:
     ]
 
 
-def test_build_page_text_request_uses_content_parsing_endpoint() -> None:
-    request = build_page_text_request("https://example.com/technical-seo/1")
+@pytest.mark.parametrize(
+    ("enable_javascript", "enable_browser_rendering"),
+    [(False, False), (True, False), (True, True)],
+)
+def test_build_page_text_request_uses_content_parsing_endpoint(
+    enable_javascript: bool,
+    enable_browser_rendering: bool,
+) -> None:
+    request = build_page_text_request(
+        "https://example.com/technical-seo/1",
+        enable_javascript=enable_javascript,
+        enable_browser_rendering=enable_browser_rendering,
+    )
 
     assert request.method == "POST"
     assert request.path == "/v3/on_page/content_parsing/live"
@@ -89,8 +100,8 @@ def test_build_page_text_request_uses_content_parsing_endpoint() -> None:
             "url": "https://example.com/technical-seo/1",
             "switch_pool": False,
             "ip_pool_for_scan": "us",
-            "enable_browser_rendering": False,
-            "enable_javascript": False,
+            "enable_browser_rendering": enable_browser_rendering,
+            "enable_javascript": enable_javascript,
             "accept_language": "en-US",
             "browser_preset": "desktop",
             "store_raw_html": True,

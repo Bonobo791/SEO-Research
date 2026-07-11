@@ -23,6 +23,7 @@ from seo_rank.cli import build_live_payload
 from seo_rank.cli import enrich_run_payload_page_similarity
 from seo_rank.cli import fetch_dataforseo_backlinks_for_urls
 from seo_rank.cli import fetch_onpage_signals_for_urls
+from seo_rank.cli import fetch_page_text_for_urls
 from seo_rank.cli import main
 from seo_rank.cli import RunConfig
 from seo_rank.cli import prepare_textrazor_only_context
@@ -41,6 +42,186 @@ def _assert_textrazor_entities_raw_response_contract(parquet_path: Path) -> None
     assert rows
     assert {row["endpoint"] for row in rows} == {"entities"}
     assert {row["provider"] for row in rows} == {"textrazor"}
+
+
+def _empty_page_text_response(
+    url: str,
+    *,
+    crawl_status: str = "Page content is empty",
+) -> dict[str, object]:
+    return {
+        "tasks": [
+            {
+                "data": {"url": url},
+                "status_code": 20000,
+                "status_message": "Ok.",
+                "result": [{"items": [], "crawl_status": crawl_status}],
+            }
+        ]
+    }
+
+
+def _javascript_disabled_page_text_response(url: str) -> dict[str, object]:
+    return {
+        "tasks": [
+            {
+                "data": {"url": url},
+                "status_code": 20000,
+                "status_message": "Ok.",
+                "result": [
+                    {
+                        "items": [
+                            {
+                                "page_content": {
+                                    "main_topic": [
+                                        {
+                                            "primary_content": [
+                                                {"text": "JavaScript is disabled"}
+                                            ]
+                                        }
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+
+
+def test_fetch_page_text_for_urls_stops_after_javascript_stage_success() -> None:
+    url = "https://example.com/rendered"
+    request_bodies: list[dict[str, object]] = []
+    responses = iter(
+        [
+            _empty_page_text_response(url),
+            fixture_page_text_response(url, "technical seo"),
+        ]
+    )
+
+    def transport(*, body: bytes, **_: object) -> dict[str, object]:
+        request_bodies.append(json.loads(body.decode("utf-8"))[0])
+        return next(responses)
+
+    assert fetch_page_text_for_urls(
+        "technical seo",
+        [url],
+        credentials=DataForSeoCredentials(login="user", password="pass"),
+        transport=transport,
+    ) == [fixture_page_text_response(url, "technical seo")]
+    assert [
+        (body["enable_javascript"], body["enable_browser_rendering"])
+        for body in request_bodies
+    ] == [(False, False), (True, False)]
+
+
+def test_fetch_page_text_for_urls_stops_after_browser_stage_success() -> None:
+    url = "https://example.com/rendered"
+    request_bodies: list[dict[str, object]] = []
+    responses = iter(
+        [
+            _empty_page_text_response(url),
+            _javascript_disabled_page_text_response(url),
+            fixture_page_text_response(url, "technical seo"),
+        ]
+    )
+
+    def transport(*, body: bytes, **_: object) -> dict[str, object]:
+        request_bodies.append(json.loads(body.decode("utf-8"))[0])
+        return next(responses)
+
+    assert fetch_page_text_for_urls(
+        "technical seo",
+        [url],
+        credentials=DataForSeoCredentials(login="user", password="pass"),
+        transport=transport,
+    ) == [fixture_page_text_response(url, "technical seo")]
+    assert [
+        (body["enable_javascript"], body["enable_browser_rendering"])
+        for body in request_bodies
+    ] == [(False, False), (True, False), (True, True)]
+
+
+def test_fetch_page_text_for_urls_exhaustion_retains_browser_response() -> None:
+    url = "https://example.com/empty"
+    request_bodies: list[dict[str, object]] = []
+    browser_response = _empty_page_text_response(
+        url,
+        crawl_status="browser fallback remained empty",
+    )
+    responses = iter(
+        [
+            _empty_page_text_response(url, crawl_status="baseline remained empty"),
+            _javascript_disabled_page_text_response(url),
+            browser_response,
+        ]
+    )
+
+    def transport(*, body: bytes, **_: object) -> dict[str, object]:
+        request_bodies.append(json.loads(body.decode("utf-8"))[0])
+        return next(responses)
+
+    assert fetch_page_text_for_urls(
+        "technical seo",
+        [url],
+        credentials=DataForSeoCredentials(login="user", password="pass"),
+        transport=transport,
+    ) == [browser_response]
+    assert [
+        (body["enable_javascript"], body["enable_browser_rendering"])
+        for body in request_bodies
+    ] == [(False, False), (True, False), (True, True)]
+
+
+def test_fetch_page_text_for_urls_stops_after_usable_baseline_response() -> None:
+    url = "https://example.com/static"
+    request_bodies: list[dict[str, object]] = []
+    response = fixture_page_text_response(url, "technical seo")
+
+    def transport(*, body: bytes, **_: object) -> dict[str, object]:
+        request_bodies.append(json.loads(body.decode("utf-8"))[0])
+        return response
+
+    assert fetch_page_text_for_urls(
+        "technical seo",
+        [url],
+        credentials=DataForSeoCredentials(login="user", password="pass"),
+        transport=transport,
+    ) == [response]
+    assert [
+        (body["enable_javascript"], body["enable_browser_rendering"])
+        for body in request_bodies
+    ] == [(False, False)]
+
+
+def test_fetch_page_text_for_urls_keeps_terminal_outcomes_at_the_baseline() -> None:
+    url = "https://example.com/timeout"
+    request_bodies: list[dict[str, object]] = []
+    timeout_response = {
+        "tasks": [
+            {
+                "status_code": 50402,
+                "status_message": "Timeout",
+                "result": [],
+            }
+        ]
+    }
+
+    def transport(*, body: bytes, **_: object) -> dict[str, object]:
+        request_bodies.append(json.loads(body.decode("utf-8"))[0])
+        return timeout_response
+
+    assert fetch_page_text_for_urls(
+        "technical seo",
+        [url],
+        credentials=DataForSeoCredentials(login="user", password="pass"),
+        transport=transport,
+    ) == [timeout_response]
+    assert [
+        (body["enable_javascript"], body["enable_browser_rendering"])
+        for body in request_bodies
+    ] == [(False, False)]
 
 
 def test_run_without_output_dir_writes_stable_default_run_directory(
@@ -1523,6 +1704,100 @@ def test_build_resumed_keyword_result_fetches_only_missing_onpage_urls(
     assert len(onpage_responses) == 2
     assert onpage_responses[0]["url"] == url_a
     assert onpage_responses[1]["url"] == url_b
+
+
+def test_build_resumed_keyword_result_stages_missing_page_text(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seo_rank.cli import build_resumed_keyword_result
+
+    target_keyword = "technical seo"
+    url = "https://example.com/technical-seo/1"
+    serp_response = fixture_serp_response(target_keyword)
+    final_response = fixture_page_text_response(url, target_keyword)
+    config = RunConfig(
+        seed=target_keyword,
+        location="United States",
+        language="en",
+        device="desktop",
+        depth=1,
+        keyword_limit=1,
+        output_dir=tmp_path / "artifacts",
+        model_name="fixture-similarity-v1",
+        dry_run=False,
+        skip_textrazor=True,
+        live_providers=True,
+    )
+    request_bodies: list[dict[str, object]] = []
+    responses = iter(
+        [
+            _empty_page_text_response(url),
+            _javascript_disabled_page_text_response(url),
+            final_response,
+        ]
+    )
+
+    def transport(*, body: bytes, **_: object) -> dict[str, object]:
+        request_bodies.append(json.loads(body.decode("utf-8"))[0])
+        return next(responses)
+
+    monkeypatch.setattr("seo_rank.cli.DEFAULT_DATAFORSEO_TRANSPORT", transport)
+    monkeypatch.setattr(
+        "seo_rank.cli.fetch_onpage_signals_for_urls",
+        lambda *args, **kwargs: [],
+    )
+
+    def raw_record(
+        *,
+        endpoint: str,
+        response: dict[str, object],
+        response_url: str,
+    ) -> dict[str, object]:
+        return build_raw_response_record(
+            config.output_dir.name,
+            endpoint=endpoint,
+            provider="dataforseo",
+            response={**response, "url": response_url},
+            target_keyword=target_keyword,
+            request_metadata={"target_keyword": target_keyword, "url": response_url},
+            recorded_at="2026-07-05T12:00:00+00:00",
+        )
+
+    live_context = {
+        "credentials": type(
+            "LiveCredentials",
+            (),
+            {"dataforseo": DataForSeoCredentials("login", "password")},
+        )(),
+        "live_bge_enabled": False,
+        "bge_reranker": None,
+        "gemini_api_key": None,
+        "textrazor_credentials": None,
+        "location_code": 2840,
+    }
+    network_calls: list[str] = []
+
+    result = build_resumed_keyword_result(
+        config,
+        target_keyword=target_keyword,
+        stored_keyword_result=None,
+        raw_keyword_records={
+            "serp": [
+                raw_record(endpoint="serp", response=serp_response, response_url=url)
+            ],
+            "page_text": [],
+        },
+        live_context=live_context,
+        network_calls=network_calls,
+    )
+
+    assert result["raw_provider_data"]["dataforseo"]["page_text"] == [final_response]
+    assert network_calls == ["dataforseo.page_text"]
+    assert [
+        (body["enable_javascript"], body["enable_browser_rendering"])
+        for body in request_bodies
+    ] == [(False, False), (True, False), (True, True)]
 
 
 def test_build_resumed_keyword_result_refetches_empty_stored_onpage_response(

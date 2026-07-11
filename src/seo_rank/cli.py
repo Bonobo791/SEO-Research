@@ -46,6 +46,7 @@ from seo_rank.dataforseo import (
     build_onpage_instant_pages_request,
     build_page_text_request,
     build_serp_request,
+    classify_page_text_response,
     execute_dataforseo_request,
     fixture_keyword_expansion_response,
     fixture_page_text_response,
@@ -1423,20 +1424,16 @@ def build_resumed_keyword_result(
         if blocklist.is_blocked(url):
             continue
         if config.live_providers and live_context is not None:
-            try:
-                response = execute_validated_dataforseo_request(
-                    "page_text",
-                    build_page_text_request(url),
-                    credentials=live_context["credentials"].dataforseo,
-                    transport=DEFAULT_DATAFORSEO_TRANSPORT,
-                )
-            except DataForSeoClientError as error:
-                if is_domain_unreachable_error(error):
-                    blocklist.record(
-                        url, keyword=target_keyword, reason="page_text-unreachable"
-                    )
-                    continue
-                raise
+            staged_responses = fetch_page_text_for_urls(
+                target_keyword,
+                [url],
+                credentials=live_context["credentials"].dataforseo,
+                transport=DEFAULT_DATAFORSEO_TRANSPORT,
+                blocklist=blocklist,
+            )
+            if not staged_responses:
+                continue
+            response = staged_responses[0]
             network_calls.append("dataforseo.page_text")
         else:
             response = fixture_page_text_response(url, target_keyword)
@@ -2952,20 +2949,33 @@ def fetch_page_text_for_urls(
     transport,
     blocklist: DomainBlocklist | None = None,
 ) -> list[dict[str, object]]:
-    """Fetch page_text for each URL, skipping blocked domains and recording any
-    that fail to load (transport error) instead of aborting the run."""
+    """Fetch page text with progressively more capable rendering when needed."""
 
     responses: list[dict[str, object]] = []
     for url in urls:
         if blocklist is not None and blocklist.is_blocked(url):
             continue
         try:
-            response = execute_validated_dataforseo_request(
-                "page_text",
-                build_page_text_request(url),
-                credentials=credentials,
-                transport=transport,
-            )
+            for enable_javascript, enable_browser_rendering in (
+                (False, False),
+                (True, False),
+                (True, True),
+            ):
+                response = execute_validated_dataforseo_request(
+                    "page_text",
+                    build_page_text_request(
+                        url,
+                        enable_javascript=enable_javascript,
+                        enable_browser_rendering=enable_browser_rendering,
+                    ),
+                    credentials=credentials,
+                    transport=transport,
+                )
+                if classify_page_text_response(response) not in {
+                    "empty",
+                    "javascript_disabled",
+                }:
+                    break
         except DataForSeoClientError as error:
             if blocklist is not None and is_domain_unreachable_error(error):
                 blocklist.record(
