@@ -224,7 +224,4 @@ runs/
 node_modules
 .venv_probe
 graphify-out
-ponytail/
-ponytail
 .headroom
-.claude

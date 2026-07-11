@@ -1,5 +1,20 @@
 {
   "enabledPlugins": {
     "superpowers@claude-plugins-official": true
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read|Edit|Write|Grep|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/var/home/user/PycharmProjects/SEO-Research/serena-guard/guard.sh",
+            "timeout": 10,
+            "statusMessage": "Serena Guard: redirecting to semantic tools..."
+          }
+        ]
+      }
+    ]
   }
 }
