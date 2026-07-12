@@ -26,7 +26,7 @@ from seo_rank.data import (
     normalize_run,
 )
 from seo_rank.data.scans import scan_curated_table, scan_raw_responses
-from seo_rank.domain_blocklist import DomainBlocklist, is_domain_unreachable_error
+from seo_rank.domain_blocklist import DomainBlocklist
 from seo_rank.progress import RunProgress
 from seo_rank.stats.artifacts import merge_keyword_analysis_frame, run_phase5_stats
 from seo_rank.dataforseo import (
@@ -184,18 +184,19 @@ class LiveProviderCredentials:
     dataforseo: DataForSeoCredentials
 
 
-def configure_textrazor_logging() -> None:
-    """Enable stderr logging for TextRazor fetch/normalize diagnostics."""
+def configure_provider_logging() -> None:
+    """Enable stderr logging for live-provider diagnostics."""
 
     level_name = os.environ.get(TEXTRAZOR_LOG_LEVEL_ENV_FLAG, "INFO").upper()
     level = getattr(logging, level_name, logging.INFO)
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(logging.Formatter("[seo-rank] %(message)s"))
-    textrazor_logger = logging.getLogger("seo_rank.textrazor")
-    textrazor_logger.handlers.clear()
-    textrazor_logger.addHandler(handler)
-    textrazor_logger.setLevel(level)
-    textrazor_logger.propagate = False
+    for logger_name in ("seo_rank.textrazor", "seo_rank.dataforseo"):
+        provider_logger = logging.getLogger(logger_name)
+        provider_logger.handlers.clear()
+        provider_logger.addHandler(handler)
+        provider_logger.setLevel(level)
+        provider_logger.propagate = False
 
 
 def normalize_textrazor_response(
@@ -213,7 +214,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Run the command-line interface."""
 
     ensure_project_env_loaded()
-    configure_textrazor_logging()
+    configure_provider_logging()
     parser = build_parser()
     try:
         args = parser.parse_args(argv)
@@ -3067,6 +3068,12 @@ def fetch_page_text_for_urls(
                     transport=transport,
                     sleep=sleep,
                 )
+                if find_skippable_onpage_task_status(response) is not None:
+                    if blocklist is not None:
+                        blocklist.record(
+                            url, keyword=target_keyword, reason="page_text-50402"
+                        )
+                    break
                 if page_text_response_is_pool_related(response):
                     response = execute_validated_dataforseo_request_with_timeout_retry(
                         "page_text",
@@ -3085,12 +3092,7 @@ def fetch_page_text_for_urls(
                     "javascript_disabled",
                 }:
                     break
-        except DataForSeoClientError as error:
-            if blocklist is not None and is_domain_unreachable_error(error):
-                blocklist.record(
-                    url, keyword=target_keyword, reason="page_text-unreachable"
-                )
-                continue
+        except DataForSeoClientError:
             raise
         responses.append(response)
     return responses
@@ -3120,22 +3122,12 @@ def fetch_dataforseo_backlinks_for_urls(
                         target_keyword, f"dataforseo {endpoint} ({url})"
                     )
                 request = BACKLINKS_VARIANT_REQUEST_BUILDERS[variant](url)
-                try:
-                    response = execute_validated_dataforseo_request(
-                        endpoint,
-                        request,
-                        credentials=credentials,
-                        transport=transport,
-                    )
-                except DataForSeoClientError as error:
-                    if blocklist is not None and is_domain_unreachable_error(error):
-                        blocklist.record(
-                            url,
-                            keyword=target_keyword,
-                            reason=f"{endpoint}-unreachable",
-                        )
-                        break
-                    raise
+                response = execute_validated_dataforseo_request(
+                    endpoint,
+                    request,
+                    credentials=credentials,
+                    transport=transport,
+                )
                 raise_for_failed_dataforseo_tasks(
                     endpoint,
                     response,
@@ -3198,8 +3190,8 @@ def fetch_onpage_signals_for_urls(
     once per ``target_keyword`` to avoid duplicate live calls.
 
     A 50402 provider timeout is retried once; a terminal 50402 keeps its final
-    response in the returned list and raw records (no OnPage signal, no
-    blocklist entry). Transport-unreachable errors still blocklist and skip.
+    response in the returned list and raw records and blocklists the domain.
+    Transport errors propagate without changing the blocklist.
     """
     responses: list[dict[str, object]] = []
     new_records: list[dict[str, object]] = []
@@ -3241,27 +3233,23 @@ def fetch_onpage_signals_for_urls(
                     f"dataforseo {ONPAGE_INSTANT_PAGES_ENDPOINT} ({url})",
                 )
             request = build_onpage_instant_pages_request(url)
-            try:
-                response = execute_validated_dataforseo_request_with_timeout_retry(
-                    ONPAGE_INSTANT_PAGES_ENDPOINT,
-                    request,
-                    credentials=credentials,
-                    transport=transport,
-                    sleep=sleep,
-                )
-            except DataForSeoClientError as error:
-                if blocklist is not None and is_domain_unreachable_error(error):
-                    blocklist.record(
-                        url,
-                        keyword=target_keyword,
-                        reason=f"{ONPAGE_INSTANT_PAGES_ENDPOINT}-unreachable",
-                    )
-                    continue
-                raise
+            response = execute_validated_dataforseo_request_with_timeout_retry(
+                ONPAGE_INSTANT_PAGES_ENDPOINT,
+                request,
+                credentials=credentials,
+                transport=transport,
+                sleep=sleep,
+            )
             response_with_url = {**response, "url": url}
             skippable = find_skippable_onpage_task_status(response)
             if skippable is not None:
                 status_code, status_message = skippable
+                if blocklist is not None:
+                    blocklist.record(
+                        url,
+                        keyword=target_keyword,
+                        reason=f"{ONPAGE_INSTANT_PAGES_ENDPOINT}-50402",
+                    )
                 logging.getLogger("seo_rank.dataforseo.onpage").warning(
                     "Skipping onpage_instant_pages for target_keyword=%r url=%r: "
                     "status_code=%s (%s)",

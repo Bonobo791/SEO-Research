@@ -2,7 +2,4 @@
 # Delete a line to re-enable a domain.
 zillow.com  # keyword="cypress tx realtor" reason=onpage-50402
 realtor.com  # keyword="realtor com cypress tx" reason=onpage-50402
-parkaveappliance.com  # keyword="front load coin operated washer" reason=onpage-50402
 redfin.com  # keyword="house for sale in cypress" reason=onpage_instant_pages-unreachable
-cyfairrealestate.com  # keyword="house for sale in cypress" reason=onpage_instant_pages-unreachable
-sothebysrealty.com  # keyword="houses for sale in cypress texas" reason=page_text-unreachable

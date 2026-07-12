@@ -459,10 +459,21 @@ def execute_dataforseo_request(
         **request.headers,
         "Authorization": dataforseo_basic_auth_header(credentials),
     }
+    request_target = None
+    if isinstance(request.body, list) and request.body and isinstance(request.body[0], Mapping):
+        request_target = request.body[0].get("url")
+        if request_target is None:
+            request_target = request.body[0].get("target") or request.body[0].get("keyword")
 
     attempt = 0
     while True:
         attempt += 1
+        logger.info(
+            "DataForSEO request endpoint=%s target=%s attempt=%d",
+            request.path,
+            request_target,
+            attempt,
+        )
         try:
             response = transport(
                 method=request.method,
@@ -485,6 +496,11 @@ def execute_dataforseo_request(
         raise DataForSeoClientError("DataForSEO response was not a JSON object")
     tasks = response.get("tasks")
     tasks = tasks if isinstance(tasks, list) else []
+    task_ids = [
+        task.get("id")
+        for task in tasks
+        if isinstance(task, Mapping)
+    ]
     task_status_codes = [
         task.get("status_code")
         for task in tasks
@@ -500,20 +516,18 @@ def execute_dataforseo_request(
         for task in tasks
         if isinstance(task, Mapping)
     ]
-    request_target = None
-    if isinstance(request.body, list) and request.body and isinstance(request.body[0], Mapping):
-        request_target = request.body[0].get("url")
-        if request_target is None:
-            request_target = request.body[0].get("target") or request.body[0].get("keyword")
     logger.info(
         "DataForSEO response endpoint=%s target=%s status_code=%s "
-        "task_status_codes=%s task_status_messages=%s result_counts=%s",
+        "task_ids=%s task_status_codes=%s task_status_messages=%s result_counts=%s "
+        "response=%s",
         request.path,
         request_target,
         response.get("status_code"),
+        task_ids,
         task_status_codes,
         task_status_messages,
         result_counts,
+        response,
     )
     return response
 

@@ -127,6 +127,7 @@ def test_execute_dataforseo_request_logs_response_metadata(
         "status_message": "Ok.",
         "tasks": [
             {
+                "id": "live-task-123",
                 "status_code": 40205,
                 "status_message": "Duplicate task limit exceeded.",
                 "result": [],
@@ -142,13 +143,17 @@ def test_execute_dataforseo_request_logs_response_metadata(
         )
 
     assert result is response
+    assert "DataForSEO request" in caplog.text
+    assert "attempt=1" in caplog.text
     assert "DataForSEO response" in caplog.text
     assert "endpoint=/v3/on_page/content_parsing/live" in caplog.text
     assert "target=https://example.com/technical-seo/1" in caplog.text
     assert "status_code=20000" in caplog.text
+    assert "task_ids=['live-task-123']" in caplog.text
     assert "task_status_codes=[40205]" in caplog.text
     assert "Duplicate task limit exceeded." in caplog.text
     assert "result_counts=[0]" in caplog.text
+    assert "response={'status_code': 20000" in caplog.text
 
 
 def test_build_onpage_instant_pages_request_uses_instant_pages_endpoint_and_flags() -> None:

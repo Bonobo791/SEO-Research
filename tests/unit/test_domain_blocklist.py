@@ -1,7 +1,5 @@
-from seo_rank.dataforseo import DataForSeoClientError
 from seo_rank.domain_blocklist import (
     DomainBlocklist,
-    is_domain_unreachable_error,
     registrable_domain,
 )
 
@@ -73,18 +71,3 @@ def test_record_appends_new_domain_with_header_and_dedups(tmp_path):
     assert bl.is_blocked("https://dead.com/other")
     # a fresh load sees the persisted lines
     assert DomainBlocklist.load(path).is_blocked("https://also-dead.com/q")
-
-
-def test_is_domain_unreachable_error_classifier():
-    net = DataForSeoClientError("boom")
-    net.__cause__ = OSError("timed out")
-    assert is_domain_unreachable_error(net)
-
-    http = DataForSeoClientError("bad", status_code=503)
-    http.__cause__ = OSError("x")
-    assert not is_domain_unreachable_error(http)  # has status code
-
-    malformed = DataForSeoClientError("not JSON")  # no OSError cause
-    assert not is_domain_unreachable_error(malformed)
-
-    assert not is_domain_unreachable_error(ValueError("nope"))

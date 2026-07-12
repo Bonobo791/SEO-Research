@@ -199,7 +199,9 @@ def test_fetch_page_text_for_urls_stops_after_usable_baseline_response() -> None
     ] == [(False, False)]
 
 
-def test_fetch_page_text_for_urls_keeps_terminal_outcomes_at_the_baseline() -> None:
+def test_fetch_page_text_for_urls_blocklists_terminal_timeout_at_the_baseline(
+    tmp_path: Path,
+) -> None:
     url = "https://example.com/timeout"
     request_bodies: list[dict[str, object]] = []
     sleeps: list[float] = []
@@ -212,6 +214,7 @@ def test_fetch_page_text_for_urls_keeps_terminal_outcomes_at_the_baseline() -> N
             }
         ]
     }
+    blocklist = DomainBlocklist.load(tmp_path / "domain_blocklist.txt")
 
     def transport(*, body: bytes, **_: object) -> dict[str, object]:
         request_bodies.append(json.loads(body.decode("utf-8"))[0])
@@ -222,6 +225,7 @@ def test_fetch_page_text_for_urls_keeps_terminal_outcomes_at_the_baseline() -> N
         [url],
         credentials=DataForSeoCredentials(login="user", password="pass"),
         transport=transport,
+        blocklist=blocklist,
         sleep=sleeps.append,
     ) == [timeout_response]
     assert sleeps == [1.0]
@@ -230,9 +234,12 @@ def test_fetch_page_text_for_urls_keeps_terminal_outcomes_at_the_baseline() -> N
         (body["enable_javascript"], body["enable_browser_rendering"])
         for body in request_bodies
     ] == [(False, False), (False, False)]
+    assert blocklist.is_blocked(url)
 
 
-def test_fetch_page_text_for_urls_retries_task_timeout_before_success() -> None:
+def test_fetch_page_text_for_urls_retries_task_timeout_before_success(
+    tmp_path: Path,
+) -> None:
     url = "https://example.com/slow"
     request_bodies: list[dict[str, object]] = []
     sleeps: list[float] = []
@@ -251,11 +258,14 @@ def test_fetch_page_text_for_urls_retries_task_timeout_before_success() -> None:
         request_bodies.append(json.loads(body.decode("utf-8"))[0])
         return next(responses)
 
+    blocklist = DomainBlocklist.load(tmp_path / "domain_blocklist.txt")
+
     assert fetch_page_text_for_urls(
         "technical seo",
         [url],
         credentials=DataForSeoCredentials(login="user", password="pass"),
         transport=transport,
+        blocklist=blocklist,
         sleep=sleeps.append,
     ) == [fixture_page_text_response(url, "technical seo")]
     assert sleeps == [1.0]
@@ -263,6 +273,28 @@ def test_fetch_page_text_for_urls_retries_task_timeout_before_success() -> None:
         (body["enable_javascript"], body["enable_browser_rendering"], body["switch_pool"])
         for body in request_bodies
     ] == [(False, False, False), (False, False, False)]
+    assert not blocklist.is_blocked(url)
+
+
+def test_fetch_page_text_for_urls_does_not_blocklist_transport_error(
+    tmp_path: Path,
+) -> None:
+    url = "https://example.com/unavailable"
+    blocklist = DomainBlocklist.load(tmp_path / "domain_blocklist.txt")
+
+    def transport(**_: object) -> dict[str, object]:
+        raise OSError("connection failed")
+
+    with pytest.raises(DataForSeoClientError):
+        fetch_page_text_for_urls(
+            "technical seo",
+            [url],
+            credentials=DataForSeoCredentials(login="user", password="pass"),
+            transport=transport,
+            blocklist=blocklist,
+        )
+
+    assert not blocklist.is_blocked(url)
 
 
 def test_fetch_page_text_for_urls_switches_pool_after_unreachable() -> None:
@@ -1604,7 +1636,7 @@ def test_fetch_onpage_signals_for_urls_retries_task_timeout_before_success(
     assert onpage_instant_pages_response_is_usable(result[0])
 
 
-def test_fetch_onpage_signals_for_urls_retains_terminal_timeout_without_blocklisting(
+def test_fetch_onpage_signals_for_urls_blocklists_terminal_timeout(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -1659,8 +1691,8 @@ def test_fetch_onpage_signals_for_urls_retains_terminal_timeout_without_blocklis
     }
     assert persisted_urls == {url}
 
-    assert not blocklist.is_blocked(url)
-    assert not DomainBlocklist.load(blocklist_path).is_blocked(url)
+    assert blocklist.is_blocked(url)
+    assert DomainBlocklist.load(blocklist_path).is_blocked(url)
 
 
 def test_fetch_onpage_signals_for_urls_raises_on_non_timeout_task_failure(

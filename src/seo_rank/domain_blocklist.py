@@ -1,9 +1,9 @@
 """Persistent blocklist of domains that never load.
 
 A run reads the committed ``domain_blocklist.txt`` and drops any SERP result on a
-listed domain before fetching. When a domain fails to load during a run (network
-timeout / connection error, or an OnPage 50402 "page unreachable" status), it is
-appended so future runs skip it. See the module ``DOMAIN_BLOCKLIST_FILENAME``.
+listed domain before fetching. When a domain returns an OnPage 50402 status on
+both the initial request and its retry, it is appended so future runs skip it.
+See the module ``DOMAIN_BLOCKLIST_FILENAME``.
 """
 
 from __future__ import annotations
@@ -11,8 +11,6 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from typing import Sequence
-
-from .dataforseo import DataForSeoClientError
 
 DOMAIN_BLOCKLIST_FILENAME = "domain_blocklist.txt"
 
@@ -41,17 +39,6 @@ def registrable_domain(url: str) -> str | None:
     host = host.split("@")[-1].split(":", 1)[0]
     host = host.removeprefix("www.")
     return host or None
-
-
-def is_domain_unreachable_error(exc: BaseException) -> bool:
-    """True when ``exc`` signals a domain that never loaded (transport OSError),
-    as opposed to an HTTP status failure or a malformed-response error."""
-
-    return (
-        isinstance(exc, DataForSeoClientError)
-        and exc.status_code is None
-        and isinstance(exc.__cause__, OSError)
-    )
 
 
 def _resolve_default_path() -> Path:
@@ -117,8 +104,8 @@ class DomainBlocklist:
 
         ponytail: naive append + read-time dedup. Two concurrent runs can double
         -append a line; harmless since :meth:`load` dedups via a set. A single
-        transient blip permanently blocks a good domain — prune the line by hand;
-        the trailing comment records why it was added.
+        repeated timeout can permanently block a good domain — prune the line by
+        hand; the trailing comment records why it was added.
         """
 
         domain = registrable_domain(url)
