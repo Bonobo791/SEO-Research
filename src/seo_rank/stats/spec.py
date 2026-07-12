@@ -87,6 +87,19 @@ class AnalysisSpec:
         limitations_by_depth = self.data["limitations_by_depth"]
         return str(limitations_by_depth[depth_key])
 
+    @property
+    def entity_signal_policy(self) -> Mapping[str, int | float]:
+        configured = self.data.get("entity_signals", {})
+        if not isinstance(configured, Mapping):
+            raise ValueError("entity_signals must be a mapping")
+        defaults: dict[str, int | float] = {
+            "min_present_pages": 10,
+            "min_present_keywords": 3,
+            "min_inference_keywords": 10,
+            "bh_q": 0.05,
+        }
+        return MappingProxyType({**defaults, **configured})
+
 
 def load_analysis_spec(path: Path | str | None = None) -> AnalysisSpec:
     """Load the committed analysis spec from disk."""

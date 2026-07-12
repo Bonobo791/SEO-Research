@@ -13,6 +13,7 @@ from seo_rank.data.validate import (
     validate_frame_contract,
     validate_materialized_frame_contract,
 )
+from seo_rank.domain_blocklist import DomainBlocklist
 from seo_rank.dataforseo import (
     BACKLINKS_QUERY_DOFOLLOW,
     BACKLINKS_QUERY_SUMMARY,
@@ -963,6 +964,7 @@ def normalize_run(run_dir: Path) -> dict[str, object]:
     depth = int(config["depth"])
     keyword_limit = int(config.get("keyword_limit", DEFAULT_KEYWORD_LIMIT))
     page_similarity_scores = _load_run_page_similarity_scores(run_payload)
+    blocklist = DomainBlocklist.load()
 
     catalog: dict[str, object] = run_payload.get("catalog", {})
     if not isinstance(catalog, dict):
@@ -985,6 +987,14 @@ def normalize_run(run_dir: Path) -> dict[str, object]:
         keyword_limit=keyword_limit,
         page_similarity_scores=page_similarity_scores,
     )
+    curated_lazyframes = {
+        name: (
+            frame
+            if name == "keywords"
+            else filter_blocklisted_domain_rows(frame, blocklist=blocklist)
+        )
+        for name, frame in curated_lazyframes.items()
+    }
     for name, frame in curated_lazyframes.items():
         dataset_catalog[name] = write_curated_lazyframe_dataset(
             run_dir,
@@ -996,6 +1006,21 @@ def normalize_run(run_dir: Path) -> dict[str, object]:
     run_payload["catalog"] = catalog
     run_json_path.write_text(json.dumps(run_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return catalog
+
+
+def filter_blocklisted_domain_rows(
+    frame: pl.LazyFrame,
+    *,
+    blocklist: DomainBlocklist,
+) -> pl.LazyFrame:
+    """Exclude rows whose URL matches the current domain blocklist."""
+
+    return frame.filter(
+        ~pl.col("url").map_elements(
+            lambda url: isinstance(url, str) and blocklist.is_blocked(url),
+            return_dtype=pl.Boolean,
+        )
+    )
 
 
 def validate_raw_response_bodies(raw_responses: pl.LazyFrame) -> None:
@@ -2321,6 +2346,8 @@ def write_curated_dataset(
 ) -> dict[str, object]:
     dataset_dir = run_dir / "parquet" / name
     dataset_dir.mkdir(parents=True, exist_ok=True)
+    for part_path in dataset_dir.glob("part-*.parquet"):
+        part_path.unlink()
     file_path = dataset_dir / "part-0.parquet"
     sorted_rows = sorted(
         rows,

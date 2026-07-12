@@ -16,6 +16,7 @@ from seo_rank.data.scans import scan_curated_table
 from seo_rank.stats.diagnostics import summarize_diagnostics_backends_from_fits
 from seo_rank.stats.diagnostics import summarize_diagnostics_families
 from seo_rank.stats.diagnostics import summarize_multivariate_sensitivity
+from seo_rank.stats.entities import summarize_entity_signals
 from seo_rank.stats.panel import (
     AnalysisPanelResult,
     _restore_analysis_controls,
@@ -40,6 +41,79 @@ from seo_rank.stats.spec import AnalysisSpec, load_analysis_spec
 
 
 logger = logging.getLogger(__name__)
+
+
+def write_entity_stats_artifact(
+    run_dir: Path,
+    *,
+    entity_ids: set[str] | None = None,
+    policy: Mapping[str, int | float] | None = None,
+    rank_depths: Mapping[str, int] | None = None,
+) -> tuple[dict[str, object], str]:
+    """Write detailed entity results and return compact summary/report content."""
+
+    entity_path = Path(run_dir) / "parquet" / "entity_signals"
+    entity_signals = (
+        scan_curated_table(run_dir, "entity_signals").collect()
+        if entity_path.exists()
+        else pl.DataFrame()
+    )
+    depth_limits = rank_depths or {"top_20": 20}
+    depth_results = [
+        summarize_entity_signals(
+            entity_signals.filter(pl.col("serp_rank") <= max_rank)
+            if "serp_rank" in entity_signals.columns
+            else entity_signals,
+            entity_ids=entity_ids,
+            policy=policy,
+            rank_depth_key=depth_key,
+        )
+        for depth_key, max_rank in depth_limits.items()
+    ]
+    results = pl.concat(depth_results, how="vertical")
+    stats_dir = Path(run_dir) / "stats"
+    stats_dir.mkdir(parents=True, exist_ok=True)
+    results.lazy().sink_parquet(stats_dir / "entity_stats.parquet", compression="zstd")
+    status_counts = (
+        results.group_by("status").len().to_dicts() if not results.is_empty() else []
+    )
+    summary = {
+        "row_count": results.height,
+        "status_counts": {str(row["status"]): int(row["len"]) for row in status_counts},
+        "metrics": results.get_column("metric").unique(maintain_order=True).to_list()
+        if not results.is_empty()
+        else [],
+    }
+    report_lines = [
+        "## Entity signals",
+        "",
+        "Entity models use `-log(rank)`: lower SERP rank numbers indicate better rankings.",
+        "",
+        f"- result rows: {results.height}",
+    ]
+    selected = results.filter(
+        (pl.col("status") == "significant") & (pl.col("rank_depth_key") == "top_20")
+    ).sort(
+        ["metric", "entity_id"]
+    )
+    report_lines.extend(["", "### Significant associations"])
+    if selected.is_empty():
+        report_lines.append("- none")
+    else:
+        for row in selected.to_dicts():
+            examples = "; ".join(
+                f"{url} [{matched_text}]"
+                for url, matched_text in zip(
+                    row["example_urls"],
+                    row["example_matched_texts"],
+                    strict=True,
+                )
+            )
+            report_lines.append(
+                f"- `{row['entity_id']}` ({row['metric']}): coefficient={row['ols_coefficient']:.4f}; "
+                f"examples={examples}"
+            )
+    return summary, "\n".join(report_lines) + "\n"
 
 def build_stats_output_metadata(spec: AnalysisSpec) -> Mapping[str, object]:
     return {
@@ -1025,6 +1099,7 @@ def write_stats_artifacts(
     rank_depth_bundles: dict[str, dict[str, object]],
     diagnostics_by_depth: dict[str, dict[str, object]],
     spec: AnalysisSpec,
+    entity_ids: set[str] | None = None,
 ) -> dict[str, object]:
     stats_dir = Path(run_dir) / "stats"
     stats_dir.mkdir(parents=True, exist_ok=True)
@@ -1035,6 +1110,16 @@ def write_stats_artifacts(
         rank_depth_bundles=rank_depth_bundles,
         spec=spec,
     )
+    entity_summary, entity_report = write_entity_stats_artifact(
+        run_dir,
+        entity_ids=entity_ids,
+        policy=spec.entity_signal_policy,
+        rank_depths={
+            depth_key: spec.rank_depth_limit(depth_key)
+            for depth_key in spec.confirmatory_rank_depths
+        },
+    )
+    summary["entity_stats"] = entity_summary
     (stats_dir / "stats_summary.json").write_text(
         json.dumps(summary, indent=2) + "\n",
         encoding="utf-8",
@@ -1056,13 +1141,20 @@ def write_stats_artifacts(
             rank_depth_bundles=rank_depth_bundles,
             diagnostics_by_depth=diagnostics_by_depth,
             spec=spec,
-        ),
+        )
+        + "\n"
+        + entity_report,
         encoding="utf-8",
     )
     logger.info(
         "wrote stats artifacts run_dir=%s files=%s",
         run_dir,
-        ["stats_summary.json", *(["stats_diagnostics.json"] if diagnostics_by_depth else []), "stats_report.md"],
+        [
+            "stats_summary.json",
+            *(["stats_diagnostics.json"] if diagnostics_by_depth else []),
+            "entity_stats.parquet",
+            "stats_report.md",
+        ],
     )
     return summary
 
@@ -1071,6 +1163,7 @@ def run_phase5_stats(
     run_dir: Path,
     *,
     spec: AnalysisSpec | None = None,
+    entity_ids: set[str] | None = None,
 ) -> AnalysisPanelResult:
     """Load the panel, write guardrail artifacts, and return the prepared panel."""
 
@@ -1088,6 +1181,7 @@ def run_phase5_stats(
         rank_depth_bundles=rank_depth_bundles,
         diagnostics_by_depth=diagnostics_by_depth,
         spec=analysis_spec,
+        entity_ids=entity_ids,
     )
     logger.info(
         "phase5 stats complete run_dir=%s hard_fail=%s depths=%s",

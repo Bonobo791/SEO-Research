@@ -24,6 +24,7 @@ from seo_rank.data.normalize import normalize_run
 from seo_rank.dataforseo import BACKLINKS_QUERY_SUMMARY
 from seo_rank.dataforseo import fixture_backlinks_response
 from seo_rank.dataforseo import fixture_onpage_instant_pages_response
+from seo_rank import domain_blocklist
 
 LEGACY_ONPAGE_META_COLUMNS = (
     # Slice 12: meta block metrics
@@ -81,6 +82,72 @@ LEGACY_ONPAGE_META_COLUMNS = (
     "time_to_interactive_ms",
     "first_input_delay_ms",
 )
+
+
+def test_materialization_drops_blocklisted_domain_rows_and_replaces_stale_parts(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    assert (
+        main(
+            [
+                "run",
+                "--seed",
+                "technical seo",
+                "--depth",
+                "1",
+                "--output-dir",
+                str(output_dir),
+                "--dry-run",
+            ]
+        )
+        == 0
+    )
+
+    blocklist_path = tmp_path / "domain_blocklist.txt"
+    blocklist_path.write_text("example.com\n", encoding="utf-8")
+    monkeypatch.setattr(domain_blocklist, "_resolve_default_path", lambda: blocklist_path)
+
+    stale_feature_part = output_dir / "parquet" / "keyword_serp" / "part-stale.parquet"
+    stale_feature_part.write_bytes(
+        (output_dir / "parquet" / "keyword_serp" / "part-0.parquet").read_bytes()
+    )
+    build_feature_marts(output_dir)
+
+    assert not stale_feature_part.exists()
+    for name in (
+        "keyword_serp",
+        "page_features",
+        "passage_features",
+        "domain_features",
+        "backlinks_analysis",
+        "onpage_features",
+        "textrazor_page_metrics",
+    ):
+        assert ds.dataset(output_dir / "parquet" / name, format="parquet").count_rows() == 0
+
+    stale_curated_part = output_dir / "parquet" / "serp_items" / "part-stale.parquet"
+    stale_curated_part.write_bytes(
+        (output_dir / "parquet" / "serp_items" / "part-0.parquet").read_bytes()
+    )
+    normalize_run(output_dir)
+
+    assert not stale_curated_part.exists()
+    assert ds.dataset(output_dir / "parquet" / "keywords", format="parquet").count_rows() > 0
+    for name in (
+        "serp_items",
+        "pages",
+        "page_html",
+        "page_content_fields",
+        "passages",
+        "backlinks",
+        "onpage_signals",
+        "entities",
+        "textrazor_page_metrics_curated",
+        "similarity_scores",
+    ):
+        assert ds.dataset(output_dir / "parquet" / name, format="parquet").count_rows() == 0
 
 
 def test_build_analysis_panel_keyword_serp_keeps_only_scored_urls_with_site_scale() -> None:

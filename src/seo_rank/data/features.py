@@ -9,13 +9,14 @@ import polars as pl
 import pyarrow.parquet as pq
 
 from seo_rank.data.marts import build_analysis_lazyframe
-from seo_rank.data.normalize import CURATED_VALIDATION_RULES
+from seo_rank.data.normalize import CURATED_VALIDATION_RULES, filter_blocklisted_domain_rows
 from seo_rank.data.scans import scan_curated_table
 from seo_rank.data.validate import (
     align_lazyframe_schema,
     validate_frame_contract,
     validate_materialized_frame_contract,
 )
+from seo_rank.domain_blocklist import DomainBlocklist
 
 FEATURE_SCHEMA_VERSION = "feature_marts.v3"
 SITE_SCALE_COLUMNS = (
@@ -117,6 +118,22 @@ FEATURE_REQUIRED_COLUMNS = {
         "textrazor_properties_present",
         "textrazor_noun_phrases_present",
         "textrazor_page_metrics_complete",
+        "schema_version",
+    ),
+    "entity_signals": (
+        "run_id",
+        "target_keyword_id",
+        "target_keyword",
+        "canonical_url_hash",
+        "url",
+        "serp_rank",
+        "entity_id",
+        "matched_texts",
+        "entity_types",
+        "entity_present",
+        "entity_mention_count",
+        "entity_confidence_mean",
+        "entity_relevance_mean",
         "schema_version",
     ),
     "backlinks_analysis": tuple(CURATED_VALIDATION_RULES["backlinks"]["expected_schema"].keys()),
@@ -373,6 +390,51 @@ FEATURE_VALIDATION_RULES = {
             "textrazor_relation_count": (0, None),
             "textrazor_property_count": (0, None),
             "textrazor_noun_phrase_count": (0, None),
+        },
+    },
+    "entity_signals": {
+        "expected_schema": {
+            "run_id": pl.Utf8,
+            "target_keyword_id": pl.Utf8,
+            "target_keyword": pl.Utf8,
+            "canonical_url_hash": pl.Utf8,
+            "url": pl.Utf8,
+            "serp_rank": pl.Int64,
+            "entity_id": pl.Utf8,
+            "matched_texts": pl.List(pl.Utf8),
+            "entity_types": pl.List(pl.Utf8),
+            "entity_present": pl.Int64,
+            "entity_mention_count": pl.Int64,
+            "entity_confidence_mean": pl.Float64,
+            "entity_relevance_mean": pl.Float64,
+            "schema_version": pl.Utf8,
+        },
+        "unique_columns": (
+            "run_id",
+            "target_keyword_id",
+            "canonical_url_hash",
+            "entity_id",
+        ),
+        "non_null_columns": (
+            "run_id",
+            "target_keyword_id",
+            "target_keyword",
+            "canonical_url_hash",
+            "url",
+            "serp_rank",
+            "entity_id",
+            "matched_texts",
+            "entity_types",
+            "entity_present",
+            "entity_mention_count",
+            "schema_version",
+        ),
+        "bounded_columns": {
+            "serp_rank": (1, 20),
+            "entity_present": (0, 1),
+            "entity_mention_count": (0, None),
+            "entity_confidence_mean": (0, None),
+            "entity_relevance_mean": (0, 1),
         },
     },
     "backlinks_analysis": CURATED_VALIDATION_RULES["backlinks"],
@@ -675,6 +737,7 @@ def build_feature_lazyframes(
     similarity_scores = curated_frames["similarity_scores"]
     backlinks = curated_frames["backlinks"]
     onpage_signals = curated_frames["onpage_signals"]
+    entities = curated_frames["entities"]
     onpage_required_columns = CURATED_VALIDATION_RULES["onpage_signals"]["non_null_columns"]
     onpage_signals = align_lazyframe_schema(
         onpage_signals,
@@ -876,6 +939,11 @@ def build_feature_lazyframes(
         .with_columns(pl.lit(FEATURE_SCHEMA_VERSION).alias("schema_version"))
         .sort(["target_keyword_id", "serp_rank", "canonical_url_hash"])
     )
+    entity_signals = build_entity_signals_lazyframe(
+        entities,
+        curated_frames["textrazor_page_metrics_curated"],
+        serp_items,
+    )
 
     return {
         "keyword_serp": analysis_keyword_serp,
@@ -885,7 +953,103 @@ def build_feature_lazyframes(
         "backlinks_analysis": backlinks_analysis,
         "onpage_features": onpage_features,
         "textrazor_page_metrics": curated_frames["textrazor_page_metrics_curated"],
+        "entity_signals": entity_signals,
     }
+
+
+def build_entity_signals_lazyframe(
+    entities: pl.LazyFrame,
+    textrazor_page_metrics: pl.LazyFrame,
+    serp_items: pl.LazyFrame,
+) -> pl.LazyFrame:
+    """Build one entity-presence row per usable SERP page.
+
+    Candidate entities expand only across keywords where they were observed;
+    pages with a usable TextRazor response but no matching entity become the
+    explicit absence rows needed for page-level rank analysis.
+    """
+
+    entity_keys = [
+        "run_id",
+        "target_keyword_id",
+        "target_keyword",
+        "canonical_url_hash",
+        "url",
+        "entity_id",
+    ]
+    occurrences = entities.group_by(entity_keys).agg(
+        [
+            pl.len().alias("entity_mention_count"),
+            pl.col("confidence").mean().alias("entity_confidence_mean"),
+            pl.col("relevance").mean().alias("entity_relevance_mean"),
+            pl.col("matched_text").unique().sort().alias("matched_texts"),
+        ]
+    )
+    entity_types = (
+        entities.explode("types")
+        .rename({"types": "entity_type"})
+        .select([*entity_keys, "entity_type"])
+        .filter(pl.col("entity_type").is_not_null())
+        .group_by(entity_keys)
+        .agg(pl.col("entity_type").unique().sort().alias("entity_types"))
+    )
+    candidate_keywords = occurrences.select(
+        ["run_id", "target_keyword_id", "target_keyword", "entity_id"]
+    ).unique()
+    usable_pages = textrazor_page_metrics.select(
+        ["run_id", "target_keyword_id", "target_keyword", "canonical_url_hash", "url"]
+    ).join(
+        serp_items.select(
+            ["run_id", "target_keyword_id", "canonical_url_hash", "url", "serp_rank"]
+        ),
+        on=["run_id", "target_keyword_id", "canonical_url_hash", "url"],
+        how="inner",
+    )
+    return (
+        candidate_keywords.join(
+            usable_pages,
+            on=["run_id", "target_keyword_id", "target_keyword"],
+            how="inner",
+        )
+        .join(occurrences, on=entity_keys, how="left")
+        .join(entity_types, on=entity_keys, how="left")
+        .with_columns(
+            [
+                pl.col("entity_mention_count").fill_null(0).cast(pl.Int64),
+                pl.when(pl.col("entity_mention_count").is_null())
+                .then(pl.lit(0))
+                .otherwise(pl.lit(1))
+                .cast(pl.Int64)
+                .alias("entity_present"),
+                pl.col("matched_texts")
+                .fill_null(pl.lit([], dtype=pl.List(pl.Utf8)))
+                .alias("matched_texts"),
+                pl.col("entity_types")
+                .fill_null(pl.lit([], dtype=pl.List(pl.Utf8)))
+                .alias("entity_types"),
+                pl.lit(FEATURE_SCHEMA_VERSION).alias("schema_version"),
+            ]
+        )
+        .select(
+            [
+                "run_id",
+                "target_keyword_id",
+                "target_keyword",
+                "canonical_url_hash",
+                "url",
+                "serp_rank",
+                "entity_id",
+                "matched_texts",
+                "entity_types",
+                "entity_present",
+                "entity_mention_count",
+                "entity_confidence_mean",
+                "entity_relevance_mean",
+                "schema_version",
+            ]
+        )
+        .sort(["entity_id", "target_keyword_id", "serp_rank", "url"])
+    )
 
 
 REQUIRED_FEATURE_MARTS_FOR_ANALYSIS = (
@@ -895,6 +1059,7 @@ REQUIRED_FEATURE_MARTS_FOR_ANALYSIS = (
     "domain_features",
     "backlinks_analysis",
     "onpage_features",
+    "entity_signals",
 )
 
 
@@ -945,8 +1110,15 @@ def build_feature_marts(run_dir: Path) -> dict[str, object]:
     dataset_catalog = catalog.setdefault("datasets", {})
     assert isinstance(dataset_catalog, dict)
 
+    blocklist = DomainBlocklist.load()
     curated_frames = {
-        name: scan_curated_table(run_dir, name)
+        name: (
+            scan_curated_table(run_dir, name)
+            if name == "keywords"
+            else filter_blocklisted_domain_rows(
+                scan_curated_table(run_dir, name), blocklist=blocklist
+            )
+        )
         for name in (
             "keywords",
             "serp_items",
@@ -955,6 +1127,7 @@ def build_feature_marts(run_dir: Path) -> dict[str, object]:
             "similarity_scores",
             "backlinks",
             "onpage_signals",
+            "entities",
             "textrazor_page_metrics_curated",
         )
     }
@@ -1033,6 +1206,8 @@ def write_feature_dataset(
 ) -> dict[str, object]:
     dataset_dir = run_dir / "parquet" / name
     dataset_dir.mkdir(parents=True, exist_ok=True)
+    for part_path in dataset_dir.glob("part-*.parquet"):
+        part_path.unlink()
     file_path = dataset_dir / "part-0.parquet"
     validation = FEATURE_VALIDATION_RULES[name]
     try:

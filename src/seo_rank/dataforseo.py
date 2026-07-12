@@ -313,7 +313,11 @@ def build_page_text_request(
     )
 
 
-def build_onpage_instant_pages_request(url: str) -> ProviderRequest:
+def build_onpage_instant_pages_request(
+    url: str,
+    *,
+    switch_pool: bool = False,
+) -> ProviderRequest:
     """Build a DataForSEO OnPage instant_pages request without executing it.
 
     Uses browser rendering and micromarkup validation so CWV and structured-data
@@ -328,6 +332,7 @@ def build_onpage_instant_pages_request(url: str) -> ProviderRequest:
         body=[
             {
                 "url": url,
+                "switch_pool": switch_pool,
                 "enable_javascript": True,
                 "enable_browser_rendering": True,
                 "load_resources": True,
@@ -443,6 +448,7 @@ def execute_dataforseo_request(
     transport=None,
     timeout: float = 60.0,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+    attempt_start: int = 1,
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, object]:
     """Execute a DataForSEO request and parse the JSON response.
@@ -472,7 +478,7 @@ def execute_dataforseo_request(
             "DataForSEO request endpoint=%s target=%s attempt=%d",
             request.path,
             request_target,
-            attempt,
+            attempt_start + attempt - 1,
         )
         try:
             response = transport(
@@ -490,6 +496,8 @@ def execute_dataforseo_request(
                 sleep(DEFAULT_RETRY_BACKOFF_SECONDS * (2 ** (attempt - 1)))
                 continue
             raise
+        except OSError as error:
+            raise DataForSeoClientError(f"DataForSEO request failed: {error}") from error
         break
 
     if not isinstance(response, dict):
@@ -553,6 +561,11 @@ def validate_dataforseo_response(
             expected="dict",
             actual=response,
         )
+    # A target URL can return 4xx/5xx while the enclosing DataForSEO task is
+    # successful. These intentionally bodyless items are recoverable and do
+    # not satisfy the normal successful-item schema.
+    if endpoint in {"page_text", "onpage_instant_pages"} and nested_http_failure(response) is not None:
+        return response
     for field_schema in schema:
         _validate_dataforseo_field(response, endpoint=endpoint, schema=field_schema)
     if endpoint == "page_text":
@@ -607,6 +620,23 @@ def classify_page_text_response(response: Mapping[str, object]) -> str:
     return _PAGE_TEXT_PROVIDER_FAILURE
 
 
+def response_has_crawl_status(
+    response: Mapping[str, object],
+    expected_status: str,
+) -> bool:
+    expected = _normalized_status(expected_status)
+    tasks = response.get("tasks")
+    if not isinstance(tasks, list):
+        return False
+    return any(
+        _normalized_status(result.get("crawl_status")) == expected
+        for task in tasks
+        if isinstance(task, Mapping) and isinstance(task.get("result"), list)
+        for result in task["result"]
+        if isinstance(result, Mapping)
+    )
+
+
 def page_text_response_is_pool_related(response: Mapping[str, object]) -> bool:
     """Return True if a page-text response carries an access-denied, geo/location,
     or unreachable pool marker.
@@ -628,6 +658,72 @@ def page_text_response_is_pool_related(response: Mapping[str, object]) -> bool:
         marker in _normalized_status(status)
         for status in statuses
         for marker in _POOL_RELATED_MARKERS
+    )
+
+
+def nested_http_failure(response: Mapping[str, object]) -> int | None:
+    """Return a nested target-page 4xx/5xx status from a successful API task.
+
+    DataForSEO reports target fetch failures inside ``result[].items[]`` while
+    the enclosing API task can still be ``20000 / Ok``.
+    """
+    tasks = response.get("tasks")
+    if not isinstance(tasks, list):
+        return None
+    for task in tasks:
+        if not isinstance(task, Mapping):
+            continue
+        results = task.get("result")
+        if not isinstance(results, list):
+            continue
+        for result in results:
+            if not isinstance(result, Mapping):
+                continue
+            items = result.get("items")
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                if not isinstance(item, Mapping):
+                    continue
+                status_code = item.get("status_code")
+                if isinstance(status_code, int) and 400 <= status_code <= 599:
+                    return status_code
+                checks = item.get("checks")
+                if isinstance(checks, Mapping):
+                    if checks.get("is_4xx_code") is True:
+                        return 400
+                    if checks.get("is_5xx_code") is True:
+                        return 500
+    return None
+
+
+def live_url_response_requires_retry(
+    response: Mapping[str, object],
+    target_url: str,
+) -> bool:
+    """Return whether the requested URL's diagnostics require one recovery pull."""
+    items: list[Mapping[str, object]] = []
+    tasks = response.get("tasks")
+    if not isinstance(tasks, list):
+        return False
+    for task in tasks:
+        if not isinstance(task, Mapping) or not isinstance(task.get("result"), list):
+            continue
+        for result in task["result"]:
+            if not isinstance(result, Mapping) or not isinstance(result.get("items"), list):
+                continue
+            items.extend(
+                item for item in result["items"] if isinstance(item, Mapping)
+            )
+    matching_items = [item for item in items if item.get("url") == target_url]
+    if matching_items:
+        items = matching_items
+    elif len(items) != 1:
+        return page_text_response_is_pool_related(response)
+    checks = items[0].get("checks")
+    return isinstance(checks, Mapping) and any(
+        checks.get(flag) is True
+        for flag in ("is_4xx_code", "is_5xx_code", "is_broken")
     )
 
 

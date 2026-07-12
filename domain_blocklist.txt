@@ -3,3 +3,70 @@
 zillow.com  # keyword="cypress tx realtor" reason=onpage-50402
 realtor.com  # keyword="realtor com cypress tx" reason=onpage-50402
 redfin.com  # keyword="house for sale in cypress" reason=onpage_instant_pages-unreachable
+m.yelp.com  # keyword="cypress tx realtor" reason=onpage_instant_pages-http-403
+homes.com  # keyword="cypress tx realtor" reason=onpage_instant_pages-http-403
+remax.com  # keyword="cypress tx realtor" reason=onpage_instant_pages-http-403
+cyfairrealestate.com  # keyword="cypress tx realtor" reason=onpage_instant_pages-http-403
+texasrealestatesource.com  # keyword="bridgeland cypress homes for sale" reason=onpage_instant_pages-http-403
+signaturehouston.com  # keyword="houses for sale in cypress texas" reason=onpage_instant_pages-http-403
+houstonprimerealty.com  # keyword="towne lake cypress homes for sale" reason=onpage_instant_pages-http-403
+drbhomes.com  # keyword="bridgeland homes for sale cypress tx" reason=onpage_instant_pages-http-403
+lennar.com  # keyword="bridgeland homes for sale houston" reason=onpage_instant_pages-http-403
+estately.com  # keyword="bridgeland homes for sale houston" reason=onpage_instant_pages-http-451
+rubyhome.com  # keyword="house for sale in cypress" reason=onpage_instant_pages-http-403
+prevu.com  # keyword="house for sale in cypress" reason=onpage_instant_pages-http-403
+reddit.com  # keyword="best realtor in cypress tx" reason=onpage_instant_pages-http-403
+jillsmithteam.com  # keyword="best realtor in cypress tx" reason=onpage_instant_pages-http-403
+houstonsuburb.com  # keyword="best realtor in cypress tx" reason=onpage_instant_pages-http-403
+bhgre.com  # keyword="best realtor in cypress tx" reason=onpage_instant_pages-http-403
+realtyofamerica.com  # keyword="top real estate agents in cypress tx" reason=onpage_instant_pages-http-429
+clutch.co  # keyword="seo company columbus" reason=onpage_instant_pages-http-403
+rankworks.com  # keyword="seo company columbus" reason=onpage_instant_pages-http-403
+interodigital.com  # keyword="seo company columbus" reason=onpage_instant_pages-http-403
+goodfirms.co  # keyword="seo company in columbus" reason=onpage_instant_pages-http-403
+designrush.com  # keyword="seo company in columbus" reason=onpage_instant_pages-http-403
+realestate.usnews.com  # keyword="top real estate agents in cypress tx" reason=page_text-50402
+coldwellbanker.com
+compass.com
+blair-realty-group.wheree.com  # keyword="blair realty group cypress tx" reason=onpage_instant_pages-http-403
+texaslocalrealty.com  # keyword="cypress realtor tx" reason=onpage_instant_pages-http-403
+kwplatinumhouston.yourkwoffice.com  # keyword="keller williams cypress tx" reason=onpage_instant_pages-http-403
+mytexashomeresource.com  # keyword="spring cypress homes for sale" reason=onpage_instant_pages-http-403
+citygroupproperties.com  # keyword="top realtor cypress tx" reason=onpage_instant_pages-http-403
+percys.com  # keyword="used coin operated washing machine" reason=onpage_instant_pages-http-403
+lowlaundry.com  # keyword="used coin operated washing machine" reason=onpage_instant_pages-http-403
+homedepot.com  # keyword="used coin operated washing machine" reason=onpage_instant_pages-http-403
+facebook.com  # keyword="used coin operated washing machine" reason=page_text-crawl-status-page-content-is-empty
+allcoinlaundry.square.site  # keyword="used coin operated washing machine" reason=page_text-crawl-status-page-content-is-empty
+youtube.com  # keyword="used coin operated washing machine" reason=page_text-crawl-status-page-content-is-empty
+buyunitynow.com  # keyword="used coin operated washer and dryer" reason=onpage_instant_pages-http-418
+dewaardandbode.com  # keyword="commercial washing machine coin operated" reason=onpage_instant_pages-http-403
+robysfurniture.com  # keyword="commercial washing machine coin operated" reason=onpage_instant_pages-http-403
+lowes.com  # keyword="commercial washing machine coin operated" reason=onpage_instant_pages-http-403
+txappliance.com  # keyword="commercial washing machine coin operated" reason=onpage_instant_pages-http-403
+webstaurantstore.com  # keyword="commercial washing machine coin operated" reason=onpage_instant_pages-http-403
+speedqueencommercial.com  # keyword="commercial washing machine coin operated" reason=page_text-crawl-status-page-content-is-empty
+whirlpool.com  # keyword="commercial washing machine coin operated" reason=page_text-crawl-status-page-content-is-empty
+grandappliance.com  # keyword="coin operated washer dryer" reason=onpage_instant_pages-http-403
+abt.com  # keyword="commercial coin operated dryer" reason=onpage_instant_pages-http-403
+davesappliancetv.com  # keyword="front load coin operated washer" reason=onpage_instant_pages-http-403
+yourhomeappliance.com  # keyword="front load coin operated washer" reason=onpage_instant_pages-http-403
+vkkearney.com  # keyword="front load coin operated washer" reason=onpage_instant_pages-http-403
+ebay.com  # keyword="front load coin operated washer" reason=page_text-crawl-status-page-content-is-empty
+surplusrecord.com  # keyword="used commercial washers for sale" reason=onpage_instant_pages-http-403
+bestbuy.com  # keyword="coin washers for sale" reason=page_text-50402
+machinio.com  # keyword="used speed queen commercial washer" reason=page_text-crawl-status-page-content-is-empty
+tiktok.com  # keyword="used speed queen commercial washer" reason=page_text-crawl-status-page-content-is-empty
+donsappliances.com  # keyword="used commercial washers for sale near me" reason=onpage_instant_pages-http-403
+lyttonsappliance.com  # keyword="used commercial washers for sale near me" reason=onpage_instant_pages-http-403
+alibaba.com  # keyword="used coin operated washers and dryers for sale" reason=page_text-crawl-status-page-content-is-empty
+appliancesalesplus.com  # keyword="speed queen washing machine coin operated" reason=onpage_instant_pages-http-403
+theappliancediscounters.com  # keyword="speed queen washing machine coin operated" reason=onpage_instant_pages-http-403
+shoreappliances.com  # keyword="speed queen washing machine coin operated" reason=onpage_instant_pages-http-403
+baronsmajorbrands.com  # keyword="speed queen washing machine coin operated" reason=onpage_instant_pages-http-403
+oakwoodwaco.com  # keyword="speed queen washing machine coin operated" reason=onpage_instant_pages-http-404
+rosners.com  # keyword="speed queen washing machine coin operated" reason=onpage_instant_pages-http-403
+alemanacademy.com  # keyword="speed queen washing machine coin operated" reason=page_text-crawl-status-page-content-is-empty
+glaamamerica.com  # keyword="speed queen washing machine coin operated" reason=page_text-crawl-status-page-content-is-empty
+theapplianceloft.com  # keyword="used coin operated washer and dryer near me" reason=onpage_instant_pages-http-403
+appliancevillagemn.com  # keyword="used commercial washers and dryers for sale" reason=onpage_instant_pages-http-403

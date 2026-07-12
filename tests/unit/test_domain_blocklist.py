@@ -31,6 +31,10 @@ def test_load_missing_file_is_empty(tmp_path):
     assert not bl.is_blocked("https://anything.com")
 
 
+def test_committed_blocklist_keeps_fixture_domain_available():
+    assert not DomainBlocklist.load().is_blocked("https://example.com/fixture")
+
+
 def test_is_blocked_matches_subdomains_not_lookalikes(tmp_path):
     path = tmp_path / "bl.txt"
     path.write_text("example.com\n", encoding="utf-8")

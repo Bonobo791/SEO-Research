@@ -53,6 +53,12 @@ def test_load_analysis_spec_reads_repo_root_yaml() -> None:
         "onpage_technical_checks",
     )
     assert analysis_spec.estimand["outcome"] == "-log(serp_rank)"
+    assert analysis_spec.entity_signal_policy == {
+        "min_present_pages": 10,
+        "min_present_keywords": 3,
+        "min_inference_keywords": 10,
+        "bh_q": 0.05,
+    }
 
 
 def test_load_analysis_spec_includes_plackett_luce_secondary_estimand() -> None:

@@ -1,6 +1,7 @@
 import logging
 import urllib.parse
 
+from seo_rank.domain_blocklist import DomainBlocklist
 from seo_rank.textrazor import (
     TEXTRAZOR_ENDPOINTS,
     build_entity_request,
@@ -171,6 +172,42 @@ def test_fetch_textrazor_entities_for_pages_dedupes_requests_and_preserves_raw_s
             "source_text": "Beta",
         },
     ]
+
+
+def test_fetch_textrazor_entities_for_pages_skips_blocklisted_domains(tmp_path) -> None:
+    blocklist_path = tmp_path / "domain_blocklist.txt"
+    blocklist_path.write_text("blocked.example\n", encoding="utf-8")
+    requested_texts: list[str] = []
+
+    def transport(*, body: bytes, **_: object) -> dict[str, object]:
+        requested_texts.extend(urllib.parse.parse_qs(body.decode("utf-8"))["text"])
+        return {"response": {"entities": []}}
+
+    responses = fetch_textrazor_entities_for_pages(
+        [
+            {
+                "target_keyword": "Technical SEO",
+                "url": "https://blocked.example/a",
+                "text": "Blocked",
+            },
+            {
+                "target_keyword": "Technical SEO",
+                "url": "https://sub.blocked.example/b",
+                "text": "Also blocked",
+            },
+            {
+                "target_keyword": "Technical SEO",
+                "url": "https://allowed.example/c",
+                "text": "Allowed",
+            },
+        ],
+        credentials=TextRazorCredentials(api_key="textrazor-secret"),
+        transport=transport,
+        blocklist=DomainBlocklist.load(blocklist_path),
+    )
+
+    assert requested_texts == ["Allowed"]
+    assert [response["url"] for response in responses] == ["https://allowed.example/c"]
 
 
 def test_summarize_textrazor_response_counts_sections_and_top_entities() -> None:

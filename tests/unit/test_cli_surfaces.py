@@ -29,6 +29,19 @@ def test_build_parser_exposes_phase_45_commands() -> None:
     )
     assert parsed.stored_run == Path("/tmp/run-1")
 
+    analyzed = parser.parse_args(
+        [
+            "analyze",
+            "--run",
+            "/tmp/run-1",
+            "--entity-id",
+            "entity-a",
+            "--entity-id",
+            "entity-b",
+        ]
+    )
+    assert analyzed.entity_id == ["entity-a", "entity-b"]
+
 
 def test_storage_commands_dispatch_to_data_layer(
     tmp_path: Path,

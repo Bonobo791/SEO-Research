@@ -12,6 +12,7 @@ import pytest
 from seo_rank.cli import build_raw_response_record
 from seo_rank.cli import main
 from seo_rank.cli import RAW_RESPONSE_SCHEMA
+from seo_rank.domain_blocklist import DomainBlocklist
 from seo_rank.dataforseo import (
     BACKLINKS_QUERY_DOFOLLOW,
     BACKLINKS_QUERY_SUMMARY,
@@ -1595,7 +1596,12 @@ def test_normalize_run_preserves_run_json_page_similarity_scores(
     shutil.copytree(source_run_dir, run_dir)
 
     run_payload = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
-    report_row = run_payload["page_similarity"][0]
+    blocklist = DomainBlocklist.load()
+    report_row = next(
+        row
+        for row in run_payload["page_similarity"]
+        if not blocklist.is_blocked(str(row["url"]))
+    )
     report_url = report_row["url"]
     report_score = report_row["page_similarity"]["bge"]["normalized_score"]
 

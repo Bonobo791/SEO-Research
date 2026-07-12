@@ -100,7 +100,6 @@ def test_fetch_page_text_for_urls_stops_after_javascript_stage_success() -> None
     responses = iter(
         [
             _empty_page_text_response(url),
-            fixture_page_text_response(url, "technical seo"),
         ]
     )
 
@@ -113,11 +112,11 @@ def test_fetch_page_text_for_urls_stops_after_javascript_stage_success() -> None
         [url],
         credentials=DataForSeoCredentials(login="user", password="pass"),
         transport=transport,
-    ) == [fixture_page_text_response(url, "technical seo")]
+    ) == [_empty_page_text_response(url)]
     assert [
         (body["enable_javascript"], body["enable_browser_rendering"])
         for body in request_bodies
-    ] == [(False, False), (True, False)]
+    ] == [(False, False)]
 
 
 def test_fetch_page_text_for_urls_stops_after_browser_stage_success() -> None:
@@ -126,8 +125,6 @@ def test_fetch_page_text_for_urls_stops_after_browser_stage_success() -> None:
     responses = iter(
         [
             _empty_page_text_response(url),
-            _javascript_disabled_page_text_response(url),
-            fixture_page_text_response(url, "technical seo"),
         ]
     )
 
@@ -140,11 +137,11 @@ def test_fetch_page_text_for_urls_stops_after_browser_stage_success() -> None:
         [url],
         credentials=DataForSeoCredentials(login="user", password="pass"),
         transport=transport,
-    ) == [fixture_page_text_response(url, "technical seo")]
+    ) == [_empty_page_text_response(url)]
     assert [
         (body["enable_javascript"], body["enable_browser_rendering"])
         for body in request_bodies
-    ] == [(False, False), (True, False), (True, True)]
+    ] == [(False, False)]
 
 
 def test_fetch_page_text_for_urls_exhaustion_retains_browser_response() -> None:
@@ -157,8 +154,6 @@ def test_fetch_page_text_for_urls_exhaustion_retains_browser_response() -> None:
     responses = iter(
         [
             _empty_page_text_response(url, crawl_status="baseline remained empty"),
-            _javascript_disabled_page_text_response(url),
-            browser_response,
         ]
     )
 
@@ -171,11 +166,11 @@ def test_fetch_page_text_for_urls_exhaustion_retains_browser_response() -> None:
         [url],
         credentials=DataForSeoCredentials(login="user", password="pass"),
         transport=transport,
-    ) == [browser_response]
+    ) == [_empty_page_text_response(url, crawl_status="baseline remained empty")]
     assert [
         (body["enable_javascript"], body["enable_browser_rendering"])
         for body in request_bodies
-    ] == [(False, False), (True, False), (True, True)]
+    ] == [(False, False)]
 
 
 def test_fetch_page_text_for_urls_stops_after_usable_baseline_response() -> None:
@@ -235,6 +230,95 @@ def test_fetch_page_text_for_urls_blocklists_terminal_timeout_at_the_baseline(
         for body in request_bodies
     ] == [(False, False), (False, False)]
     assert blocklist.is_blocked(url)
+
+
+def test_fetch_page_text_for_urls_blocklists_final_empty_content(
+    tmp_path: Path,
+) -> None:
+    url = "https://empty.example/technical-seo"
+    blocklist = DomainBlocklist.load(tmp_path / "domain_blocklist.txt")
+    responses = iter(
+        [
+            {
+                "tasks": [
+                    {
+                        "status_code": 20000,
+                        "result": [
+                            {
+                                "url": url,
+                                "crawl_status": "Page content is empty",
+                                "items": [],
+                            }
+                        ],
+                    }
+                ]
+            },
+            _empty_page_text_response(url),
+        ]
+    )
+
+    def transport(*, body: bytes, **_: object) -> dict[str, object]:
+        del body
+        return next(responses)
+
+    result = fetch_page_text_for_urls(
+        "technical seo",
+        [url],
+        credentials=DataForSeoCredentials("login", "password"),
+        transport=transport,
+        blocklist=blocklist,
+    )
+
+    assert result[-1]["tasks"][0]["result"][0]["crawl_status"] == (
+        "Page content is empty"
+    )
+    assert blocklist.is_blocked(url)
+
+
+def test_fetch_page_text_for_urls_does_not_blocklist_empty_content_recovered_by_retry(
+    tmp_path: Path,
+) -> None:
+    url = "https://recovered.example/technical-seo"
+    blocklist = DomainBlocklist.load(tmp_path / "domain_blocklist.txt")
+    responses = iter(
+        [
+            {
+                "tasks": [
+                    {
+                        "status_code": 20000,
+                        "result": [
+                            {
+                                "url": url,
+                                "crawl_status": "Page content is empty",
+                                "items": [
+                                    {
+                                        "url": url,
+                                        "crawl_status": "Page content is empty",
+                                        "checks": {"is_broken": True},
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            },
+            fixture_page_text_response(url, "technical seo"),
+        ]
+    )
+
+    def transport(*, body: bytes, **_: object) -> dict[str, object]:
+        del body
+        return next(responses)
+
+    fetch_page_text_for_urls(
+        "technical seo",
+        [url],
+        credentials=DataForSeoCredentials("login", "password"),
+        transport=transport,
+        blocklist=blocklist,
+    )
+
+    assert not blocklist.is_blocked(url)
 
 
 def test_fetch_page_text_for_urls_retries_task_timeout_before_success(
@@ -328,7 +412,7 @@ def test_fetch_page_text_for_urls_switches_pool_after_unreachable() -> None:
     assert [
         (body["enable_javascript"], body["enable_browser_rendering"], body["switch_pool"])
         for body in request_bodies
-    ] == [(False, False, False), (False, False, True)]
+    ] == [(False, False, False), (True, True, True)]
 
 
 @pytest.mark.parametrize("switched_kind", ["empty", "javascript_disabled"])
@@ -352,8 +436,7 @@ def test_fetch_page_text_for_urls_advances_stage_after_empty_switched_pool_respo
         if switched_kind == "empty"
         else _javascript_disabled_page_text_response(url)
     )
-    final_response = fixture_page_text_response(url, "technical seo")
-    responses = iter([pool_response, switched_response, final_response])
+    responses = iter([pool_response, switched_response])
 
     def transport(*, body: bytes, **_: object) -> dict[str, object]:
         request_bodies.append(json.loads(body.decode("utf-8"))[0])
@@ -365,15 +448,134 @@ def test_fetch_page_text_for_urls_advances_stage_after_empty_switched_pool_respo
         credentials=DataForSeoCredentials(login="user", password="pass"),
         transport=transport,
         sleep=lambda _seconds: None,
-    ) == [final_response]
+    ) == [switched_response]
     assert [
         (body["enable_javascript"], body["enable_browser_rendering"], body["switch_pool"])
         for body in request_bodies
     ] == [
         (False, False, False),
-        (False, False, True),
-        (True, False, False),
+        (True, True, True),
     ]
+
+
+def test_fetch_page_text_for_urls_switches_pool_after_nested_http_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    url = "https://example.com/blocked"
+    request_bodies: list[dict[str, object]] = []
+    responses = iter(
+        [
+            {
+                "tasks": [
+                    {
+                        "data": {"url": url},
+                        "status_code": 20000,
+                        "result": [
+                            {"items": [{"status_code": 403, "checks": {"is_4xx_code": True}}]}
+                        ],
+                    }
+                ]
+            },
+            fixture_page_text_response(url, "technical seo"),
+        ]
+    )
+
+    def transport(*, body: bytes, **_: object) -> dict[str, object]:
+        request_bodies.append(json.loads(body.decode("utf-8"))[0])
+        return next(responses)
+
+    with caplog.at_level(logging.INFO, logger="seo_rank.dataforseo"):
+        assert fetch_page_text_for_urls(
+            "technical seo",
+            [url],
+            credentials=DataForSeoCredentials(login="user", password="pass"),
+            transport=transport,
+        ) == [fixture_page_text_response(url, "technical seo")]
+    assert [
+        (body["enable_javascript"], body["enable_browser_rendering"], body["switch_pool"])
+        for body in request_bodies
+    ] == [(False, False, False), (True, True, True)]
+    assert "attempt=1" in caplog.text
+    assert "attempt=2" in caplog.text
+
+
+def test_fetch_page_text_for_urls_blocklists_terminal_nested_4xx(tmp_path: Path) -> None:
+    url = "https://example.com/blocked"
+    blocklist = DomainBlocklist.load(tmp_path / "domain_blocklist.txt")
+    failed_response = {
+        "tasks": [
+            {
+                "data": {"url": url},
+                "status_code": 20000,
+                "result": [
+                    {"items": [{"status_code": 403, "checks": {"is_4xx_code": True}}]}
+                ],
+            }
+        ]
+    }
+    request_bodies: list[dict[str, object]] = []
+
+    def transport(*, body: bytes, **_: object) -> dict[str, object]:
+        request_bodies.append(json.loads(body.decode("utf-8"))[0])
+        return failed_response
+
+    result = fetch_page_text_for_urls(
+        "technical seo",
+        [url],
+        credentials=DataForSeoCredentials(login="user", password="pass"),
+        transport=transport,
+        blocklist=blocklist,
+        sleep=lambda _seconds: None,
+    )
+
+    assert result == [failed_response]
+    assert blocklist.is_blocked(url)
+    assert [
+        (body["enable_javascript"], body["enable_browser_rendering"], body["switch_pool"])
+        for body in request_bodies
+    ] == [(False, False, False), (True, True, True)]
+
+
+def test_fetch_page_text_for_urls_does_not_repull_when_all_checks_are_false() -> None:
+    url = "https://example.com/healthy"
+    response = {
+        "tasks": [
+            {
+                "data": {"url": url},
+                "status_code": 20000,
+                "result": [
+                    {
+                        "items": [
+                            {
+                                "url": url,
+                                "status_code": 403,
+                                "checks": {
+                                    "is_4xx_code": False,
+                                    "is_5xx_code": False,
+                                    "is_broken": False,
+                                },
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+    calls = 0
+
+    def transport(*, body: bytes, **_: object) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        return response
+
+    assert fetch_page_text_for_urls(
+        "technical seo",
+        [url],
+        credentials=DataForSeoCredentials(login="user", password="pass"),
+        transport=transport,
+        sleep=lambda _seconds: None,
+    ) == [response]
+    assert calls == 1
 
 
 def test_fetch_page_text_for_urls_does_not_retry_immediate_success() -> None:
@@ -1636,6 +1838,135 @@ def test_fetch_onpage_signals_for_urls_retries_task_timeout_before_success(
     assert onpage_instant_pages_response_is_usable(result[0])
 
 
+def test_fetch_onpage_signals_for_urls_blocklists_final_empty_content(
+    tmp_path: Path,
+) -> None:
+    url = "https://empty.example/technical-seo/1"
+    blocklist = DomainBlocklist.load(tmp_path / "domain_blocklist.txt")
+    empty_response = fixture_onpage_instant_pages_response(url)
+    empty_result = empty_response["tasks"][0]["result"][0]
+    empty_result["crawl_status"] = "Page content is empty"
+    empty_result["items"] = []
+    empty_result["items_count"] = 0
+    responses = iter([empty_response])
+
+    def transport(*, body: bytes, **_: object) -> dict[str, object]:
+        del body
+        return next(responses)
+
+    fetch_onpage_signals_for_urls(
+        "technical seo",
+        [url],
+        credentials=DataForSeoCredentials("login", "password"),
+        transport=transport,
+        blocklist=blocklist,
+    )
+
+    assert blocklist.is_blocked(url)
+
+
+def test_fetch_onpage_signals_for_urls_does_not_blocklist_empty_content_recovered_by_retry(
+    tmp_path: Path,
+) -> None:
+    url = "https://recovered.example/technical-seo/1"
+    blocklist = DomainBlocklist.load(tmp_path / "domain_blocklist.txt")
+    first_response = fixture_onpage_instant_pages_response(url)
+    first_result = first_response["tasks"][0]["result"][0]
+    first_result["crawl_status"] = "Page content is empty"
+    first_result["items"][0]["checks"] = {"is_broken": True}
+    responses = iter([first_response, fixture_onpage_instant_pages_response(url)])
+
+    def transport(*, body: bytes, **_: object) -> dict[str, object]:
+        del body
+        return next(responses)
+
+    fetch_onpage_signals_for_urls(
+        "technical seo",
+        [url],
+        credentials=DataForSeoCredentials("login", "password"),
+        transport=transport,
+        blocklist=blocklist,
+    )
+
+    assert not blocklist.is_blocked(url)
+
+
+def test_fetch_onpage_signals_for_urls_switches_pool_after_nested_http_failure() -> None:
+    url = "https://example.com/technical-seo/1"
+    request_bodies: list[dict[str, object]] = []
+    responses = iter(
+        [
+            {
+                "status_code": 20000,
+                "tasks": [
+                    {
+                        "status_code": 20000,
+                        "result": [
+                            {"items": [{"status_code": 403, "checks": {"is_4xx_code": True}}]}
+                        ],
+                    }
+                ],
+            },
+            fixture_onpage_instant_pages_response(url),
+        ]
+    )
+
+    def transport(*, body: bytes, **_: object) -> dict[str, object]:
+        request_bodies.append(json.loads(body.decode("utf-8"))[0])
+        return next(responses)
+
+    result = fetch_onpage_signals_for_urls(
+        "technical seo",
+        [url],
+        credentials=DataForSeoCredentials("login", "password"),
+        transport=transport,
+        sleep=lambda _seconds: None,
+    )
+
+    assert onpage_instant_pages_response_is_usable(result[0])
+    assert [body["switch_pool"] for body in request_bodies] == [False, True]
+    assert all(body["enable_javascript"] is True for body in request_bodies)
+
+
+def test_fetch_onpage_signals_for_urls_blocklists_only_after_second_pool_switch(
+    tmp_path: Path,
+) -> None:
+    url = "https://example.com/technical-seo/1"
+    blocklist = DomainBlocklist.load(tmp_path / "domain_blocklist.txt")
+    failed_response = {
+        "status_code": 20000,
+        "tasks": [
+            {
+                "status_code": 20000,
+                "result": [
+                    {"items": [{"status_code": 403, "checks": {"is_4xx_code": True}}]}
+                ],
+            }
+        ],
+    }
+    request_bodies: list[dict[str, object]] = []
+
+    def transport(*, body: bytes, **_: object) -> dict[str, object]:
+        request_bodies.append(json.loads(body.decode("utf-8"))[0])
+        return failed_response
+
+    fetch_onpage_signals_for_urls(
+        "technical seo",
+        [url],
+        credentials=DataForSeoCredentials("login", "password"),
+        transport=transport,
+        blocklist=blocklist,
+        sleep=lambda _seconds: None,
+    )
+
+    assert blocklist.is_blocked(url)
+    assert [body["switch_pool"] for body in request_bodies] == [False, True]
+    assert all(
+        body["enable_javascript"] and body["enable_browser_rendering"]
+        for body in request_bodies
+    )
+
+
 def test_fetch_onpage_signals_for_urls_blocklists_terminal_timeout(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
@@ -2041,7 +2372,6 @@ def test_build_resumed_keyword_result_stages_missing_page_text(
     responses = iter(
         [
             _empty_page_text_response(url),
-            _javascript_disabled_page_text_response(url),
             final_response,
         ]
     )
@@ -2105,7 +2435,7 @@ def test_build_resumed_keyword_result_stages_missing_page_text(
     assert [
         (body["enable_javascript"], body["enable_browser_rendering"])
         for body in request_bodies
-    ] == [(False, False), (True, False), (True, True)]
+    ] == [(False, False), (True, True)]
 
 
 @pytest.mark.parametrize("live_textrazor", [False, True], ids=["drop", "regenerate"])

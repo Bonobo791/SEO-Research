@@ -2029,11 +2029,45 @@ with 8.3 and is a lower-priority cross-check.
 | Every Phase 8 source stays opt-in behind its own `SEO_RANK_ENABLE_<SOURCE>` flag | 8.1–8.4 | Open |
 | `run --stored-run` backfills every new source's missing raw partition without refetching unrelated data | 8.1–8.4 | Open |
 
+### Phase 9 — Manual content capture for blocklisted domains
+
+Domains on the blocklist require manual browser scraping because automated
+page-text retrieval is not sufficient. During live DataForSEO pulls, identify
+SERP results whose exact returned URL belongs to a blocklisted domain and write
+those rows to a separate Parquet handoff for manual completion. Preserve the
+exact URL shown by DataForSEO; do not replace it with a canonicalized or
+redirected URL.
+
+#### Dev slices
+
+1. **[ ] Slice 1 — Blocklist matching** — define the blocklist source and
+   registrable-domain matching rule, while retaining the exact DataForSEO URL
+   on each match.
+2. **[ ] Slice 2 — Manual-scrape handoff Parquet** — write a separate Parquet
+   dataset with `url`, `target_keyword`, `scraped_plain_text`, and
+   `scraped_html` columns. The two scraped-content columns are nullable and
+   blank when the row is first emitted for manual work; HTML is intended for
+   browser source copy/paste.
+3. **[ ] Slice 3 — Live-pull integration** — emit one handoff row for every
+   blocklisted SERP result, deduplicated by exact `url × target_keyword`, and
+   keep non-blocklisted retrieval unchanged.
+4. **[ ] Slice 4 — Stored-run and validation coverage** — support rebuilding
+   the handoff from stored DataForSEO responses, validate the schema and key
+   columns before the Parquet write, and add fixtures/tests for blocked,
+   unblocked, subdomain, duplicate, and URL-preservation cases.
+
+| Acceptance item | Sub-phase | Status |
+| --------------- | --------- | ------ |
+| Exact DataForSEO SERP URL is retained for every blocklisted-domain match | 9.1–9.3 | Open |
+| Separate manual-scrape Parquet contains `url`, `target_keyword`, nullable `scraped_plain_text`, and nullable `scraped_html` | 9.2 | Open |
+| Initial handoff leaves both scraped-content columns blank | 9.2–9.3 | Open |
+| Handoff rows are deduplicated by exact `url × target_keyword` and do not alter non-blocklisted retrieval | 9.3 | Open |
+| Stored-run rebuild and schema/key validation are covered by tests | 9.4 | Open |
+
 ## Deferred
 
 - Entity-derived features beyond Phase 5.6 density bundle (keyword–entity overlap,
   type-weighted density, passage-level density)
-- Direct page crawling outside DataForSEO
 - CI, release packaging, coverage thresholds
 - Production deployment, databases, cache
 - Parquet `Variant` type for provider payloads

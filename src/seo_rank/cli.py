@@ -49,6 +49,8 @@ from seo_rank.dataforseo import (
     build_serp_request,
     classify_page_text_response,
     page_text_response_is_pool_related,
+    nested_http_failure,
+    live_url_response_requires_retry,
     execute_dataforseo_request,
     fixture_keyword_expansion_response,
     fixture_page_text_response,
@@ -58,6 +60,7 @@ from seo_rank.dataforseo import (
     normalize_serp_results,
     onpage_instant_pages_response_is_usable,
     parsed_page_text,
+    response_has_crawl_status,
     validate_dataforseo_response,
     validate_dataforseo_credentials,
 )
@@ -104,6 +107,7 @@ RUN_CATALOG_SCHEMA_VERSION = "run_catalog.v1"
 COMBINED_ANALYSIS_REQUIRED_TABLES = ("analysis_mart",)
 COMBINED_ANALYSIS_OPTIONAL_TABLES = (
     "textrazor_page_metrics",
+    "entity_signals",
     "backlinks_analysis",
     "onpage_features",
 )
@@ -284,7 +288,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 if args.keyword:
                     emit_keyword_analysis(run_dir, args.keyword)
                 return 0
-            stats_result = run_phase5_stats(run_dir)
+            stats_result = (
+                run_phase5_stats(run_dir, entity_ids=set(args.entity_id))
+                if args.entity_id
+                else run_phase5_stats(run_dir)
+            )
             if args.keyword:
                 emit_keyword_analysis(run_dir, args.keyword)
             return 1 if stats_result.hard_fail else 0
@@ -373,6 +381,7 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--run", type=Path, action="append", required=True)
     analyze.add_argument("--output-dir", type=Path)
     analyze.add_argument("--keyword")
+    analyze.add_argument("--entity-id", action="append")
 
     replay = subparsers.add_parser(
         "replay",
@@ -649,6 +658,7 @@ def backfill_textrazor_run(
         else []
     )
     textrazor_records: list[dict[str, object]] = []
+    blocklist = DomainBlocklist.load(config.domain_blocklist_path)
 
     for index, keyword in enumerate(
         [keyword for keyword in stored_keywords if isinstance(keyword, str)],
@@ -665,6 +675,7 @@ def backfill_textrazor_run(
             pages,
             credentials=credentials,
             transport=DEFAULT_TEXTRAZOR_TRANSPORT,
+            blocklist=blocklist,
         )
         if responses:
             network_calls.append("textrazor.entities")
@@ -1517,6 +1528,7 @@ def build_resumed_keyword_result(
             refreshed_textrazor_pages,
             credentials=textrazor_credentials,
             transport=DEFAULT_TEXTRAZOR_TRANSPORT,
+            blocklist=blocklist,
         )
         if refreshed_textrazor_responses:
             network_calls.append("textrazor.entities")
@@ -2388,6 +2400,7 @@ def build_textrazor_only_keyword_result(
     credentials: TextRazorCredentials,
     progress: RunProgress | None = None,
 ) -> dict[str, object]:
+    blocklist = DomainBlocklist.load(config.domain_blocklist_path)
     keyword_result = build_offline_keyword_result(
         config,
         target_keyword=target_keyword,
@@ -2430,6 +2443,7 @@ def build_textrazor_only_keyword_result(
         textrazor_pages,
         credentials=credentials,
         transport=DEFAULT_TEXTRAZOR_TRANSPORT,
+        blocklist=blocklist,
     )
     textrazor_entities = [
         annotate_target_keyword(entity, target_keyword)
@@ -2804,6 +2818,7 @@ def build_live_keyword_result(
             textrazor_pages,
             credentials=textrazor_credentials,
             transport=textrazor_transport,
+            blocklist=blocklist,
         )
         if textrazor_responses:
             network_calls.append("textrazor.entities")
@@ -2940,12 +2955,14 @@ def execute_validated_dataforseo_request(
     *,
     credentials: DataForSeoCredentials,
     transport,
+    attempt_number: int = 1,
 ) -> dict[str, object]:
     response = execute_dataforseo_request(
         request,
         credentials=credentials,
         transport=transport,
         timeout=DATAFORSEO_LIVE_REQUEST_TIMEOUT,
+        attempt_start=attempt_number,
     )
     return validate_dataforseo_response(endpoint, response)
 
@@ -2957,19 +2974,32 @@ def execute_validated_dataforseo_request_with_timeout_retry(
     credentials: DataForSeoCredentials,
     transport,
     sleep=time.sleep,
+    attempt_counter: list[int] | None = None,
 ) -> dict[str, object]:
     """Execute a validated DataForSEO request, retrying exactly once after a
     one-second pause when any task fails with a 50402 provider timeout.
 
     Only the final response is returned; the retryable first response is dropped.
     """
+    if attempt_counter is not None:
+        attempt_counter[0] += 1
     response = execute_validated_dataforseo_request(
-        endpoint, request, credentials=credentials, transport=transport
+        endpoint,
+        request,
+        credentials=credentials,
+        transport=transport,
+        attempt_number=attempt_counter[0] if attempt_counter is not None else 1,
     )
     if find_skippable_onpage_task_status(response) is not None:
         sleep(1.0)
+        if attempt_counter is not None:
+            attempt_counter[0] += 1
         response = execute_validated_dataforseo_request(
-            endpoint, request, credentials=credentials, transport=transport
+            endpoint,
+            request,
+            credentials=credentials,
+            transport=transport,
+            attempt_number=attempt_counter[0] if attempt_counter is not None else 1,
         )
     return response
 
@@ -3040,58 +3070,59 @@ def fetch_page_text_for_urls(
     blocklist: DomainBlocklist | None = None,
     sleep=time.sleep,
 ) -> list[dict[str, object]]:
-    """Fetch page text with progressively more capable rendering when needed.
+    """Fetch page text with one optional switched-pool rendering recovery.
 
-    Each attempt retries once on a 50402 provider timeout. When the final
-    response is pool-related (access denied, geo/location, or unreachable), one
-    additional same-rendering request is issued with ``switch_pool=True``.
+    Each request retries once on a 50402 provider timeout. A response flagged as
+    broken or HTTP-failed gets one switched-pool JavaScript/browser request.
     """
 
     responses: list[dict[str, object]] = []
     for url in urls:
         if blocklist is not None and blocklist.is_blocked(url):
             continue
+        attempt_counter = [0]
         try:
-            for enable_javascript, enable_browser_rendering in (
-                (False, False),
-                (True, False),
-                (True, True),
-            ):
+            response = execute_validated_dataforseo_request_with_timeout_retry(
+                "page_text",
+                build_page_text_request(url),
+                credentials=credentials,
+                transport=transport,
+                sleep=sleep,
+                attempt_counter=attempt_counter,
+            )
+            if find_skippable_onpage_task_status(response) is not None:
+                if blocklist is not None:
+                    blocklist.record(url, keyword=target_keyword, reason="page_text-50402")
+            elif live_url_response_requires_retry(response, url):
                 response = execute_validated_dataforseo_request_with_timeout_retry(
                     "page_text",
                     build_page_text_request(
                         url,
-                        enable_javascript=enable_javascript,
-                        enable_browser_rendering=enable_browser_rendering,
+                        enable_javascript=True,
+                        enable_browser_rendering=True,
+                        switch_pool=True,
                     ),
                     credentials=credentials,
                     transport=transport,
                     sleep=sleep,
+                    attempt_counter=attempt_counter,
                 )
-                if find_skippable_onpage_task_status(response) is not None:
-                    if blocklist is not None:
-                        blocklist.record(
-                            url, keyword=target_keyword, reason="page_text-50402"
-                        )
-                    break
-                if page_text_response_is_pool_related(response):
-                    response = execute_validated_dataforseo_request_with_timeout_retry(
-                        "page_text",
-                        build_page_text_request(
-                            url,
-                            enable_javascript=enable_javascript,
-                            enable_browser_rendering=enable_browser_rendering,
-                            switch_pool=True,
-                        ),
-                        credentials=credentials,
-                        transport=transport,
-                        sleep=sleep,
+            if blocklist is not None and response_has_crawl_status(
+                response, "Page content is empty"
+            ):
+                blocklist.record(
+                    url,
+                    keyword=target_keyword,
+                    reason="page_text-crawl-status-page-content-is-empty",
+                )
+            nested_status = nested_http_failure(response)
+            if nested_status is not None and 400 <= nested_status < 500:
+                if blocklist is not None:
+                    blocklist.record(
+                        url,
+                        keyword=target_keyword,
+                        reason=f"page_text-http-{nested_status}",
                     )
-                if classify_page_text_response(response) not in {
-                    "empty",
-                    "javascript_disabled",
-                }:
-                    break
         except DataForSeoClientError:
             raise
         responses.append(response)
@@ -3115,6 +3146,7 @@ def fetch_dataforseo_backlinks_for_urls(
         for url in urls:
             if blocklist is not None and blocklist.is_blocked(url):
                 continue
+            attempt_counter = [0]
             for variant in variants:
                 endpoint = BACKLINKS_VARIANT_ENDPOINTS[variant]
                 if progress is not None:
@@ -3210,6 +3242,7 @@ def fetch_onpage_signals_for_urls(
                 request_metadata={
                     "target_keyword": target_keyword,
                     "url": url,
+                    "switch_pool": request_body["switch_pool"],
                     "enable_javascript": request_body["enable_javascript"],
                     "enable_browser_rendering": request_body[
                         "enable_browser_rendering"
@@ -3227,6 +3260,7 @@ def fetch_onpage_signals_for_urls(
         for url in urls:
             if blocklist is not None and blocklist.is_blocked(url):
                 continue
+            attempt_counter = [0]
             if progress is not None:
                 progress.keyword_log(
                     target_keyword,
@@ -3239,8 +3273,42 @@ def fetch_onpage_signals_for_urls(
                 credentials=credentials,
                 transport=transport,
                 sleep=sleep,
+                attempt_counter=attempt_counter,
             )
+            if live_url_response_requires_retry(response, url):
+                request = build_onpage_instant_pages_request(url, switch_pool=True)
+                response = execute_validated_dataforseo_request_with_timeout_retry(
+                    ONPAGE_INSTANT_PAGES_ENDPOINT,
+                    request,
+                    credentials=credentials,
+                    transport=transport,
+                    sleep=sleep,
+                    attempt_counter=attempt_counter,
+                )
+            if blocklist is not None and response_has_crawl_status(
+                response, "Page content is empty"
+            ):
+                blocklist.record(
+                    url,
+                    keyword=target_keyword,
+                    reason="onpage_instant_pages-crawl-status-page-content-is-empty",
+                )
             response_with_url = {**response, "url": url}
+            nested_status = nested_http_failure(response)
+            if nested_status is not None and 400 <= nested_status < 500:
+                if blocklist is not None:
+                    blocklist.record(
+                        url,
+                        keyword=target_keyword,
+                        reason=f"{ONPAGE_INSTANT_PAGES_ENDPOINT}-http-{nested_status}",
+                    )
+                logging.getLogger("seo_rank.dataforseo.onpage").warning(
+                    "Skipping onpage_instant_pages for target_keyword=%r url=%r: "
+                    "nested_http_status=%s",
+                    target_keyword,
+                    url,
+                    nested_status,
+                )
             skippable = find_skippable_onpage_task_status(response)
             if skippable is not None:
                 status_code, status_message = skippable
@@ -3802,6 +3870,7 @@ def build_raw_response_records(
                         request_body = build_onpage_instant_pages_request(url).body[0]
                         request_metadata.update(
                             {
+                                "switch_pool": request_body["switch_pool"],
                                 "enable_javascript": request_body["enable_javascript"],
                                 "enable_browser_rendering": request_body[
                                     "enable_browser_rendering"

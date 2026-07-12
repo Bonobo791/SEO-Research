@@ -10,6 +10,7 @@ from seo_rank.dataforseo import (
     BACKLINKS_DOFOLLOW_FILTERS,
     BACKLINKS_QUERY_SUMMARY,
     classify_page_text_response,
+    response_has_crawl_status,
     build_backlinks_detail_request,
     decode_content_parsing_items,
     build_backlinks_dofollow_summary_request,
@@ -26,17 +27,39 @@ from seo_rank.dataforseo import (
     fixture_onpage_instant_pages_response,
     fixture_page_text_response,
     fixture_serp_response,
+    nested_http_failure,
+    live_url_response_requires_retry,
     onpage_instant_pages_response_is_usable,
     format_backlinks_target,
     parsed_page_text,
     validate_dataforseo_response,
     validate_dataforseo_credentials,
 )
+
+
 from seo_rank.cli import (
     execute_validated_dataforseo_request,
     find_skippable_onpage_task_status,
     raise_for_failed_dataforseo_tasks,
 )
+
+
+@pytest.mark.parametrize(
+    "status",
+    ["Page content is empty", " page content is empty ", "PAGE CONTENT IS EMPTY"],
+)
+def test_response_has_crawl_status_matches_normalized_task_result_status(
+    status: str,
+) -> None:
+    response = {"tasks": [{"result": [{"crawl_status": status}]}]}
+
+    assert response_has_crawl_status(response, "Page content is empty")
+
+
+def test_response_has_crawl_status_ignores_other_statuses() -> None:
+    response = {"tasks": [{"result": [{"crawl_status": "finished"}]}]}
+
+    assert not response_has_crawl_status(response, "Page content is empty")
 
 
 def test_build_keyword_expansion_request_uses_dataforseo_live_endpoint() -> None:
@@ -164,6 +187,7 @@ def test_build_onpage_instant_pages_request_uses_instant_pages_endpoint_and_flag
     assert request.body == [
         {
             "url": "https://example.com/technical-seo/1",
+            "switch_pool": False,
             "enable_javascript": True,
             "enable_browser_rendering": True,
             "load_resources": True,
@@ -172,6 +196,83 @@ def test_build_onpage_instant_pages_request_uses_instant_pages_endpoint_and_flag
             "browser_preset": "desktop",
         }
     ]
+
+
+def test_build_onpage_instant_pages_request_switch_pool_toggles_body_flag() -> None:
+    request = build_onpage_instant_pages_request(
+        "https://example.com/technical-seo/1", switch_pool=True
+    )
+
+    assert request.body[0]["switch_pool"] is True
+
+
+@pytest.mark.parametrize(
+    ("status_code", "checks"),
+    [
+        (403, {"is_4xx_code": True, "is_5xx_code": False}),
+        (503, {"is_4xx_code": False, "is_5xx_code": True}),
+        (403, {}),
+    ],
+)
+def test_nested_http_failure_detects_checks_or_item_status(
+    status_code: int, checks: dict[str, bool]
+) -> None:
+    response = {
+        "tasks": [
+            {"result": [{"items": [{"status_code": status_code, "checks": checks}]}]}
+        ]
+    }
+
+    assert nested_http_failure(response) == status_code
+
+
+@pytest.mark.parametrize(
+    "checks",
+    [
+        {"is_4xx_code": True, "is_5xx_code": False, "is_broken": False},
+        {"is_4xx_code": False, "is_5xx_code": True, "is_broken": False},
+        {"is_4xx_code": False, "is_5xx_code": False, "is_broken": True},
+    ],
+)
+def test_live_url_response_requires_retry_when_any_check_is_true(
+    checks: dict[str, bool],
+) -> None:
+    response = {
+        "tasks": [
+            {
+                "result": [
+                    {"items": [{"url": "https://example.com/page", "checks": checks}]}
+                ]
+            }
+        ]
+    }
+
+    assert live_url_response_requires_retry(response, "https://example.com/page")
+
+
+def test_live_url_response_does_not_retry_when_all_checks_are_false() -> None:
+    response = {
+        "tasks": [
+            {
+                "result": [
+                    {
+                        "items": [
+                            {
+                                "url": "https://example.com/page",
+                                "checks": {
+                                    "is_4xx_code": False,
+                                    "is_5xx_code": False,
+                                    "is_broken": False,
+                                },
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    }
+
+    assert not live_url_response_requires_retry(response, "https://example.com/page")
 
 
 def test_build_backlinks_summary_request_uses_backlinks_summary_endpoint() -> None:

@@ -8,6 +8,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from seo_rank.domain_blocklist import DomainBlocklist
+
 logger = logging.getLogger(__name__)
 
 TEXTRAZOR_RESPONSE_SECTIONS = (
@@ -127,10 +129,13 @@ def fetch_textrazor_entities_for_pages(
     credentials: TextRazorCredentials,
     transport=None,
     timeout: float = 30.0,
+    blocklist: DomainBlocklist | None = None,
 ) -> list[dict[str, object]]:
     """Fetch TextRazor entity responses for unique parsed page records."""
 
     page_batch = pages_missing_textrazor(pages)
+    if blocklist is not None:
+        page_batch = blocklist.filter_results(page_batch)
     if page_batch:
         logger.info("textrazor batch start pages=%d", len(page_batch))
 

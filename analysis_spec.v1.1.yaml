@@ -253,6 +253,12 @@ inference:
   bh_skipped_reason: underpowered
   diagnostics_bh_policy: never_adjust_diagnostic_p_values
 
+entity_signals:
+  min_present_pages: 10
+  min_present_keywords: 3
+  min_inference_keywords: 10
+  bh_q: 0.05
+
 guardrails:
   hard_fail:
     - name: serp_rank_variance_within_keyword
