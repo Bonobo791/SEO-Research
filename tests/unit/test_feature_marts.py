@@ -562,7 +562,7 @@ def test_write_feature_dataset_uses_lazy_sink_parquet_with_statistics(
         frame=frame,
     )
 
-    assert captured["path"] == run_dir / "parquet" / "keyword_serp" / "part-0.parquet"
+    assert captured["path"] == run_dir / "parquet" / "keyword_serp" / "part-0.parquet.tmp"
     assert captured["kwargs"] == {"compression": "zstd", "statistics": True}
     assert catalog["row_count"] == 1
 
@@ -671,3 +671,48 @@ def test_write_feature_dataset_includes_dataset_name_on_validation_failure(
             name="textrazor_page_metrics",
             frame=frame,
         )
+
+
+
+def test_write_feature_dataset_keeps_prior_parts_when_sink_fails(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    run_dir = tmp_path / "run-1"
+    frame = pl.DataFrame(
+        [
+            {
+                "run_id": "run-1",
+                "target_keyword_id": "kw-1",
+                "target_keyword": "technical seo",
+                "keyword_order": 1,
+                "source_response_id": "resp-1",
+                "serp_item_id": "serp-1",
+                "canonical_url_hash": "hash-1",
+                "url": "https://example.com",
+                "serp_rank": 1,
+                "title": "Example",
+                "description": "Example result",
+                "schema_version": "keyword_serp.v1",
+            }
+        ]
+    ).lazy()
+    write_feature_dataset(run_dir, name="keyword_serp", frame=frame)
+    prior = (run_dir / "parquet" / "keyword_serp" / "part-0.parquet").read_bytes()
+
+    def boom(self, path, **kwargs):  # noqa: ANN001, ANN003
+        raise RuntimeError("sink failed")
+
+    monkeypatch.setattr(pl.LazyFrame, "sink_parquet", boom)
+
+    try:
+        write_feature_dataset(run_dir, name="keyword_serp", frame=frame)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("expected sink failure")
+
+    part = run_dir / "parquet" / "keyword_serp" / "part-0.parquet"
+    assert part.exists()
+    assert part.read_bytes() == prior
+    assert not (run_dir / "parquet" / "keyword_serp" / "part-0.parquet.tmp").exists()

@@ -2346,9 +2346,10 @@ def write_curated_dataset(
 ) -> dict[str, object]:
     dataset_dir = run_dir / "parquet" / name
     dataset_dir.mkdir(parents=True, exist_ok=True)
-    for part_path in dataset_dir.glob("part-*.parquet"):
-        part_path.unlink()
     file_path = dataset_dir / "part-0.parquet"
+    temp_path = dataset_dir / "part-0.parquet.tmp"
+    if temp_path.exists():
+        temp_path.unlink()
     sorted_rows = sorted(
         rows,
         key=lambda row: (
@@ -2361,11 +2362,21 @@ def write_curated_dataset(
             str(row.get("ordinal")) if row.get("ordinal") is not None else "",
         ),
     )
-    pl.from_arrow(pa.Table.from_pylist(sorted_rows, schema=schema)).lazy().sink_parquet(
-        file_path,
-        compression="zstd",
-        statistics=True,
-    )
+    try:
+        # ponytail: temp+replace so failed writes do not wipe readable parts.
+        pl.from_arrow(pa.Table.from_pylist(sorted_rows, schema=schema)).lazy().sink_parquet(
+            temp_path,
+            compression="zstd",
+            statistics=True,
+        )
+    except Exception:
+        if temp_path.exists():
+            temp_path.unlink()
+        raise
+    temp_path.replace(file_path)
+    for part_path in dataset_dir.glob("part-*.parquet"):
+        if part_path != file_path:
+            part_path.unlink()
     return {
         "schema_version": CURATED_SCHEMA_VERSION,
         "row_count": len(rows),

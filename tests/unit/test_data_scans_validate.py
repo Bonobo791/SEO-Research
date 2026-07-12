@@ -3,7 +3,7 @@ from pathlib import Path
 import polars as pl
 
 from seo_rank.data.normalize import build_curated_lazyframes
-from seo_rank.data.scans import scan_raw_responses
+from seo_rank.data.scans import scan_curated_table, scan_raw_responses
 from seo_rank.data.validate import (
     align_lazyframe_schema,
     validate_frame_contract,
@@ -198,3 +198,22 @@ def test_build_curated_lazyframes_returns_lazyframes() -> None:
 
     assert isinstance(frames["keywords"], pl.LazyFrame)
     assert isinstance(frames["pages"], pl.LazyFrame)
+
+
+
+def test_scan_curated_table_raises_clear_error_when_dataset_has_no_parts(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "run-1"
+    dataset_dir = run_dir / "parquet" / "analysis_mart"
+    dataset_dir.mkdir(parents=True)
+
+    try:
+        scan_curated_table(run_dir, "analysis_mart").collect()
+    except FileNotFoundError as error:
+        message = str(error)
+        assert "analysis_mart" in message
+        assert "no parquet parts" in message
+        assert "expanded paths were empty" not in message
+    else:
+        raise AssertionError("expected FileNotFoundError for empty dataset dir")

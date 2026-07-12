@@ -69,4 +69,16 @@ rosners.com  # keyword="speed queen washing machine coin operated" reason=onpage
 alemanacademy.com  # keyword="speed queen washing machine coin operated" reason=page_text-crawl-status-page-content-is-empty
 glaamamerica.com  # keyword="speed queen washing machine coin operated" reason=page_text-crawl-status-page-content-is-empty
 theapplianceloft.com  # keyword="used coin operated washer and dryer near me" reason=onpage_instant_pages-http-403
-appliancevillagemn.com  # keyword="used commercial washers and dryers for sale" reason=onpage_instant_pages-http-403
+appliancevillagemn.com  # keyword="used commercial washers and dryers for sale" reason=onpage_instant_pages-http-403forefrontweb.com  # keyword="columbus seo company" reason=page_text-crawl-status-page-content-is-empty
+coldwellbankerhomes.com  # keyword="cypress tx realtor" reason=page_text-crawl-status-page-content-is-empty
+forefrontweb.com  # keyword="columbus local seo" reason=page_text-crawl-status-page-content-is-empty
+forsalebyowner.com  # keyword="houses for sale in cypress texas" reason=page_text-crawl-status-page-content-is-empty
+angi.com  # keyword="best realtor in cypress tx" reason=page_text-crawl-status-page-content-is-empty
+blairrg.com  # keyword="top real estate agents in cypress tx" reason=page_text-crawl-status-page-content-is-empty
+example.com  # keyword="technical seo" reason=page_text-crawl-status-page-content-is-empty
+taylormorrison.com  # keyword="bridge creek cypress homes for sale" reason=page_text-crawl-status-page-content-is-empty
+instagram.com  # keyword="blair realty group cypress tx" reason=page_text-crawl-status-page-content-is-empty
+linkedin.com  # keyword="blair realty group cypress tx" reason=page_text-crawl-status-page-content-is-empty
+voyagehouston.com  # keyword="blair realty group cypress tx" reason=page_text-crawl-status-page-content-is-empty
+kw.com  # keyword="keller williams cypress tx" reason=page_text-crawl-status-page-content-is-empty
+lakehomes.com  # keyword="spring cypress homes for sale" reason=page_text-crawl-status-page-content-is-empty

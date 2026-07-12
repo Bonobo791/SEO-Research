@@ -1001,7 +1001,9 @@ def build_entity_signals_lazyframe(
     ).join(
         serp_items.select(
             ["run_id", "target_keyword_id", "canonical_url_hash", "url", "serp_rank"]
-        ),
+        )
+        .group_by(["run_id", "target_keyword_id", "canonical_url_hash", "url"])
+        .agg(pl.col("serp_rank").min()),
         on=["run_id", "target_keyword_id", "canonical_url_hash", "url"],
         how="inner",
     )
@@ -1206,20 +1208,33 @@ def write_feature_dataset(
 ) -> dict[str, object]:
     dataset_dir = run_dir / "parquet" / name
     dataset_dir.mkdir(parents=True, exist_ok=True)
-    for part_path in dataset_dir.glob("part-*.parquet"):
-        part_path.unlink()
     file_path = dataset_dir / "part-0.parquet"
+    temp_path = dataset_dir / "part-0.parquet.tmp"
+    if temp_path.exists():
+        temp_path.unlink()
     validation = FEATURE_VALIDATION_RULES[name]
     try:
-        frame.sink_parquet(file_path, compression="zstd", statistics=True)
+        # ponytail: sink to temp then replace so a failed rewrite cannot leave
+        # an empty dataset dir that breaks later scan_curated_table calls.
+        frame.sink_parquet(temp_path, compression="zstd", statistics=True)
         validate_materialized_frame_contract(
-            pl.from_arrow(pq.read_table(file_path)),
+            pl.from_arrow(pq.read_table(temp_path)),
             unique_columns=validation.get("unique_columns", ()),
             non_null_columns=validation.get("non_null_columns", ()),
             bounded_columns=validation.get("bounded_columns"),
         )
     except ValueError as error:
+        if temp_path.exists():
+            temp_path.unlink()
         raise ValueError(f"{name} validation failed: {error}") from error
+    except Exception:
+        if temp_path.exists():
+            temp_path.unlink()
+        raise
+    temp_path.replace(file_path)
+    for part_path in dataset_dir.glob("part-*.parquet"):
+        if part_path != file_path:
+            part_path.unlink()
     return {
         "schema_version": FEATURE_SCHEMA_VERSION,
         "row_count": pq.ParquetFile(file_path).metadata.num_rows,

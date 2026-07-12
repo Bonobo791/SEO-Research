@@ -26,4 +26,12 @@ def scan_raw_responses(run_dir: Path) -> pl.LazyFrame:
 def scan_curated_table(run_dir: Path, table_name: str) -> pl.LazyFrame:
     """Scan a curated table from the run-scoped Parquet lake."""
 
-    return pl.scan_parquet(str(Path(run_dir) / "parquet" / table_name))
+    run_dir = Path(run_dir)
+    dataset_dir = run_dir / "parquet" / table_name
+    parts = sorted(dataset_dir.glob("part-*.parquet"))
+    if not parts:
+        raise FileNotFoundError(
+            f"Stored run {run_dir} has no parquet parts for {table_name} "
+            f"(expected {dataset_dir}/part-*.parquet)"
+        )
+    return pl.scan_parquet(str(dataset_dir))

@@ -77,6 +77,47 @@ def test_entity_signals_builds_page_level_presence_and_provenance() -> None:
     ]
 
 
+def test_entity_signals_keeps_best_rank_for_duplicate_serp_url() -> None:
+    entities = pl.DataFrame(
+        {
+            "run_id": ["run-1"],
+            "target_keyword_id": ["kw-1"],
+            "target_keyword": ["keyword"],
+            "canonical_url_hash": ["url-a"],
+            "url": ["https://a.example/page"],
+            "entity_id": ["entity-a"],
+            "matched_text": ["Alpha"],
+            "confidence": [2.0],
+            "relevance": [0.2],
+            "types": [["Topic"]],
+        }
+    ).lazy()
+    page_metrics = pl.DataFrame(
+        {
+            "run_id": ["run-1"],
+            "target_keyword_id": ["kw-1"],
+            "target_keyword": ["keyword"],
+            "canonical_url_hash": ["url-a"],
+            "url": ["https://a.example/page"],
+        }
+    ).lazy()
+    serp_items = pl.DataFrame(
+        {
+            "run_id": ["run-1", "run-1"],
+            "target_keyword_id": ["kw-1", "kw-1"],
+            "canonical_url_hash": ["url-a", "url-a"],
+            "url": ["https://a.example/page", "https://a.example/page"],
+            "serp_rank": [4, 2],
+        }
+    ).lazy()
+
+    result = build_entity_signals_lazyframe(entities, page_metrics, serp_items).collect()
+
+    assert result.select(["canonical_url_hash", "entity_id", "serp_rank"]).to_dicts() == [
+        {"canonical_url_hash": "url-a", "entity_id": "entity-a", "serp_rank": 2}
+    ]
+
+
 def test_build_features_materializes_entity_signals(tmp_path) -> None:
     run_dir = tmp_path / "run"
     assert (
