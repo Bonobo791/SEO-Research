@@ -12,10 +12,26 @@ if str(REPO_SRC) not in sys.path:
 
 from seo_rank.stats.spec import load_analysis_spec
 from seo_rank.stats.textrazor_explainability import (
+    load_ranking_importance_panel,
     load_similarity_explainability_panel,
     load_textrazor_explainability_panel,
     summarize_ranking_explainability,
+    summarize_ranking_relative_importance,
 )
+
+
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError(f"must be >= 1, got {parsed}")
+    return parsed
+
+
+def _cv_folds(value: str) -> int:
+    parsed = int(value)
+    if parsed < 2:
+        raise argparse.ArgumentTypeError(f"must be >= 2, got {parsed}")
+    return parsed
 
 
 def _parse_args() -> argparse.Namespace:
@@ -41,6 +57,18 @@ def _parse_args() -> argparse.Namespace:
         "--no-show",
         action="store_true",
         help="Skip the interactive plot window (still writes PNG when matplotlib is available)",
+    )
+    parser.add_argument(
+        "--cv-folds",
+        type=_cv_folds,
+        default=5,
+        help="Keyword-grouped CV folds for out-of-sample delta R² (default: 5, minimum 2)",
+    )
+    parser.add_argument(
+        "--bootstraps",
+        type=_positive_int,
+        default=500,
+        help="Keyword-clustered bootstrap draws for partial R² CIs (default: 500, minimum 1)",
     )
     return parser.parse_args()
 
@@ -192,6 +220,80 @@ def _entity_relevance_univariate(summary: dict[str, object]) -> dict[str, object
     return None
 
 
+
+
+def _format_ci(value: object) -> str:
+    if not isinstance(value, dict):
+        return "n/a"
+    lower = value.get("lower")
+    upper = value.get("upper")
+    if lower is None or upper is None:
+        return "n/a"
+    return f"[{_format_float(lower)}, {_format_float(upper)}]"
+
+
+def _render_relative_importance_table(relative_importance: object) -> str:
+    if not isinstance(relative_importance, dict):
+        return "Relative importance: unavailable"
+
+    if relative_importance.get("status") != "computed":
+        reason = relative_importance.get("skipped_reason", "unknown")
+        row_count = relative_importance.get("row_count", 0)
+        return f"Relative importance: skipped ({reason}, n={row_count})"
+
+    header = (
+        f"{'Factor':<34} {'Full-model partial R²':>22} {'Shapley share':>14} "
+        f"{'Out-of-sample ΔR²':>18} {'Clustered CI':>22}"
+    )
+    excluded = relative_importance.get("excluded_predictors") or []
+    excluded_note = (
+        f"  excluded_sparse_predictors: {len(excluded)}"
+        if isinstance(excluded, list)
+        else ""
+    )
+    lines = [
+        "",
+        "Relative importance (full model)",
+        "-" * 36,
+        f"rows: {relative_importance.get('row_count', 0)}  "
+        f"keywords: {relative_importance.get('keyword_count', 0)}  "
+        f"cv_folds: {relative_importance.get('cv_folds', 0)}  "
+        f"bootstraps: {relative_importance.get('bootstraps', 0)}"
+        f"{excluded_note}",
+        "",
+        header,
+        "-" * len(header),
+    ]
+
+    for group in relative_importance.get("groups", []):
+        if not isinstance(group, dict):
+            continue
+        lines.append(
+            f"{str(group.get('factor', '')):<34} "
+            f"{_format_float(group.get('full_model_partial_r2')):>22} "
+            f"{_format_float(group.get('shapley_share')):>14} "
+            f"{_format_float(group.get('out_of_sample_delta_r2')):>18} "
+            f"{_format_ci(group.get('clustered_ci')):>22}"
+        )
+        metrics = group.get("metrics")
+        if not isinstance(metrics, list):
+            continue
+        for metric in metrics:
+            if not isinstance(metric, dict):
+                continue
+            label = str(metric.get("factor", metric.get("column", "")))
+            lines.append(
+                f"  {label:<32} "
+                f"{_format_float(metric.get('full_model_partial_r2')):>22} "
+                f"{'':>14} {'':>18} {'':>22}"
+            )
+
+    oos_note = relative_importance.get("oos_note")
+    if isinstance(oos_note, str) and oos_note:
+        lines.extend(["", oos_note])
+    return "\n".join(lines)
+
+
 def _print_viz_result(viz_result: object, *, no_show: bool) -> None:
     if viz_result is None:
         return
@@ -233,6 +335,11 @@ def main() -> None:
         rank_depth=args.depth,
         spec=spec,
     )
+    importance_panel, _, _, _ = load_ranking_importance_panel(
+        run_dir,
+        rank_depth=args.depth,
+        spec=spec,
+    )
     summary = summarize_ranking_explainability(
         similarity_panel,
         textrazor_panel,
@@ -241,6 +348,13 @@ def main() -> None:
         spec=spec,
         limitations=limitations,
     )
+    relative_importance = summarize_ranking_relative_importance(
+        importance_panel,
+        spec=spec,
+        cv_folds=args.cv_folds,
+        bootstraps=args.bootstraps,
+    )
+    summary["relative_importance"] = relative_importance
 
     print(f"Ranking explainability — {run_dir.name} ({rank_depth})")
     print(f"outcome: {summary['estimand']['outcome']}")
@@ -276,6 +390,7 @@ def main() -> None:
             ),
         )
     )
+    print(_render_relative_importance_table(summary.get("relative_importance")))
 
     stats_dir = run_dir / "stats"
     stats_dir.mkdir(parents=True, exist_ok=True)
