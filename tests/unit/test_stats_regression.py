@@ -561,3 +561,41 @@ def test_summarize_score_column_preserves_control_error_status() -> None:
 
     assert summary["status"] == "error"
     assert summary["error_note"] == "required control data is incomplete; model not fit"
+
+
+def test_fit_backend_regression_returns_skipped_fit_when_ols_svd_does_not_converge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _BoomModel:
+        def fit(self, *_args, **_kwargs):
+            raise np.linalg.LinAlgError("SVD did not converge")
+
+    monkeypatch.setattr(regression_module.smf, "ols", lambda *_a, **_k: _BoomModel())
+
+    model_data = _regression_analysis_mart_frame().to_pandas()
+    fit = regression_module._fit_backend_regression_from_model_data(
+        model_data,
+        label="bge",
+        score_column="bge_normalized_score",
+    )
+
+    assert isinstance(fit, regression_module.SkippedModelFit)
+    assert fit.reason == "svd_did_not_converge"
+
+
+def test_summarize_backend_regression_skips_when_ols_svd_does_not_converge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _BoomModel:
+        def fit(self, *_args, **_kwargs):
+            raise np.linalg.LinAlgError("SVD did not converge")
+
+    monkeypatch.setattr(regression_module.smf, "ols", lambda *_a, **_k: _BoomModel())
+
+    summary = summarize_backend_regression(
+        _regression_analysis_mart_frame(),
+        backend="bge",
+    )
+
+    assert summary["status"] == "skipped"
+    assert summary["skipped_reason"] == "svd_did_not_converge"

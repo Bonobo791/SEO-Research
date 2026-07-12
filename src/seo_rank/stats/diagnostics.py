@@ -30,6 +30,7 @@ from seo_rank.stats.regression import (
 from seo_rank.stats.families import SignalFamily, SignalFamilyRegistry, source_mart_for_family
 from seo_rank.stats.model_inputs import (
     REQUIRED_CONTROL_COLUMNS,
+    SkippedModelFit,
     control_error_summary,
     validate_control_columns,
 )
@@ -98,7 +99,7 @@ def summarize_diagnostics_backends_from_fits(
     analysis_mart: pl.DataFrame,
     backend_order: Sequence[str],
     *,
-    fits: dict[str, BackendRegressionFit | None],
+    fits: dict[str, BackendRegressionFit | SkippedModelFit | None],
 ) -> dict[str, object]:
     """Summarize pooled OLS diagnostics from precomputed backend fits."""
 
@@ -203,6 +204,12 @@ def summarize_multivariate_sensitivity(
             current_backends,
             control_columns,
         )
+        if fit is None:
+            return _skipped_multivariate_sensitivity_summary(
+                skipped_reason="svd_did_not_converge",
+                vif_threshold=vif_threshold,
+                backend_drop_order=backend_drop_order,
+            )
         fit_summary = _summarize_multivariate_sensitivity_fit(
             fit,
             model_data,
@@ -307,7 +314,11 @@ def _fit_multivariate_sensitivity_model(
     control_columns: Sequence[str],
 ):
     formula = _multivariate_formula(active_backends, control_columns)
-    return smf.ols(formula, data=model_data).fit()
+    try:
+        return smf.ols(formula, data=model_data).fit()
+    except (np.linalg.LinAlgError, ValueError):
+        # ponytail: match entities.py — SVD/singular OLS must not abort Phase 5
+        return None
 
 
 def _summarize_multivariate_sensitivity_fit(
@@ -511,9 +522,31 @@ def _summarize_backend_diagnostics_result(
     analysis_mart: pl.DataFrame,
     *,
     backend: str,
-    fit: BackendRegressionFit | None,
+    fit: BackendRegressionFit | SkippedModelFit | None,
     score_column: str | None = None,
 ) -> dict[str, object]:
+    if isinstance(fit, SkippedModelFit):
+        if score_column is None:
+            score_column = _score_column_for_backend(backend)
+        model_frame = _prepare_regression_frame(analysis_mart, score_column)
+        row_count = model_frame.height
+        keyword_count = (
+            model_frame["target_keyword_id"].n_unique() if not model_frame.is_empty() else 0
+        )
+        logger.info(
+            "diagnostics backend=%s status=skipped skipped_reason=%s row_count=%d keyword_count=%d",
+            backend,
+            fit.reason,
+            row_count,
+            keyword_count,
+        )
+        return _skipped_backend_summary(
+            backend=backend,
+            score_column=score_column,
+            skipped_reason=fit.reason,
+            row_count=row_count,
+            keyword_count=keyword_count,
+        )
     if fit is None:
         if score_column is None:
             score_column = _score_column_for_backend(backend)
@@ -558,7 +591,7 @@ def _refit_backend_regression_from_model_data(
     *,
     backend: str,
     score_column: str,
-) -> BackendRegressionFit | None:
+) -> BackendRegressionFit | SkippedModelFit | None:
     return _fit_backend_regression_from_model_data(
         model_data,
         label=backend,
@@ -577,37 +610,7 @@ def summarize_backend_diagnostics_from_fit(
     parameter_count = len(fit.feature_result.model.exog_names)
     influence = fit.feature_result.get_influence()
 
-    cooks_d, leverage, studentized, dffits, dfbetas = _safe_influence_arrays(influence)
-    leverage = np.clip(leverage, 0.0, 1.0)
-
-    cooks_d_threshold = 4.0 / nobs
-    leverage_threshold = (2.0 * parameter_count) / nobs
-    dffits_threshold = 2.0 * math.sqrt(parameter_count / nobs)
-    dfbeta_threshold = 2.0 / math.sqrt(nobs)
-
-    row_flags = (
-        (cooks_d > cooks_d_threshold)
-        | (leverage > leverage_threshold)
-        | (np.abs(studentized) > STUDENTIZED_RESIDUAL_THRESHOLD)
-        | (np.abs(dffits) > dffits_threshold)
-        | (np.abs(dfbetas).max(axis=1) > dfbeta_threshold)
-    )
-    influential_rows = [
-        _row_influence_summary(
-            fit=fit,
-            row_index=row_index,
-            cooks_d=float(cooks_d[row_index]),
-            leverage=float(leverage[row_index]),
-            studentized_residual=float(studentized[row_index]),
-            dffits=float(dffits[row_index]),
-            dfbetas=dfbetas[row_index],
-            cooks_d_threshold=cooks_d_threshold,
-            leverage_threshold=leverage_threshold,
-            dffits_threshold=dffits_threshold,
-            dfbeta_threshold=dfbeta_threshold,
-        )
-        for row_index in np.flatnonzero(row_flags)
-    ]
+    arrays = _safe_influence_arrays(influence)
 
     reset_summary = _reset_summary(fit.feature_result)
     breusch_pagan = het_breuschpagan(
@@ -616,37 +619,71 @@ def summarize_backend_diagnostics_from_fit(
         robust=True,
     )
     shapiro = _shapiro_summary(residuals)
-    influence_sensitivity = _summarize_influence_sensitivity(
-        fit,
-        cooks_d=cooks_d,
-        cooks_d_threshold=cooks_d_threshold,
-    )
 
-    influential_count = len(influential_rows)
-    logger.info(
-        "diagnostics backend=%s status=computed row_count=%d keyword_count=%d influential_count=%d",
-        fit.backend,
-        nobs,
-        int(fit.model_data["target_keyword_id"].nunique()),
-        influential_count,
-    )
+    if arrays is None:
+        logger.info(
+            "diagnostics backend=%s status=computed row_count=%d keyword_count=%d "
+            "influence=skipped",
+            fit.backend,
+            nobs,
+            int(fit.model_data["target_keyword_id"].nunique()),
+        )
+        influence_block: dict[str, object] = {
+            "status": "skipped",
+            "skipped_reason": "influence_estimation_failed",
+            "row_count": nobs,
+            "nobs": nobs,
+            "parameter_count": parameter_count,
+        }
+        influence_sensitivity: dict[str, object] = {
+            "status": "skipped",
+            "skipped_reason": "influence_estimation_failed",
+        }
+    else:
+        cooks_d, leverage, studentized, dffits, dfbetas = arrays
+        leverage = np.clip(leverage, 0.0, 1.0)
 
-    return {
-        "backend": fit.backend,
-        "score_column": fit.score_column,
-        "status": "computed",
-        "row_count": nobs,
-        "keyword_count": int(fit.model_data["target_keyword_id"].nunique()),
-        "omitted_controls": [dict(control) for control in fit.omitted_controls],
-        "model_formula": fit.feature_result.model.formula,
-        "baseline_formula": fit.baseline_result.model.formula,
-        "residuals_vs_fitted": _residuals_vs_fitted_summary(residuals, fitted),
-        "reset": reset_summary,
-        "breusch_pagan": _breusch_pagan_summary(
-            breusch_pagan,
-            flagged=_breusch_pagan_flagged(breusch_pagan),
-        ),
-        "influence": {
+        cooks_d_threshold = 4.0 / nobs
+        leverage_threshold = (2.0 * parameter_count) / nobs
+        dffits_threshold = 2.0 * math.sqrt(parameter_count / nobs)
+        dfbeta_threshold = 2.0 / math.sqrt(nobs)
+
+        row_flags = (
+            (cooks_d > cooks_d_threshold)
+            | (leverage > leverage_threshold)
+            | (np.abs(studentized) > STUDENTIZED_RESIDUAL_THRESHOLD)
+            | (np.abs(dffits) > dffits_threshold)
+            | (np.abs(dfbetas).max(axis=1) > dfbeta_threshold)
+        )
+        influential_rows = [
+            _row_influence_summary(
+                fit=fit,
+                row_index=row_index,
+                cooks_d=float(cooks_d[row_index]),
+                leverage=float(leverage[row_index]),
+                studentized_residual=float(studentized[row_index]),
+                dffits=float(dffits[row_index]),
+                dfbetas=dfbetas[row_index],
+                cooks_d_threshold=cooks_d_threshold,
+                leverage_threshold=leverage_threshold,
+                dffits_threshold=dffits_threshold,
+                dfbeta_threshold=dfbeta_threshold,
+            )
+            for row_index in np.flatnonzero(row_flags)
+        ]
+        influence_sensitivity = _summarize_influence_sensitivity(
+            fit,
+            cooks_d=cooks_d,
+            cooks_d_threshold=cooks_d_threshold,
+        )
+        logger.info(
+            "diagnostics backend=%s status=computed row_count=%d keyword_count=%d influential_count=%d",
+            fit.backend,
+            nobs,
+            int(fit.model_data["target_keyword_id"].nunique()),
+            len(influential_rows),
+        )
+        influence_block = {
             "status": "computed",
             "row_count": nobs,
             "nobs": nobs,
@@ -666,7 +703,24 @@ def summarize_backend_diagnostics_from_fit(
             "influential_count": int(len(influential_rows)),
             "influential_rate": float(len(influential_rows) / nobs),
             "rows": influential_rows,
-        },
+        }
+
+    return {
+        "backend": fit.backend,
+        "score_column": fit.score_column,
+        "status": "computed",
+        "row_count": nobs,
+        "keyword_count": int(fit.model_data["target_keyword_id"].nunique()),
+        "omitted_controls": [dict(control) for control in fit.omitted_controls],
+        "model_formula": fit.feature_result.model.formula,
+        "baseline_formula": fit.baseline_result.model.formula,
+        "residuals_vs_fitted": _residuals_vs_fitted_summary(residuals, fitted),
+        "reset": reset_summary,
+        "breusch_pagan": _breusch_pagan_summary(
+            breusch_pagan,
+            flagged=_breusch_pagan_flagged(breusch_pagan),
+        ),
+        "influence": influence_block,
         "influence_sensitivity": influence_sensitivity,
     } | ({"shapiro": shapiro} if shapiro is not None else {})
 
@@ -711,16 +765,26 @@ def _reset_summary(feature_result) -> dict[str, object]:
 
 def _safe_influence_arrays(
     influence,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Extract influence arrays without surfacing statsmodels precision warnings."""
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
+    """Extract influence arrays without surfacing statsmodels precision warnings.
 
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", RuntimeWarning)
-        cooks_d = np.asarray(influence.cooks_distance[0], dtype=float)
-        leverage = np.asarray(influence.hat_matrix_diag, dtype=float)
-        studentized = np.asarray(influence.resid_studentized_external, dtype=float)
-        dffits = np.asarray(influence.dffits[0], dtype=float)
-        dfbetas = np.asarray(influence.dfbetas, dtype=float)
+    Returns None when the leave-one-out refits behind the studentized/DFFITS/
+    DFBETAS statistics hit a degenerate design and the internal SVD fails to
+    converge, so the caller can degrade the influence section instead of aborting
+    the whole stats run.
+    """
+
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            cooks_d = np.asarray(influence.cooks_distance[0], dtype=float)
+            leverage = np.asarray(influence.hat_matrix_diag, dtype=float)
+            studentized = np.asarray(influence.resid_studentized_external, dtype=float)
+            dffits = np.asarray(influence.dffits[0], dtype=float)
+            dfbetas = np.asarray(influence.dfbetas, dtype=float)
+    except (np.linalg.LinAlgError, ValueError):
+        return None
+    return cooks_d, leverage, studentized, dffits, dfbetas
     return cooks_d, leverage, studentized, dffits, dfbetas
 
 
@@ -831,6 +895,20 @@ def _summarize_influence_sensitivity(
         backend=fit.backend,
         score_column=fit.score_column,
     )
+    if isinstance(trimmed_fit, SkippedModelFit):
+        return {
+            "status": "skipped",
+            "skipped_reason": trimmed_fit.reason,
+            "cook_d_threshold": cooks_d_threshold,
+            "row_count": row_count,
+            "trimmed_row_count": int(trimmed_model_data.shape[0]),
+            "keyword_count": keyword_count,
+            "trimmed_keyword_count": int(trimmed_model_data["target_keyword_id"].nunique())
+            if not trimmed_model_data.empty
+            else 0,
+            "influential_row_count": influential_row_count,
+            "influential_row_rate": influential_row_rate,
+        }
     if trimmed_fit is None:
         return {
             "status": "skipped",

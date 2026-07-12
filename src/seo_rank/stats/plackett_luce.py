@@ -18,6 +18,8 @@ from scipy import optimize, stats
 from scipy.special import logsumexp
 from seo_rank.stats.model_inputs import (
     REQUIRED_CONTROL_COLUMNS,
+    SVD_DID_NOT_CONVERGE,
+    SkippedModelFit,
     control_error_summary,
     validate_control_columns,
 )
@@ -121,7 +123,7 @@ def fit_backend_plackett_luce(
     backend: str,
     max_rank: int = DEFAULT_MAX_SERP_RANK,
     optimizer_options: dict[str, object] | None = None,
-) -> PlackettLuceFit | None:
+) -> PlackettLuceFit | SkippedModelFit | None:
     """Fit a PL model for one backend."""
 
     return fit_plackett_luce_for_score_column(
@@ -140,7 +142,7 @@ def fit_plackett_luce_for_score_column(
     score_column: str,
     max_rank: int = DEFAULT_MAX_SERP_RANK,
     optimizer_options: dict[str, object] | None = None,
-) -> PlackettLuceFit | None:
+) -> PlackettLuceFit | SkippedModelFit | None:
     """Fit a PL model for one arbitrary signal column."""
 
     logger.debug("fitting plackett-luce backend=%s max_rank=%d", label, max_rank)
@@ -169,7 +171,7 @@ def fit_plackett_luce_for_prepared_model_data(
     score_column: str,
     optimizer_options: dict[str, object] | None = None,
     sorted_model_data: pd.DataFrame | None = None,
-) -> PlackettLuceFit | None:
+) -> PlackettLuceFit | SkippedModelFit | None:
     """Fit a PL model from an already prepared pandas panel."""
 
     model_data = sorted_model_data if sorted_model_data is not None else raw_model_data
@@ -226,7 +228,16 @@ def fit_plackett_luce_for_prepared_model_data(
         grouped,
     )
     information = -hessian
-    information_inverse = np.linalg.pinv(information)
+    try:
+        information_inverse = np.linalg.pinv(information)
+    except (np.linalg.LinAlgError, ValueError):
+        # ponytail: match entities.py — singular/near-singular Hessian must not abort Phase 5
+        logger.warning(
+            "plackett-luce backend=%s status=skipped skipped_reason=%s",
+            label,
+            SVD_DID_NOT_CONVERGE,
+        )
+        return SkippedModelFit(reason=SVD_DID_NOT_CONVERGE)
     cluster_scores = np.vstack(
         [_group_score_contribution(group["features"], params) for group in grouped]
     )
@@ -393,7 +404,7 @@ def fit_plackett_luce_backends(
     *,
     max_rank: int = DEFAULT_MAX_SERP_RANK,
     optimizer_options: dict[str, object] | None = None,
-) -> dict[str, PlackettLuceFit | None]:
+) -> dict[str, PlackettLuceFit | SkippedModelFit | None]:
     """Fit the PL model once per backend."""
 
     return {
@@ -414,10 +425,10 @@ def fit_plackett_luce_rank_depths(
     depth_order: Sequence[str],
     spec: AnalysisSpec,
     optimizer_options: dict[str, object] | None = None,
-) -> dict[str, dict[str, PlackettLuceFit | None]]:
+) -> dict[str, dict[str, PlackettLuceFit | SkippedModelFit | None]]:
     """Fit PL once per backend at each confirmatory rank depth."""
 
-    fits_by_depth: dict[str, dict[str, PlackettLuceFit | None]] = {}
+    fits_by_depth: dict[str, dict[str, PlackettLuceFit | SkippedModelFit | None]] = {}
     for depth_key in depth_order:
         depth_mart = filter_panel_by_max_rank(
             analysis_mart,
@@ -438,7 +449,7 @@ def summarize_plackett_luce_rank_depths(
     *,
     depth_order: Sequence[str],
     spec: AnalysisSpec,
-    fits_by_depth: dict[str, dict[str, PlackettLuceFit | None]] | None = None,
+    fits_by_depth: dict[str, dict[str, PlackettLuceFit | SkippedModelFit | None]] | None = None,
 ) -> dict[str, object]:
     """Summarize PL for every confirmatory rank depth."""
 
@@ -501,7 +512,7 @@ def summarize_plackett_luce_backends_from_fits(
     analysis_mart: pl.DataFrame,
     backend_order: Sequence[str],
     *,
-    fits: dict[str, PlackettLuceFit | None],
+    fits: dict[str, PlackettLuceFit | SkippedModelFit | None],
 ) -> dict[str, object]:
     """Summarize PL results from precomputed fits."""
 
@@ -539,7 +550,7 @@ def summarize_plackett_luce_diagnostics_backends_from_fits(
     analysis_mart: pl.DataFrame,
     backend_order: Sequence[str],
     *,
-    fits: dict[str, PlackettLuceFit | None],
+    fits: dict[str, PlackettLuceFit | SkippedModelFit | None],
     include_iia_sensitivity: bool = False,
 ) -> dict[str, object]:
     """Summarize PL diagnostics from precomputed fits."""
@@ -643,12 +654,40 @@ def _summarize_backend_plackett_luce_result(
     analysis_mart: pl.DataFrame,
     *,
     backend: str,
-    fit: PlackettLuceFit | None,
+    fit: PlackettLuceFit | SkippedModelFit | None,
     include_diagnostics: bool,
     include_iia_sensitivity: bool = False,
     max_rank: int = DEFAULT_MAX_SERP_RANK,
     score_column: str | None = None,
 ) -> dict[str, object]:
+    if isinstance(fit, SkippedModelFit):
+        if score_column is None:
+            score_column = _score_column_for_backend(backend)
+        model_frame = _prepare_plackett_luce_frame(analysis_mart, max_rank=max_rank)
+        score_rows = model_frame.filter(pl.col(score_column).is_not_null())
+        prepared_rows = score_rows.height
+        keyword_count = (
+            score_rows["target_keyword_id"].n_unique() if not score_rows.is_empty() else 0
+        )
+        logger.info(
+            "plackett-luce backend=%s status=skipped skipped_reason=%s "
+            "row_count=%d keyword_count=%d",
+            backend,
+            fit.reason,
+            prepared_rows,
+            keyword_count,
+        )
+        skipped = {
+            "backend": backend,
+            "score_column": score_column,
+            "status": "skipped",
+            "skipped_reason": fit.reason,
+            "row_count": prepared_rows,
+            "keyword_count": keyword_count,
+        }
+        if include_diagnostics:
+            skipped["choice_set_size_summary"] = _choice_set_size_summary([])
+        return skipped
     if fit is None:
         if score_column is None:
             score_column = _score_column_for_backend(backend)
@@ -774,11 +813,16 @@ def _iia_sensitivity(fit: PlackettLuceFit) -> dict[str, object]:
 
 
 def _subset_refit_summary(
-    fit: PlackettLuceFit | None,
+    fit: PlackettLuceFit | SkippedModelFit | None,
     main_log_odds_per_1sd: float,
     *,
     reference_similarity_sd: float,
 ) -> dict[str, object]:
+    if isinstance(fit, SkippedModelFit):
+        return {
+            "status": "skipped",
+            "reason": fit.reason,
+        }
     if fit is None:
         return {
             "status": "skipped",
@@ -806,7 +850,7 @@ def _subset_refit_summary(
 def _fit_subset(
     fit: PlackettLuceFit,
     row_selector,
-) -> PlackettLuceFit | None:
+) -> PlackettLuceFit | SkippedModelFit | None:
     subset = row_selector(fit.model_data)
     if subset.empty:
         return None
@@ -1192,7 +1236,11 @@ def _convergence_confirmed(
 def _condition_number(matrix: np.ndarray) -> float:
     if matrix.size == 0:
         return 0.0
-    singular_values = np.linalg.svd(matrix, compute_uv=False)
+    try:
+        singular_values = np.linalg.svd(matrix, compute_uv=False)
+    except (np.linalg.LinAlgError, ValueError):
+        # ponytail: match entities.py — treat SVD failure as infinite condition number
+        return float("inf")
     if np.any(singular_values <= 0):
         return float("inf")
     return float(singular_values.max() / singular_values.min())

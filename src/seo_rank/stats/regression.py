@@ -14,6 +14,8 @@ from scipy import stats
 from seo_rank.stats.families import SignalFamily, SignalFamilyRegistry, source_mart_for_family
 from seo_rank.stats.model_inputs import (
     REQUIRED_CONTROL_COLUMNS,
+    SVD_DID_NOT_CONVERGE,
+    SkippedModelFit,
     control_error_summary,
     validate_control_columns,
 )
@@ -87,7 +89,7 @@ def summarize_regression_families(
 def fit_regression_backends(
     analysis_mart: pl.DataFrame,
     backend_order: Sequence[str],
-) -> dict[str, BackendRegressionFit | None]:
+) -> dict[str, BackendRegressionFit | SkippedModelFit | None]:
     """Fit the pooled regression path once per backend."""
 
     return {
@@ -130,10 +132,10 @@ def fit_regression_rank_depths(
     *,
     depth_order: Sequence[str],
     spec: AnalysisSpec,
-) -> dict[str, dict[str, BackendRegressionFit | None]]:
+) -> dict[str, dict[str, BackendRegressionFit | SkippedModelFit | None]]:
     """Fit pooled regression once per backend at each confirmatory rank depth."""
 
-    fits_by_depth: dict[str, dict[str, BackendRegressionFit | None]] = {}
+    fits_by_depth: dict[str, dict[str, BackendRegressionFit | SkippedModelFit | None]] = {}
     for depth_key in depth_order:
         depth_mart = filter_panel_by_max_rank(
             analysis_mart,
@@ -187,7 +189,7 @@ def summarize_regression_backends_from_fits(
     analysis_mart: pl.DataFrame,
     backend_order: Sequence[str],
     *,
-    fits: dict[str, BackendRegressionFit | None],
+    fits: dict[str, BackendRegressionFit | SkippedModelFit | None],
 ) -> dict[str, object]:
     """Summarize the pooled regression path from precomputed fits."""
 
@@ -254,9 +256,31 @@ def _summarize_backend_regression_result(
     analysis_mart: pl.DataFrame,
     *,
     backend: str,
-    fit: BackendRegressionFit | None,
+    fit: BackendRegressionFit | SkippedModelFit | None,
     score_column: str | None = None,
 ) -> dict[str, object]:
+    if isinstance(fit, SkippedModelFit):
+        if score_column is None:
+            score_column = _score_column_for_backend(backend)
+        model_frame = _prepare_regression_frame(analysis_mart, score_column)
+        row_count = model_frame.height
+        keyword_count = (
+            model_frame["target_keyword_id"].n_unique() if not model_frame.is_empty() else 0
+        )
+        logger.info(
+            "regression backend=%s status=skipped skipped_reason=%s row_count=%d keyword_count=%d",
+            backend,
+            fit.reason,
+            row_count,
+            keyword_count,
+        )
+        return _skipped_backend_summary(
+            backend=backend,
+            score_column=score_column,
+            skipped_reason=fit.reason,
+            row_count=row_count,
+            keyword_count=keyword_count,
+        )
     if fit is None:
         if score_column is None:
             score_column = _score_column_for_backend(backend)
@@ -380,7 +404,7 @@ def fit_backend_regression(
     analysis_mart: pl.DataFrame,
     *,
     backend: str,
-) -> BackendRegressionFit | None:
+) -> BackendRegressionFit | SkippedModelFit | None:
     return fit_regression_for_score_column(
         analysis_mart,
         label=backend,
@@ -393,7 +417,7 @@ def fit_regression_for_score_column(
     *,
     label: str,
     score_column: str,
-) -> BackendRegressionFit | None:
+) -> BackendRegressionFit | SkippedModelFit | None:
     logger.debug("fitting regression backend=%s", label)
     model_frame = _prepare_regression_frame(analysis_mart, score_column)
     if model_frame.is_empty():
@@ -411,6 +435,8 @@ def fit_regression_for_score_column(
         label=label,
         score_column=score_column,
     )
+    if isinstance(fit, SkippedModelFit):
+        return fit
     if fit is None:
         logger.debug("regression backend=%s skipped: non-positive residual df", label)
         return None
@@ -429,7 +455,7 @@ def _fit_backend_regression_from_model_data(
     *,
     label: str,
     score_column: str,
-) -> BackendRegressionFit | None:
+) -> BackendRegressionFit | SkippedModelFit | None:
     model_data = model_data.copy()
     _coerce_regression_predictor(model_data, score_column)
     keyword_count = int(model_data["target_keyword_id"].nunique())
@@ -450,46 +476,55 @@ def _fit_backend_regression_from_model_data(
     similarity_within_keyword_sd = within_keyword_sd_rms(model_data, score_column)
     model_data["outcome"] = -np.log(model_data["serp_rank"].astype(float))
 
-    if keyword_count >= 2:
-        feature_formula = _public_feature_formula(
-            score_column,
-            keyword_count,
-            fitted_control_columns,
+    try:
+        if keyword_count >= 2:
+            feature_formula = _public_feature_formula(
+                score_column,
+                keyword_count,
+                fitted_control_columns,
+            )
+            baseline_formula = _public_baseline_formula(
+                keyword_count,
+                fitted_control_columns,
+            )
+            baseline_result = smf.ols(baseline_formula, data=model_data).fit()
+            feature_result = smf.ols(feature_formula, data=model_data).fit()
+            if feature_result.df_resid <= 0:
+                return None
+            # df_resid uses matrix rank, but statsmodels' cluster-robust small-sample
+            # correction divides by (nobs - raw exog column count). A column-rank-
+            # deficient design (e.g. tied predictor values within a keyword group)
+            # can leave df_resid > 0 while nobs <= exog.shape[1], causing a
+            # ZeroDivisionError inside get_robustcov_results.
+            if feature_result.nobs <= feature_result.model.exog.shape[1]:
+                return None
+            clustered_result = feature_result.get_robustcov_results(
+                cov_type="cluster",
+                groups=model_data["target_keyword_id"],
+            )
+        else:
+            baseline_formula = _public_baseline_formula(
+                keyword_count,
+                fitted_control_columns,
+            )
+            feature_formula = _public_feature_formula(
+                score_column,
+                keyword_count,
+                fitted_control_columns,
+            )
+            baseline_result = smf.ols(baseline_formula, data=model_data).fit()
+            feature_result = smf.ols(feature_formula, data=model_data).fit()
+            if feature_result.df_resid <= 0:
+                return None
+            clustered_result = feature_result.get_robustcov_results(cov_type="HC3")
+    except (np.linalg.LinAlgError, ValueError):
+        # ponytail: match entities.py — SVD/singular OLS must not abort Phase 5
+        logger.warning(
+            "regression backend=%s status=skipped skipped_reason=%s",
+            label,
+            SVD_DID_NOT_CONVERGE,
         )
-        baseline_formula = _public_baseline_formula(
-            keyword_count,
-            fitted_control_columns,
-        )
-        baseline_result = smf.ols(baseline_formula, data=model_data).fit()
-        feature_result = smf.ols(feature_formula, data=model_data).fit()
-        if feature_result.df_resid <= 0:
-            return None
-        # df_resid uses matrix rank, but statsmodels' cluster-robust small-sample
-        # correction divides by (nobs - raw exog column count). A column-rank-
-        # deficient design (e.g. tied predictor values within a keyword group)
-        # can leave df_resid > 0 while nobs <= exog.shape[1], causing a
-        # ZeroDivisionError inside get_robustcov_results.
-        if feature_result.nobs <= feature_result.model.exog.shape[1]:
-            return None
-        clustered_result = feature_result.get_robustcov_results(
-            cov_type="cluster",
-            groups=model_data["target_keyword_id"],
-        )
-    else:
-        baseline_formula = _public_baseline_formula(
-            keyword_count,
-            fitted_control_columns,
-        )
-        feature_formula = _public_feature_formula(
-            score_column,
-            keyword_count,
-            fitted_control_columns,
-        )
-        baseline_result = smf.ols(baseline_formula, data=model_data).fit()
-        feature_result = smf.ols(feature_formula, data=model_data).fit()
-        if feature_result.df_resid <= 0:
-            return None
-        clustered_result = feature_result.get_robustcov_results(cov_type="HC3")
+        return SkippedModelFit(reason=SVD_DID_NOT_CONVERGE)
 
     return BackendRegressionFit(
         backend=label,

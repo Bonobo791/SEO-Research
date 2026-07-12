@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import json
 
+import numpy as np
 import polars as pl
+import pytest
+
+import seo_rank.stats.textrazor_explainability as textrazor_module
 
 from seo_rank.stats.textrazor_explainability import (
     CURATED_RANKING_SCORE_COLUMNS,
@@ -223,3 +227,20 @@ def test_summarize_textrazor_ranking_explainability_reports_metric_coverage() ->
     coverage = summary["panel"]["metric_coverage"]
     assert coverage["textrazor_entity_confidence_score"]["non_null"] == panel.height
     assert coverage["textrazor_relation_count"]["non_null"] == panel.height
+
+
+def test_fit_multivariate_ranking_model_skips_when_ols_svd_does_not_converge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _BoomModel:
+        def fit(self, *_args, **_kwargs):
+            raise np.linalg.LinAlgError("SVD did not converge")
+
+    monkeypatch.setattr(textrazor_module.smf, "ols", lambda *_a, **_k: _BoomModel())
+
+    fit = fit_multivariate_ranking_model(
+        _textrazor_panel_frame(),
+        score_columns=["textrazor_entity_confidence_score"],
+    )
+
+    assert fit is None or fit.get("status") == "skipped"

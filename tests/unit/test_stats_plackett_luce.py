@@ -642,3 +642,49 @@ def test_plackett_luce_keeps_signal_null_filter_local_to_that_backend() -> None:
 
     assert summary["status"] in {"computed", "unstable"}
     assert summary["row_count"] == frame.height - 12
+
+
+def test_condition_number_returns_inf_when_svd_does_not_converge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def boom(*_args, **_kwargs):
+        raise np.linalg.LinAlgError("SVD did not converge")
+
+    monkeypatch.setattr(plackett_luce_module.np.linalg, "svd", boom)
+
+    assert plackett_luce_module._condition_number(np.eye(2)) == float("inf")
+
+
+def test_fit_plackett_luce_returns_skipped_fit_when_pinv_svd_does_not_converge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def boom(*_args, **_kwargs):
+        raise np.linalg.LinAlgError("SVD did not converge")
+
+    monkeypatch.setattr(plackett_luce_module.np.linalg, "pinv", boom)
+
+    fit = fit_plackett_luce_for_score_column(
+        _sample_plackett_luce_panel(keyword_count=4, items_per_keyword=4),
+        label="bge",
+        score_column="bge_normalized_score",
+    )
+
+    assert isinstance(fit, plackett_luce_module.SkippedModelFit)
+    assert fit.reason == "svd_did_not_converge"
+
+
+def test_summarize_backend_plackett_luce_skips_when_pinv_svd_does_not_converge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def boom(*_args, **_kwargs):
+        raise np.linalg.LinAlgError("SVD did not converge")
+
+    monkeypatch.setattr(plackett_luce_module.np.linalg, "pinv", boom)
+
+    summary = summarize_backend_plackett_luce(
+        _sample_plackett_luce_panel(keyword_count=4, items_per_keyword=4),
+        backend="bge",
+    )
+
+    assert summary["status"] == "skipped"
+    assert summary["skipped_reason"] == "svd_did_not_converge"

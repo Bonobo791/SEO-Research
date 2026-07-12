@@ -3,12 +3,21 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 import pandas as pd
 
 
 REQUIRED_CONTROL_COLUMNS = ("site_scale",)
 CONTROL_ERROR_NOTE = "required control data is incomplete; model not fit"
+SVD_DID_NOT_CONVERGE = "svd_did_not_converge"
+
+
+@dataclass(frozen=True)
+class SkippedModelFit:
+    """Sentinel for a model that was eligible but failed numerically during fit."""
+
+    reason: str
 
 
 def validate_control_columns(

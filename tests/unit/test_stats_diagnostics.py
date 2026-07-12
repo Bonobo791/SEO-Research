@@ -500,3 +500,44 @@ def test_diagnostics_reports_control_error_instead_of_omitting_null_control() ->
     assert summary["invalid_controls"] == [
         {"column": "site_scale", "reason": "missing_values"}
     ]
+
+
+def test_summarize_multivariate_sensitivity_skips_when_ols_svd_does_not_converge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _BoomModel:
+        def fit(self, *_args, **_kwargs):
+            raise np.linalg.LinAlgError("SVD did not converge")
+
+    monkeypatch.setattr(diagnostics_module.smf, "ols", lambda *_a, **_k: _BoomModel())
+    spec = load_analysis_spec()
+
+    summary = diagnostics_module.summarize_multivariate_sensitivity(
+        _multivariate_panel_frame(collinear=False),
+        vif_threshold=spec.multivariate_vif_threshold,
+        backend_drop_order=spec.backend_drop_order,
+    )
+
+    assert summary["status"] == "skipped"
+    assert summary["skipped_reason"] == "svd_did_not_converge"
+
+
+def test_summarize_backend_diagnostics_skips_when_ols_svd_does_not_converge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _BoomModel:
+        def fit(self, *_args, **_kwargs):
+            raise np.linalg.LinAlgError("SVD did not converge")
+
+    monkeypatch.setattr(
+        "seo_rank.stats.regression.smf.ols",
+        lambda *_a, **_k: _BoomModel(),
+    )
+
+    summary = summarize_backend_diagnostics(
+        _diagnostics_analysis_mart_frame(),
+        backend="bge",
+    )
+
+    assert summary["status"] == "skipped"
+    assert summary["skipped_reason"] == "svd_did_not_converge"

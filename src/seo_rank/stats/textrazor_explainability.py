@@ -423,51 +423,60 @@ def fit_multivariate_ranking_model(
         if column in model_data.columns and not model_data[column].isna().any()
     )
 
-    if keyword_count >= 2:
-        baseline_formula = _public_baseline_formula(keyword_count, control_columns)
-        feature_formula = _multivariate_feature_formula(
-            score_columns, keyword_count, control_columns
-        )
-        baseline_result = smf.ols(baseline_formula, data=model_data).fit()
-        feature_result = smf.ols(feature_formula, data=model_data).fit()
-        if feature_result.df_resid <= 0:
-            return {
-                "status": "skipped",
-                "skipped_reason": "non_positive_residual_df",
-                "row_count": model_frame.height,
-                "keyword_count": keyword_count,
-            }
-        # df_resid uses matrix rank, but statsmodels' cluster-robust small-sample
-        # correction divides by (nobs - raw exog column count). A column-rank-
-        # deficient design (e.g. tied predictor values within a keyword group)
-        # can leave df_resid > 0 while nobs <= exog.shape[1], causing a
-        # ZeroDivisionError inside get_robustcov_results.
-        if feature_result.nobs <= feature_result.model.exog.shape[1]:
-            return {
-                "status": "skipped",
-                "skipped_reason": "non_positive_residual_df",
-                "row_count": model_frame.height,
-                "keyword_count": keyword_count,
-            }
-        clustered_result = feature_result.get_robustcov_results(
-            cov_type="cluster",
-            groups=model_data["target_keyword_id"],
-        )
-    else:
-        baseline_formula = _public_baseline_formula(keyword_count, control_columns)
-        feature_formula = _multivariate_feature_formula(
-            score_columns, keyword_count, control_columns
-        )
-        baseline_result = smf.ols(baseline_formula, data=model_data).fit()
-        feature_result = smf.ols(feature_formula, data=model_data).fit()
-        if feature_result.df_resid <= 0:
-            return {
-                "status": "skipped",
-                "skipped_reason": "non_positive_residual_df",
-                "row_count": model_frame.height,
-                "keyword_count": keyword_count,
-            }
-        clustered_result = feature_result.get_robustcov_results(cov_type="HC3")
+    try:
+        if keyword_count >= 2:
+            baseline_formula = _public_baseline_formula(keyword_count, control_columns)
+            feature_formula = _multivariate_feature_formula(
+                score_columns, keyword_count, control_columns
+            )
+            baseline_result = smf.ols(baseline_formula, data=model_data).fit()
+            feature_result = smf.ols(feature_formula, data=model_data).fit()
+            if feature_result.df_resid <= 0:
+                return {
+                    "status": "skipped",
+                    "skipped_reason": "non_positive_residual_df",
+                    "row_count": model_frame.height,
+                    "keyword_count": keyword_count,
+                }
+            # df_resid uses matrix rank, but statsmodels' cluster-robust small-sample
+            # correction divides by (nobs - raw exog column count). A column-rank-
+            # deficient design (e.g. tied predictor values within a keyword group)
+            # can leave df_resid > 0 while nobs <= exog.shape[1], causing a
+            # ZeroDivisionError inside get_robustcov_results.
+            if feature_result.nobs <= feature_result.model.exog.shape[1]:
+                return {
+                    "status": "skipped",
+                    "skipped_reason": "non_positive_residual_df",
+                    "row_count": model_frame.height,
+                    "keyword_count": keyword_count,
+                }
+            clustered_result = feature_result.get_robustcov_results(
+                cov_type="cluster",
+                groups=model_data["target_keyword_id"],
+            )
+        else:
+            baseline_formula = _public_baseline_formula(keyword_count, control_columns)
+            feature_formula = _multivariate_feature_formula(
+                score_columns, keyword_count, control_columns
+            )
+            baseline_result = smf.ols(baseline_formula, data=model_data).fit()
+            feature_result = smf.ols(feature_formula, data=model_data).fit()
+            if feature_result.df_resid <= 0:
+                return {
+                    "status": "skipped",
+                    "skipped_reason": "non_positive_residual_df",
+                    "row_count": model_frame.height,
+                    "keyword_count": keyword_count,
+                }
+            clustered_result = feature_result.get_robustcov_results(cov_type="HC3")
+    except (np.linalg.LinAlgError, ValueError):
+        # ponytail: match entities.py — SVD/singular OLS must not abort Phase 5
+        return {
+            "status": "skipped",
+            "skipped_reason": "svd_did_not_converge",
+            "row_count": model_frame.height,
+            "keyword_count": keyword_count,
+        }
 
     return {
         "status": "computed",
