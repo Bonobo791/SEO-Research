@@ -10,6 +10,10 @@ import numpy as np
 import pandas as pd
 import polars as pl
 import statsmodels.formula.api as smf
+from sklearn.linear_model import Ridge
+from sklearn.model_selection import GroupKFold
+from sklearn.preprocessing import StandardScaler
+from tld import get_fld
 
 from seo_rank.stats.artifacts import build_family_source_frames
 from seo_rank.stats.panel import build_limitations_for_rank_depth, load_analysis_panel
@@ -518,15 +522,32 @@ RANKING_IMPORTANCE_GROUP_ORDER: tuple[str, ...] = (
     "similarity",
     "textrazor",
     "backlinks",
-    "technical",
+    "metadata_lengths",
+    "performance",
+    "technical_checks",
     "content",
 )
+
+CURATED_IMPORTANCE_COLUMNS: tuple[str, ...] = (
+    "referring_domains_count",
+    "gemini_doc_retrieval_normalized_score",
+    "textrazor_entailment_score",
+    "onpage_score",
+    "plain_text_rate",
+    "flesch_kincaid_readability_index",
+    "title_length",
+    "description_length",
+)
+IMPORTANCE_MAX_MISSING_FRACTION = 0.5
+IMPORTANCE_MIN_VARYING_KEYWORDS = 5
+IMPORTANCE_CORRELATION_THRESHOLD = 0.95
 
 _RANKING_IMPORTANCE_FAMILY_KEYS: dict[str, tuple[str, ...]] = {
     "similarity": (),
     "textrazor": (),
     "backlinks": ("backlinks_counts",),
-    "technical": ("onpage_core_web_vitals", "onpage_technical_checks"),
+    "performance": ("onpage_core_web_vitals",),
+    "technical_checks": ("onpage_technical_checks",),
     "content": ("onpage_content_quality",),
 }
 
@@ -546,6 +567,9 @@ def ranking_importance_factor_columns(spec: AnalysisSpec) -> dict[str, tuple[str
             family_keys = spec.signal_families.similarity_keys
         elif group == "textrazor":
             family_keys = spec.signal_families.textrazor_keys
+        elif group == "metadata_lengths":
+            groups[group] = ("title_length", "description_length")
+            continue
         else:
             family_keys = _RANKING_IMPORTANCE_FAMILY_KEYS[group]
 
@@ -561,6 +585,12 @@ def ranking_importance_factor_columns(spec: AnalysisSpec) -> dict[str, tuple[str
                 continue
             seen.add(column)
             deduped.append(column)
+        if group == "technical_checks":
+            deduped = [
+                column
+                for column in deduped
+                if column not in {"title_length", "description_length"}
+            ]
         groups[group] = tuple(deduped)
     return groups
 
@@ -594,6 +624,7 @@ def summarize_ranking_relative_importance(
     *,
     spec: AnalysisSpec | None = None,
     cv_folds: int = 5,
+    cv_repeats: int = 5,
     bootstraps: int = 500,
     random_state: int = 0,
     min_complete_rows: int | None = None,
@@ -614,6 +645,7 @@ def summarize_ranking_relative_importance(
             "row_count": panel.height,
             "keyword_count": int(panel["target_keyword_id"].n_unique()) if not panel.is_empty() else 0,
             "cv_folds": cv_folds,
+            "cv_repeats": cv_repeats,
             "bootstraps": bootstraps,
             "excluded_predictors": [],
             "groups": [],
@@ -623,13 +655,13 @@ def summarize_ranking_relative_importance(
     selected_columns = prepared["selected_columns"]
     keyword_count = prepared["keyword_count"]
     control_columns = prepared["control_columns"]
-    rng = np.random.default_rng(random_state)
 
     full_r2 = _fit_importance_r_squared(
         model_data,
         selected_columns,
         keyword_count=keyword_count,
         control_columns=control_columns,
+        print_design=True,
     )
     if full_r2 is None:
         return {
@@ -638,6 +670,7 @@ def summarize_ranking_relative_importance(
             "row_count": prepared["row_count"],
             "keyword_count": keyword_count,
             "cv_folds": cv_folds,
+            "cv_repeats": cv_repeats,
             "bootstraps": bootstraps,
             "excluded_predictors": prepared.get("excluded_predictors", []),
             "groups": [],
@@ -655,21 +688,32 @@ def summarize_ranking_relative_importance(
         coalition_cache,
     )
     shapley_total = sum(shapley_values.values())
-    oos_deltas = _keyword_grouped_cv_delta_r2(
-        model_data,
+
+    oos_panel = _prepare_oos_importance_frame(panel, factor_columns)
+    oos_result = _compute_grouped_oof_importance(
+        oos_panel,
         factor_columns,
-        selected_columns=selected_columns,
-        control_columns=control_columns,
         cv_folds=cv_folds,
-        rng=rng,
+        cv_repeats=cv_repeats,
+        random_state=random_state,
     )
-    bootstrap_cis = _bootstrap_group_partial_r2_ci(
-        model_data,
-        factor_columns,
-        selected_columns=selected_columns,
-        control_columns=control_columns,
+    oos_bootstrap = _bootstrap_oos_delta_ci(
+        oos_result,
         bootstraps=bootstraps,
-        rng=rng,
+        random_state=random_state + 1,
+    )
+    domain_holdout = _domain_holdout_oof_importance(
+        oos_panel,
+        factor_columns,
+        random_state=random_state + 2,
+        cv_repeats=cv_repeats,
+    )
+    metadata_only = _metadata_only_oof_importance(
+        oos_panel,
+        factor_columns,
+        cv_folds=cv_folds,
+        cv_repeats=cv_repeats,
+        random_state=random_state + 3,
     )
 
     groups: list[dict[str, Any]] = []
@@ -703,16 +747,30 @@ def summarize_ranking_relative_importance(
             control_columns=control_columns,
             full_r2=full_r2,
         )
-        ci = bootstrap_cis.get(group) or {}
-        if isinstance(ci, dict) and partial_r2 is not None:
-            ci = {**ci, "point": partial_r2}
+        oos_group = (oos_result or {}).get("groups", {}).get(group, {})
+        oos_ci = (oos_bootstrap or {}).get(group, {})
+        domain_group = (domain_holdout or {}).get("groups", {}).get(group, {})
+        oos_columns = tuple(
+            column
+            for column in (oos_panel.attrs.get("predictor_columns", ()) if oos_panel is not None else ())
+            if column in factor_columns[group]
+        )
         groups.append(
             {
                 "factor": group,
                 "full_model_partial_r2": partial_r2,
                 "shapley_share": shapley_share,
-                "out_of_sample_delta_r2": oos_deltas.get(group),
-                "clustered_ci": ci,
+                "out_of_sample_full_r2": oos_group.get("full_r2"),
+                "out_of_sample_reduced_r2": oos_group.get("reduced_r2"),
+                "out_of_sample_delta_r2": oos_group.get("delta_r2"),
+                "out_of_sample_delta_r2_ci": oos_ci.get("delta_r2"),
+                "out_of_sample_ndcg": oos_group.get("ndcg_full"),
+                "out_of_sample_ndcg_delta": oos_group.get("ndcg_delta"),
+                "out_of_sample_ndcg_delta_ci": oos_ci.get("ndcg_delta"),
+                "domain_holdout_delta_r2": domain_group.get("delta_r2"),
+                "domain_holdout_ndcg_delta": domain_group.get("ndcg_delta"),
+                "oos_predictor_columns": list(oos_columns),
+                "oos_predictor_count": len(oos_columns),
                 "metrics": metric_rows,
             }
         )
@@ -721,14 +779,24 @@ def summarize_ranking_relative_importance(
         "status": "computed",
         "row_count": prepared["row_count"],
         "keyword_count": keyword_count,
+        "oos_row_count": None if oos_panel is None else int(len(oos_panel)),
+        "oos_keyword_count": None if oos_panel is None else int(oos_panel["target_keyword_id"].nunique()),
         "cv_folds": cv_folds,
+        "cv_repeats": cv_repeats,
         "bootstraps": bootstraps,
         "predictor_columns": list(selected_columns),
         "excluded_predictors": prepared.get("excluded_predictors", []),
         "full_model_r_squared": full_r2,
+        "out_of_sample_full_r2": None if oos_result is None else oos_result.get("full_r2"),
+        "out_of_sample_ndcg": None if oos_result is None else oos_result.get("ndcg_full"),
+        "metadata_only_oos_r_squared": None if metadata_only is None else metadata_only.get("full_r2"),
+        "metadata_only_oos_ndcg": None if metadata_only is None else metadata_only.get("ndcg_full"),
+        "warnings": ["cv_repeats=1 is exploratory; fold-assignment uncertainty is not sampled."] if cv_repeats == 1 else [],
         "oos_note": (
-            "Out-of-sample delta R² uses keyword-grouped CV and omits keyword "
-            "fixed effects when predicting held-out keywords."
+            "OOS uses repeated keyword GroupKFold with fold-local Ridge "
+            "(log1p counts, standardize, NZV/duplicate drop, median impute), "
+            "pooled OOF R², and keyword-bootstrap CIs for the OOS delta. "
+            "In-sample partial R² / Shapley stay on the complete-case OLS path."
         ),
         "groups": groups,
     }
@@ -772,100 +840,158 @@ def _prepare_ranking_importance_context(
     if not available_columns:
         return None
 
-    target_rows = _resolve_min_complete_rows(panel.height, min_complete_rows)
-    selected_columns, excluded_predictors = _drop_sparse_importance_predictors(
-        panel,
-        available_columns,
-        min_complete_rows=target_rows,
+    excluded_predictors = [
+        {
+            "column": column,
+            "reason": "excessive_missingness",
+        }
+        for column in available_columns
+        if panel[column].null_count() / max(panel.height, 1)
+        > IMPORTANCE_MAX_MISSING_FRACTION
+    ]
+    candidate_columns = tuple(
+        dict.fromkeys(
+            [
+                *factor_columns["similarity"],
+                *factor_columns["textrazor"],
+                *CURATED_IMPORTANCE_COLUMNS,
+            ]
+        )
+    )
+    selected_columns = tuple(
+        column
+        for column in candidate_columns
+        if column in available_columns
+        and panel[column].null_count() / max(panel.height, 1)
+        <= IMPORTANCE_MAX_MISSING_FRACTION
+    )
+    control_candidates = tuple(
+        column
+        for column in REGRESSION_CONTROL_COLUMNS
+        if column in panel.columns
+        and panel[column].null_count() / max(panel.height, 1)
+        <= IMPORTANCE_MAX_MISSING_FRACTION
     )
     if not selected_columns:
         return None
 
-    required = [
-        "target_keyword_id",
-        *REGRESSION_REQUIRED_COLUMNS,
-        *[
-            column
-            for column in REGRESSION_CONTROL_COLUMNS
-            if column in panel.columns
-        ],
-        *selected_columns,
-    ]
-    present = [column for column in required if column in panel.columns]
-    model_frame = panel.select(present).drop_nulls(present)
-    if model_frame.height < 3:
+    required = ["target_keyword_id", *REGRESSION_REQUIRED_COLUMNS, *selected_columns, *control_candidates]
+    model_data = panel.select([column for column in required if column in panel.columns]).to_pandas()
+    model_data = model_data.loc[
+        model_data["target_keyword_id"].notna()
+        & model_data["serp_rank"].notna()
+        & np.isfinite(model_data["serp_rank"].astype(float))
+        & (model_data["serp_rank"].astype(float) > 0)
+    ].copy()
+    if len(model_data) < 3:
         return None
 
-    model_data = model_frame.to_pandas().copy()
     model_data["outcome"] = -np.log(model_data["serp_rank"].astype(float))
-    for column in selected_columns:
-        if column in model_data.columns and model_data[column].dtype == bool:
-            model_data[column] = model_data[column].astype(float)
+    imputation_columns = [*selected_columns, *control_candidates]
+    nuisance_columns: list[str] = []
+    for column in imputation_columns:
+        values = pd.to_numeric(model_data[column], errors="coerce")
+        missing = values.isna()
+        if missing.any():
+            indicator = f"{column}__missing"
+            model_data[indicator] = missing.astype(float)
+            nuisance_columns.append(indicator)
+        median = values.median()
+        model_data[column] = values.fillna(0.0 if pd.isna(median) else float(median))
 
-    keyword_count = int(model_data["target_keyword_id"].nunique())
+    varying_columns = [
+        column
+        for column in selected_columns
+        if (
+            model_data.groupby("target_keyword_id")[column]
+            .nunique(dropna=True)
+            .gt(1)
+            .sum()
+            >= IMPORTANCE_MIN_VARYING_KEYWORDS
+        )
+    ]
+    for left_index, left in enumerate(varying_columns):
+        if left not in varying_columns:
+            continue
+        for right in varying_columns[left_index + 1 :]:
+            if right not in varying_columns:
+                continue
+            if abs(model_data[left].corr(model_data[right])) >= IMPORTANCE_CORRELATION_THRESHOLD:
+                varying_columns.remove(right)
+                excluded_predictors.append(
+                    {"column": right, "reason": "high_correlation"}
+                )
+    selected_columns = tuple(varying_columns)
+    if not selected_columns:
+        return None
+
     control_columns = tuple(
         column
-        for column in REGRESSION_CONTROL_COLUMNS
-        if column in model_data.columns and not model_data[column].isna().any()
+        for column in control_candidates
+        if (
+            model_data.groupby("target_keyword_id")[column]
+            .nunique(dropna=True)
+            .gt(1)
+            .sum()
+            >= IMPORTANCE_MIN_VARYING_KEYWORDS
+        )
     )
+    fe_columns = [*selected_columns, *control_columns, *nuisance_columns]
+    model_data["outcome_fe"] = model_data["outcome"] - model_data.groupby(
+        "target_keyword_id"
+    )["outcome"].transform("mean")
+    for column in fe_columns:
+        model_data[f"{column}_fe"] = model_data[column] - model_data.groupby(
+            "target_keyword_id"
+        )[column].transform("mean")
+
+    accepted_controls: list[str] = []
+    accepted_nuisance_columns: list[str] = []
+    base_fe_columns: list[str] = []
+    base_rank = 0
+    for column in [*control_columns, *nuisance_columns]:
+        fe_column = f"{column}_fe"
+        if fe_column not in model_data.columns:
+            continue
+        candidate_rank = np.linalg.matrix_rank(
+            model_data[[*base_fe_columns, fe_column]].to_numpy(dtype=float)
+        )
+        if candidate_rank == base_rank:
+            continue
+        base_fe_columns.append(fe_column)
+        base_rank = candidate_rank
+        if column in control_columns:
+            accepted_controls.append(column)
+        else:
+            accepted_nuisance_columns.append(column)
+    control_columns = tuple(accepted_controls)
+    nuisance_columns = accepted_nuisance_columns
+    accepted_columns: list[str] = []
+    current_rank = base_rank
+    for column in selected_columns:
+        candidate = model_data[[*base_fe_columns, *[f"{item}_fe" for item in [*accepted_columns, column]]]].to_numpy(dtype=float)
+        candidate_rank = np.linalg.matrix_rank(candidate)
+        if candidate_rank == current_rank:
+            excluded_predictors.append({"column": column, "reason": "collinear"})
+            continue
+        accepted_columns.append(column)
+        current_rank = candidate_rank
+    selected_columns = tuple(accepted_columns)
+    if not selected_columns:
+        return None
+    model_data.attrs["within_keyword_fe"] = True
+    model_data.attrs["nuisance_columns"] = tuple(nuisance_columns)
+
+    keyword_count = int(model_data["target_keyword_id"].nunique())
     return {
         "model_data": model_data,
+        "candidate_columns": candidate_columns,
         "selected_columns": selected_columns,
         "excluded_predictors": excluded_predictors,
         "keyword_count": keyword_count,
         "control_columns": control_columns,
-        "row_count": model_frame.height,
+        "row_count": len(model_data),
     }
-
-
-def _resolve_min_complete_rows(panel_height: int, min_complete_rows: int | None) -> int:
-    if min_complete_rows is not None:
-        return max(3, int(min_complete_rows))
-    # Keep enough rows for keyword-FE OLS without requiring a perfect join across
-    # sparse onpage/backlinks fields. Analysis-only; never mutates parquet.
-    return max(3, min(panel_height, max(30, panel_height // 4)))
-
-
-def _drop_sparse_importance_predictors(
-    panel: pl.DataFrame,
-    columns: Sequence[str],
-    *,
-    min_complete_rows: int,
-) -> tuple[tuple[str, ...], list[dict[str, str]]]:
-    """Drop sparsest predictors until complete-case rows meet the floor.
-
-    Operates on the in-memory RI panel only — source marts are untouched.
-    """
-
-    selected = list(columns)
-    excluded: list[dict[str, str]] = []
-
-    def _complete_count(cols: Sequence[str]) -> int:
-        if not cols:
-            return panel.height
-        return panel.select(list(cols)).drop_nulls(list(cols)).height
-
-    while selected and _complete_count(selected) < min_complete_rows:
-        null_counts = [
-            (column, int(panel[column].null_count()))
-            for column in selected
-        ]
-        null_counts.sort(key=lambda item: (-item[1], item[0]))
-        worst_column, _ = null_counts[0]
-        if int(panel[worst_column].null_count()) == 0:
-            # No sparse columns left; cannot reach the floor by dropping.
-            break
-        selected.remove(worst_column)
-        excluded.append(
-            {
-                "column": worst_column,
-                "reason": "sparse_complete_case",
-            }
-        )
-
-    if _complete_count(selected) < 3:
-        return (), excluded
-    return tuple(selected), excluded
 
 
 def _available_predictor_columns(
@@ -909,9 +1035,22 @@ def _fit_importance_r_squared(
     keyword_count: int,
     control_columns: Sequence[str],
     include_keyword_fixed_effects: bool = True,
+    print_design: bool = False,
 ) -> float | None:
     try:
-        if include_keyword_fixed_effects and keyword_count >= 2:
+        if model_data.attrs.get("within_keyword_fe"):
+            nuisance_columns = tuple(model_data.attrs.get("nuisance_columns", ()))
+            terms = [
+                f"{column}_fe"
+                for column in [*score_columns, *control_columns, *nuisance_columns]
+                if f"{column}_fe" in model_data.columns
+            ]
+            feature_formula = (
+                "outcome_fe ~ 0 + " + " + ".join(terms)
+                if terms
+                else "outcome_fe ~ 1"
+            )
+        elif include_keyword_fixed_effects and keyword_count >= 2:
             baseline_formula = _public_baseline_formula(keyword_count, control_columns)
             feature_formula = _multivariate_feature_formula(
                 score_columns,
@@ -919,12 +1058,26 @@ def _fit_importance_r_squared(
                 control_columns,
             )
         else:
-            baseline_formula = _oos_baseline_formula(control_columns)
             feature_formula = _oos_feature_formula(score_columns, control_columns)
-        feature_result = smf.ols(feature_formula, data=model_data).fit()
+
+        model = smf.ols(feature_formula, data=model_data)
+        if print_design:
+            design_rank = np.linalg.matrix_rank(model.exog)
+            print("Complete rows:", len(model_data))
+            print("Signals:", len(score_columns))
+            print("Keywords:", model_data["target_keyword_id"].nunique())
+            print("Controls:", len(control_columns))
+            print("Design columns:", model.exog.shape[1])
+            print("Design rank:", design_rank)
+            print("Residual df:", model.exog.shape[0] - design_rank)
+        feature_result = model.fit()
+        if print_design:
+            print("R-squared:", feature_result.rsquared)
+            print("Adjusted R-squared:", feature_result.rsquared_adj)
+            print("Condition number:", feature_result.condition_number)
+            print("Parameters:", feature_result.params)
+            print("Standard errors:", feature_result.bse)
         if feature_result.df_resid <= 0:
-            return None
-        if feature_result.nobs <= feature_result.model.exog.shape[1]:
             return None
         return float(feature_result.rsquared)
     except (np.linalg.LinAlgError, ValueError):
@@ -1017,163 +1170,503 @@ def _shapley_r_squared_values(
     return shapley
 
 
-def _keyword_grouped_cv_delta_r2(
-    model_data: Any,
+def _prepare_oos_importance_frame(
+    panel: pl.DataFrame,
     factor_columns: Mapping[str, Sequence[str]],
+) -> pd.DataFrame | None:
+    """Build an OOS frame that keeps null predictors for fold-local preprocessing."""
+
+    requested = [column for columns in factor_columns.values() for column in columns]
+    available = _available_predictor_columns(panel, requested)
+    if not available:
+        return None
+    controls = [
+        column
+        for column in REGRESSION_CONTROL_COLUMNS
+        if column in panel.columns and column not in available
+    ]
+    predictors = tuple([*available, *controls])
+    required = ["target_keyword_id", "serp_rank", *predictors]
+    if "url" in panel.columns:
+        required.append("url")
+    present = [column for column in required if column in panel.columns]
+    frame = panel.select(present).drop_nulls(["target_keyword_id", "serp_rank"])
+    if frame.height < 3:
+        return None
+    model_data = frame.to_pandas().copy()
+    model_data["outcome"] = -np.log(model_data["serp_rank"].astype(float))
+    if "url" in model_data.columns:
+        model_data["domain"] = model_data["url"].map(_extract_domain)
+    for column in predictors:
+        if column in model_data.columns and model_data[column].dtype == bool:
+            model_data[column] = model_data[column].astype(float)
+    model_data.attrs["predictor_columns"] = predictors
+    return model_data
+
+
+def _extract_domain(url: object) -> str | None:
+    if url is None or (isinstance(url, float) and np.isnan(url)):
+        return None
+    return get_fld(str(url).strip(), fix_protocol=True, fail_silently=True)
+
+
+def _balanced_group_folds(
+    groups: Sequence[object],
     *,
-    selected_columns: Sequence[str],
-    control_columns: Sequence[str],
-    cv_folds: int,
+    n_splits: int,
     rng: np.random.Generator,
-) -> dict[str, float | None]:
-    keywords = sorted(model_data["target_keyword_id"].unique())
-    if len(keywords) < max(cv_folds, 2):
-        return {group: None for group in RANKING_IMPORTANCE_GROUP_ORDER}
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Approximate equal keyword counts per fold (e.g. 5/5/5/5/4)."""
 
-    shuffled = list(keywords)
-    rng.shuffle(shuffled)
-    fold_size = max(1, len(shuffled) // cv_folds)
-    group_deltas: dict[str, list[float]] = {
-        group: [] for group in RANKING_IMPORTANCE_GROUP_ORDER
-    }
-
-    for fold_index in range(cv_folds):
-        start = fold_index * fold_size
-        end = len(shuffled) if fold_index == cv_folds - 1 else (fold_index + 1) * fold_size
-        test_keywords = set(shuffled[start:end])
-        if not test_keywords:
+    unique_groups = np.array(sorted(set(groups), key=str), dtype=object)
+    if unique_groups.size < max(n_splits, 2):
+        return []
+    order = rng.permutation(unique_groups.size)
+    shuffled = unique_groups[order]
+    folds = [np.asarray(part, dtype=object) for part in np.array_split(shuffled, n_splits)]
+    group_array = np.asarray(list(groups), dtype=object)
+    splits: list[tuple[np.ndarray, np.ndarray]] = []
+    for fold_groups in folds:
+        test_mask = np.isin(group_array, fold_groups)
+        train_idx = np.flatnonzero(~test_mask)
+        test_idx = np.flatnonzero(test_mask)
+        if train_idx.size == 0 or test_idx.size == 0:
             continue
-        train_mask = ~model_data["target_keyword_id"].isin(test_keywords)
-        test_mask = model_data["target_keyword_id"].isin(test_keywords)
-        train = model_data.loc[train_mask]
-        test = model_data.loc[test_mask]
-        if train.empty or test.empty:
+        splits.append((train_idx, test_idx))
+    return splits
+
+
+def _pooled_r_squared(y_true: np.ndarray, y_pred: np.ndarray) -> float | None:
+    if y_true.size < 2:
+        return None
+    ss_res = float(np.sum(np.square(y_true - y_pred)))
+    ss_tot = float(np.sum(np.square(y_true - np.mean(y_true))))
+    if ss_tot <= 0:
+        return None
+    return 1.0 - ss_res / ss_tot
+
+
+def _is_count_like(series: pd.Series, column: str) -> bool:
+    name = column.lower()
+    if name.endswith("_count") or name.endswith("_ms") or name.endswith("_size"):
+        return True
+    if pd.api.types.is_integer_dtype(series):
+        return True
+    return False
+
+
+def _preprocess_fold_matrices(
+    train: pd.DataFrame,
+    test: pd.DataFrame,
+    columns: Sequence[str],
+) -> tuple[np.ndarray, np.ndarray, list[str]] | None:
+    usable = [column for column in columns if column in train.columns]
+    if not usable:
+        return None
+
+    train_x = train.loc[:, usable].copy()
+    test_x = test.loc[:, usable].copy()
+
+    # Near-zero variance on training fold.
+    keep: list[str] = []
+    for column in usable:
+        values = pd.to_numeric(train_x[column], errors="coerce")
+        if values.notna().sum() == 0:
             continue
-
-        full_r2 = _eval_oos_r_squared(
-            train,
-            test,
-            selected_columns,
-            control_columns=control_columns,
-        )
-        if full_r2 is None:
+        if float(values.std(skipna=True) or 0.0) <= 1e-12:
             continue
-        for group in RANKING_IMPORTANCE_GROUP_ORDER:
-            without_columns = _columns_without_group(
-                selected_columns,
-                factor_columns[group],
-            )
-            without_r2 = _eval_oos_r_squared(
-                train,
-                test,
-                without_columns,
-                control_columns=control_columns,
-            )
-            if without_r2 is None:
-                continue
-            # Out-of-sample column is advertised as ΔR², not partial R².
-            group_deltas[group].append(float(full_r2 - without_r2))
+        keep.append(column)
+    if not keep:
+        return None
+    train_x = train_x.loc[:, keep]
+    test_x = test_x.loc[:, keep]
 
-    return {
-        group: float(np.mean(deltas)) if deltas else None
-        for group, deltas in group_deltas.items()
-    }
+    for column in keep:
+        train_col = pd.to_numeric(train_x[column], errors="coerce")
+        test_col = pd.to_numeric(test_x[column], errors="coerce")
+        if _is_count_like(train_col, column):
+            train_col = np.log1p(train_col.clip(lower=0))
+            test_col = np.log1p(test_col.clip(lower=0))
+        median = float(train_col.median()) if train_col.notna().any() else 0.0
+        train_x[column] = train_col.fillna(median)
+        test_x[column] = test_col.fillna(median)
+
+    # Drop exact duplicate training columns.
+    deduped = train_x.T.drop_duplicates().T
+    keep = list(deduped.columns)
+    train_x = train_x.loc[:, keep]
+    test_x = test_x.loc[:, keep]
+
+    scaler = StandardScaler()
+    train_matrix = scaler.fit_transform(train_x.to_numpy(dtype=float))
+    test_matrix = scaler.transform(test_x.to_numpy(dtype=float))
+    return train_matrix, test_matrix, keep
 
 
-def _eval_oos_r_squared(
-    train: Any,
-    test: Any,
-    score_columns: Sequence[str],
-    *,
-    control_columns: Sequence[str],
-) -> float | None:
+def _fit_ridge_predict(
+    train: pd.DataFrame,
+    train_y: np.ndarray,
+    test: pd.DataFrame,
+    columns: Sequence[str],
+    train_groups: np.ndarray,
+) -> np.ndarray | None:
+    if len(train) < 3 or not columns:
+        return None
+    unique_groups = np.unique(train_groups)
+    inner_splits = min(3, int(unique_groups.size))
+    alphas = np.logspace(-2, 3, 8)
     try:
-        formula = _oos_feature_formula(score_columns, control_columns)
-        result = smf.ols(formula, data=train).fit()
-        if result.df_resid <= 0:
+        if inner_splits >= 2:
+            best_alpha = float(alphas[0])
+            best_score = -np.inf
+            splitter = GroupKFold(n_splits=inner_splits)
+            for alpha in alphas:
+                fold_scores: list[float] = []
+                for inner_train, inner_valid in splitter.split(
+                    train, train_y, groups=train_groups
+                ):
+                    prepared = _preprocess_fold_matrices(
+                        train.iloc[inner_train],
+                        train.iloc[inner_valid],
+                        columns,
+                    )
+                    if prepared is None:
+                        continue
+                    inner_train_x, inner_valid_x, _ = prepared
+                    model = Ridge(alpha=float(alpha))
+                    model.fit(inner_train_x, train_y[inner_train])
+                    pred = model.predict(inner_valid_x)
+                    fold_scores.append(
+                        -float(np.mean(np.square(train_y[inner_valid] - pred)))
+                    )
+                if not fold_scores:
+                    continue
+                mean_score = float(np.mean(fold_scores))
+                if mean_score > best_score:
+                    best_score = mean_score
+                    best_alpha = float(alpha)
+            if not np.isfinite(best_score):
+                return None
+            model = Ridge(alpha=best_alpha)
+        else:
+            model = Ridge(alpha=1.0)
+        prepared = _preprocess_fold_matrices(train, test, columns)
+        if prepared is None:
             return None
-        predictions = result.predict(test)
-        outcome = -np.log(test["serp_rank"].astype(float))
-        residuals = outcome - predictions
-        ss_res = float(np.sum(np.square(residuals)))
-        ss_tot = float(np.sum(np.square(outcome - outcome.mean())))
-        if ss_tot <= 0:
-            return None
-        return 1.0 - ss_res / ss_tot
-    except (np.linalg.LinAlgError, ValueError, TypeError):
+        train_x, test_x, _ = prepared
+        model.fit(train_x, train_y)
+        return np.asarray(model.predict(test_x), dtype=float)
+    except (ValueError, np.linalg.LinAlgError):
         return None
 
 
-def _bootstrap_group_partial_r2_ci(
-    model_data: Any,
+def _keyword_ndcg(
+    frame: pd.DataFrame,
+    predictions: np.ndarray,
+    *,
+    k: int = 10,
+    group_column: str = "target_keyword_id",
+) -> float | None:
+    if frame.empty or predictions.size != len(frame) or group_column not in frame.columns:
+        return None
+    work = frame.copy()
+    work["prediction"] = predictions
+    scores: list[float] = []
+    for _, group in work.groupby(group_column, sort=False):
+        if len(group) < 2:
+            continue
+        relevance = (group["serp_rank"].max() + 1 - group["serp_rank"]).to_numpy(dtype=float)
+        order = np.argsort(-group["prediction"].to_numpy(dtype=float))
+        ranked = relevance[order]
+        cutoff = min(k, ranked.size)
+        discounts = 1.0 / np.log2(np.arange(2, cutoff + 2))
+        dcg = float(np.sum((np.power(2.0, ranked[:cutoff]) - 1.0) * discounts))
+        ideal = np.sort(relevance)[::-1]
+        idcg = float(np.sum((np.power(2.0, ideal[:cutoff]) - 1.0) * discounts))
+        if idcg <= 0:
+            continue
+        scores.append(dcg / idcg)
+    if not scores:
+        return None
+    return float(np.mean(scores))
+
+
+def _compute_grouped_oof_importance(
+    model_data: pd.DataFrame | None,
     factor_columns: Mapping[str, Sequence[str]],
     *,
-    selected_columns: Sequence[str],
-    control_columns: Sequence[str],
-    bootstraps: int,
-    rng: np.random.Generator,
-    alpha: float = 0.05,
-) -> dict[str, dict[str, float | None]]:
-    keywords = model_data["target_keyword_id"].unique().tolist()
-    if not keywords:
-        return {
-            group: {"point": None, "lower": None, "upper": None, "level": 1.0 - alpha}
-            for group in RANKING_IMPORTANCE_GROUP_ORDER
+    cv_folds: int = 5,
+    cv_repeats: int = 3,
+    random_state: int = 0,
+    group_column: str = "target_keyword_id",
+) -> dict[str, Any] | None:
+    if model_data is None or model_data.empty:
+        return None
+    predictor_columns = tuple(model_data.attrs.get("predictor_columns") or ())
+    if not predictor_columns:
+        predictor_columns = tuple(
+            column
+            for columns in factor_columns.values()
+            for column in columns
+            if column in model_data.columns
+        )
+    if not predictor_columns or group_column not in model_data.columns:
+        return None
+
+    y = model_data["outcome"].to_numpy(dtype=float)
+    groups = model_data[group_column].to_numpy()
+    n_rows = len(model_data)
+    full_pred_sum = np.zeros(n_rows, dtype=float)
+    full_pred_count = np.zeros(n_rows, dtype=float)
+    leave_pred_sum = {
+        group: np.zeros(n_rows, dtype=float) for group in RANKING_IMPORTANCE_GROUP_ORDER
+    }
+    leave_pred_count = {
+        group: np.zeros(n_rows, dtype=float) for group in RANKING_IMPORTANCE_GROUP_ORDER
+    }
+
+    rng = np.random.default_rng(random_state)
+    for repeat in range(max(1, cv_repeats)):
+        repeat_rng = np.random.default_rng(int(rng.integers(0, 2**31 - 1)))
+        splits = _balanced_group_folds(groups, n_splits=cv_folds, rng=repeat_rng)
+        for train_idx, test_idx in splits:
+            train = model_data.iloc[train_idx]
+            test = model_data.iloc[test_idx]
+            train_y = y[train_idx]
+            train_groups = groups[train_idx]
+
+            preds = _fit_ridge_predict(
+                train,
+                train_y,
+                test,
+                predictor_columns,
+                train_groups,
+            )
+            if preds is None:
+                continue
+            full_pred_sum[test_idx] += preds
+            full_pred_count[test_idx] += 1.0
+
+            for group in RANKING_IMPORTANCE_GROUP_ORDER:
+                without = tuple(
+                    column
+                    for column in predictor_columns
+                    if column not in factor_columns[group]
+                )
+                leave_preds = _fit_ridge_predict(
+                    train,
+                    train_y,
+                    test,
+                    without,
+                    train_groups,
+                )
+                if leave_preds is None:
+                    continue
+                leave_pred_sum[group][test_idx] += leave_preds
+                leave_pred_count[group][test_idx] += 1.0
+
+    covered = full_pred_count > 0
+    if not np.any(covered):
+        return None
+    full_pred = np.divide(
+        full_pred_sum,
+        np.maximum(full_pred_count, 1.0),
+    )
+    y_covered = y[covered]
+    full_r2 = _pooled_r_squared(y_covered, full_pred[covered])
+    ndcg_full = _keyword_ndcg(model_data.loc[covered], full_pred[covered])
+
+    group_results: dict[str, dict[str, Any]] = {}
+    for group in RANKING_IMPORTANCE_GROUP_ORDER:
+        leave_covered = leave_pred_count[group] > 0
+        mask = covered & leave_covered
+        if not np.any(mask):
+            group_results[group] = {
+                "full_r2": full_r2,
+                "reduced_r2": None,
+                "delta_r2": None,
+                "ndcg_full": ndcg_full,
+                "ndcg_reduced": None,
+                "ndcg_delta": None,
+            }
+            continue
+        leave_pred = np.divide(
+            leave_pred_sum[group],
+            np.maximum(leave_pred_count[group], 1.0),
+        )
+        reduced_r2 = _pooled_r_squared(y[mask], leave_pred[mask])
+        ndcg_reduced = _keyword_ndcg(model_data.loc[mask], leave_pred[mask])
+        # Recompute full R² on the same mask for an apples-to-apples delta.
+        full_on_mask = _pooled_r_squared(y[mask], full_pred[mask])
+        ndcg_full_on_mask = _keyword_ndcg(model_data.loc[mask], full_pred[mask])
+        delta = (
+            None
+            if full_on_mask is None or reduced_r2 is None
+            else float(full_on_mask - reduced_r2)
+        )
+        ndcg_delta = (
+            None
+            if ndcg_full_on_mask is None or ndcg_reduced is None
+            else float(ndcg_full_on_mask - ndcg_reduced)
+        )
+        group_results[group] = {
+            "full_r2": full_on_mask,
+            "reduced_r2": reduced_r2,
+            "delta_r2": delta,
+            "ndcg_full": ndcg_full_on_mask,
+            "ndcg_reduced": ndcg_reduced,
+            "ndcg_delta": ndcg_delta,
+            "oof_predictions": pd.DataFrame(
+                {
+                    "target_keyword_id": model_data.loc[mask, "target_keyword_id"].to_numpy(),
+                    "serp_rank": model_data.loc[mask, "serp_rank"].to_numpy(),
+                    "outcome": y[mask],
+                    "full_prediction": full_pred[mask],
+                    "reduced_prediction": leave_pred[mask],
+                }
+            ),
         }
 
-    samples: dict[str, list[float]] = {
-        group: [] for group in RANKING_IMPORTANCE_GROUP_ORDER
+    return {
+        "full_r2": full_r2,
+        "ndcg_full": ndcg_full,
+        "groups": group_results,
     }
-    for _ in range(bootstraps):
-        drawn = rng.choice(keywords, size=len(keywords), replace=True)
-        boot_frames = [model_data[model_data["target_keyword_id"] == keyword] for keyword in drawn]
-        boot_data = pd.concat(boot_frames, ignore_index=True)
-        keyword_count = int(boot_data["target_keyword_id"].nunique())
-        full_r2 = _fit_importance_r_squared(
-            boot_data,
-            selected_columns,
-            keyword_count=keyword_count,
-            control_columns=control_columns,
-        )
-        if full_r2 is None:
-            continue
-        for group in RANKING_IMPORTANCE_GROUP_ORDER:
-            without_columns = _columns_without_group(
-                selected_columns,
-                factor_columns[group],
-            )
-            without_r2 = _fit_importance_r_squared(
-                boot_data,
-                without_columns,
-                keyword_count=keyword_count,
-                control_columns=control_columns,
-            )
-            if without_r2 is None:
-                continue
-            partial = _partial_r_squared(full_r2, without_r2)
-            if partial is not None:
-                samples[group].append(float(partial))
 
-    intervals: dict[str, dict[str, float | None]] = {}
+
+def _bootstrap_oos_delta_ci(
+    oof_result: Mapping[str, Any] | None,
+    *,
+    bootstraps: int,
+    random_state: int,
+    alpha: float = 0.05,
+) -> dict[str, dict[str, dict[str, float | None]]]:
+    empty_interval = {
+        "point": None,
+        "lower": None,
+        "upper": None,
+        "level": 1.0 - alpha,
+    }
+    empty = {
+        group: {"delta_r2": dict(empty_interval), "ndcg_delta": dict(empty_interval)}
+        for group in RANKING_IMPORTANCE_GROUP_ORDER
+    }
+    if oof_result is None or bootstraps < 1:
+        return empty
+
+    rng = np.random.default_rng(random_state)
+    intervals: dict[str, dict[str, dict[str, float | None]]] = {}
     lower_q = alpha / 2.0
     upper_q = 1.0 - alpha / 2.0
     for group in RANKING_IMPORTANCE_GROUP_ORDER:
-        values = samples[group]
-        if not values:
-            intervals[group] = {
-                "point": None,
-                "lower": None,
-                "upper": None,
-                "level": 1.0 - alpha,
-            }
+        frame = oof_result.get("groups", {}).get(group, {}).get("oof_predictions")
+        if not isinstance(frame, pd.DataFrame) or frame.empty:
+            intervals[group] = empty[group]
             continue
+        keywords = frame["target_keyword_id"].unique().tolist()
+        if len(keywords) < 2:
+            intervals[group] = empty[group]
+            continue
+        r2_deltas: list[float] = []
+        ndcg_deltas: list[float] = []
+        for _ in range(bootstraps):
+            drawn = rng.choice(keywords, size=len(keywords), replace=True)
+            sampled = pd.concat(
+                [
+                    frame[frame["target_keyword_id"] == keyword].assign(
+                        _bootstrap_keyword_copy_id=copy_index
+                    )
+                    for copy_index, keyword in enumerate(drawn)
+                ],
+                ignore_index=True,
+            )
+            full_r2 = _pooled_r_squared(
+                sampled["outcome"].to_numpy(dtype=float),
+                sampled["full_prediction"].to_numpy(dtype=float),
+            )
+            reduced_r2 = _pooled_r_squared(
+                sampled["outcome"].to_numpy(dtype=float),
+                sampled["reduced_prediction"].to_numpy(dtype=float),
+            )
+            if full_r2 is not None and reduced_r2 is not None:
+                r2_deltas.append(float(full_r2 - reduced_r2))
+            ndcg_full = _keyword_ndcg(
+                sampled,
+                sampled["full_prediction"].to_numpy(dtype=float),
+                group_column="_bootstrap_keyword_copy_id",
+            )
+            ndcg_reduced = _keyword_ndcg(
+                sampled,
+                sampled["reduced_prediction"].to_numpy(dtype=float),
+                group_column="_bootstrap_keyword_copy_id",
+            )
+            if ndcg_full is not None and ndcg_reduced is not None:
+                ndcg_deltas.append(float(ndcg_full - ndcg_reduced))
         intervals[group] = {
-            "point": float(np.mean(values)),
-            "lower": float(np.quantile(values, lower_q)),
-            "upper": float(np.quantile(values, upper_q)),
-            "level": 1.0 - alpha,
+            metric: (
+                {
+                    "point": float(np.mean(values)),
+                    "lower": float(np.quantile(values, lower_q)),
+                    "upper": float(np.quantile(values, upper_q)),
+                    "level": 1.0 - alpha,
+                }
+                if values
+                else dict(empty_interval)
+            )
+            for metric, values in (("delta_r2", r2_deltas), ("ndcg_delta", ndcg_deltas))
         }
     return intervals
+
+
+def _domain_holdout_oof_importance(
+    model_data: pd.DataFrame | None,
+    factor_columns: Mapping[str, Sequence[str]],
+    *,
+    random_state: int,
+    cv_repeats: int,
+) -> dict[str, Any] | None:
+    if model_data is None or "domain" not in model_data.columns:
+        return None
+    if model_data["domain"].nunique(dropna=True) < 4:
+        return None
+    return _compute_grouped_oof_importance(
+        model_data.dropna(subset=["domain"]),
+        factor_columns,
+        cv_folds=min(5, int(model_data["domain"].nunique(dropna=True))),
+        cv_repeats=cv_repeats,
+        random_state=random_state,
+        group_column="domain",
+    )
+
+
+def _metadata_only_oof_importance(
+    model_data: pd.DataFrame | None,
+    factor_columns: Mapping[str, Sequence[str]],
+    *,
+    cv_folds: int,
+    cv_repeats: int,
+    random_state: int,
+) -> dict[str, Any] | None:
+    if model_data is None:
+        return None
+    columns = tuple(
+        column
+        for column in (*factor_columns["metadata_lengths"], *REGRESSION_CONTROL_COLUMNS)
+        if column in model_data.columns
+    )
+    if not columns:
+        return None
+    metadata_data = model_data.copy()
+    metadata_data.attrs["predictor_columns"] = columns
+    empty_groups = {group: () for group in RANKING_IMPORTANCE_GROUP_ORDER}
+    empty_groups["metadata_lengths"] = factor_columns["metadata_lengths"]
+    return _compute_grouped_oof_importance(
+        metadata_data,
+        empty_groups,
+        cv_folds=cv_folds,
+        cv_repeats=cv_repeats,
+        random_state=random_state,
+    )
 
 
 def _metric_relative_importance_rows(

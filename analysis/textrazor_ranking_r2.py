@@ -65,10 +65,16 @@ def _parse_args() -> argparse.Namespace:
         help="Keyword-grouped CV folds for out-of-sample delta R² (default: 5, minimum 2)",
     )
     parser.add_argument(
+        "--cv-repeats",
+        type=_positive_int,
+        default=5,
+        help="Repeated keyword GroupKFold repeats for OOF R² (default: 5, minimum 1)",
+    )
+    parser.add_argument(
         "--bootstraps",
         type=_positive_int,
         default=500,
-        help="Keyword-clustered bootstrap draws for partial R² CIs (default: 500, minimum 1)",
+        help="Keyword-bootstrap draws for OOS delta R² CIs (default: 500, minimum 1)",
     )
     return parser.parse_args()
 
@@ -242,8 +248,8 @@ def _render_relative_importance_table(relative_importance: object) -> str:
         return f"Relative importance: skipped ({reason}, n={row_count})"
 
     header = (
-        f"{'Factor':<34} {'Full-model partial R²':>22} {'Shapley share':>14} "
-        f"{'Out-of-sample ΔR²':>18} {'Clustered CI':>22}"
+        f"{'Factor':<14} {'Partial R²':>10} {'Shapley':>8} "
+        f"{'OOS R²':>9} {'OOS w/o':>9} {'OOS ΔR²':>9} {'OOS Δ CI':>21} {'ΔNDCG':>8}"
     )
     excluded = relative_importance.get("excluded_predictors") or []
     excluded_note = (
@@ -258,8 +264,15 @@ def _render_relative_importance_table(relative_importance: object) -> str:
         f"rows: {relative_importance.get('row_count', 0)}  "
         f"keywords: {relative_importance.get('keyword_count', 0)}  "
         f"cv_folds: {relative_importance.get('cv_folds', 0)}  "
+        f"cv_repeats: {relative_importance.get('cv_repeats', 0)}  "
         f"bootstraps: {relative_importance.get('bootstraps', 0)}"
         f"{excluded_note}",
+        f"oos_rows: {relative_importance.get('oos_row_count', 'n/a')}  "
+        f"oos_keywords: {relative_importance.get('oos_keyword_count', 'n/a')}  "
+        f"oos_full_R²: {_format_float(relative_importance.get('out_of_sample_full_r2'))}  "
+        f"oos_NDCG: {_format_float(relative_importance.get('out_of_sample_ndcg'))}",
+        f"metadata_only_oos_R²: {_format_float(relative_importance.get('metadata_only_oos_r_squared'))}  "
+        f"metadata_only_oos_NDCG: {_format_float(relative_importance.get('metadata_only_oos_ndcg'))}",
         "",
         header,
         "-" * len(header),
@@ -269,11 +282,22 @@ def _render_relative_importance_table(relative_importance: object) -> str:
         if not isinstance(group, dict):
             continue
         lines.append(
-            f"{str(group.get('factor', '')):<34} "
-            f"{_format_float(group.get('full_model_partial_r2')):>22} "
-            f"{_format_float(group.get('shapley_share')):>14} "
-            f"{_format_float(group.get('out_of_sample_delta_r2')):>18} "
-            f"{_format_ci(group.get('clustered_ci')):>22}"
+            f"{str(group.get('factor', '')):<14} "
+            f"{_format_float(group.get('full_model_partial_r2')):>10} "
+            f"{_format_float(group.get('shapley_share')):>8} "
+            f"{_format_float(group.get('out_of_sample_full_r2')):>9} "
+            f"{_format_float(group.get('out_of_sample_reduced_r2')):>9} "
+            f"{_format_float(group.get('out_of_sample_delta_r2')):>9} "
+            f"{_format_ci(group.get('out_of_sample_delta_r2_ci')):>21} "
+            f"{_format_float(group.get('out_of_sample_ndcg_delta')):>8}"
+        )
+        lines.append(
+            f"  OOS predictors ({group.get('oos_predictor_count', 0)}): "
+            + ", ".join(group.get("oos_predictor_columns", []))
+        )
+        lines.append(
+            f"  domain ΔR²={_format_float(group.get('domain_holdout_delta_r2'))} "
+            f"domain ΔNDCG={_format_float(group.get('domain_holdout_ndcg_delta'))}"
         )
         metrics = group.get("metrics")
         if not isinstance(metrics, list):
@@ -283,14 +307,15 @@ def _render_relative_importance_table(relative_importance: object) -> str:
                 continue
             label = str(metric.get("factor", metric.get("column", "")))
             lines.append(
-                f"  {label:<32} "
-                f"{_format_float(metric.get('full_model_partial_r2')):>22} "
-                f"{'':>14} {'':>18} {'':>22}"
+                f"  {label:<12} "
+                f"{_format_float(metric.get('full_model_partial_r2')):>10}"
             )
 
     oos_note = relative_importance.get("oos_note")
     if isinstance(oos_note, str) and oos_note:
         lines.extend(["", oos_note])
+    for warning in relative_importance.get("warnings", []):
+        lines.append(f"WARNING: {warning}")
     return "\n".join(lines)
 
 
@@ -352,6 +377,7 @@ def main() -> None:
         importance_panel,
         spec=spec,
         cv_folds=args.cv_folds,
+        cv_repeats=args.cv_repeats,
         bootstraps=args.bootstraps,
     )
     summary["relative_importance"] = relative_importance

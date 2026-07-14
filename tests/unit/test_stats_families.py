@@ -19,6 +19,59 @@ ONPAGE_FAMILY_KEYS = (
     "onpage_core_web_vitals",
     "onpage_technical_checks",
 )
+EXCLUDED_MODEL_COLUMNS = frozenset(
+    {
+        "is_4xx_code",
+        "is_5xx_code",
+        "is_broken",
+        "broken_links",
+        "broken_resources",
+        "resource_errors_count",
+        "no_title",
+        "no_description",
+        "no_h1_tag",
+        "duplicate_title_tag",
+        "duplicate_title",
+        "duplicate_description",
+        "duplicate_meta_tags",
+        "irrelevant_title",
+        "irrelevant_description",
+        "irrelevant_meta_keywords",
+        "no_encoding_meta_tag",
+        "no_content_encoding",
+        "https_to_http_links",
+        "no_doctype",
+        "deprecated_html_tags",
+        "has_meta_refresh_redirect",
+        "no_image_alt",
+        "high_loading_time",
+        "high_waiting_time",
+        "low_readability_rate",
+        "low_content_rate",
+        "is_www",
+        "has_html_doctype",
+        "meta_charset_consistency",
+        "from_sitemap",
+        "canonical",
+        "is_https",
+        "has_meta_title",
+        "title_too_long",
+        "title_too_short",
+        "large_page_size",
+        "size_greater_than_3mb",
+        "has_render_blocking_resources",
+        "render_blocking_scripts_count",
+        "render_blocking_stylesheets_count",
+        "scripts_size",
+        "stylesheets_size",
+        "total_transfer_size",
+        "total_dom_size",
+        "cumulative_layout_shift",
+        "largest_contentful_paint_ms",
+        "time_to_first_byte_ms",
+        "first_input_delay_ms",
+    }
+)
 ONPAGE_SIGNAL_COLUMNS = (
     frozenset(ONPAGE_FEATURES_EXTRA_COLUMNS)
     - {"onpage_signal_id"}
@@ -37,9 +90,6 @@ ONPAGE_CONTENT_QUALITY_COLUMNS = (
     "meta_keywords_to_content_consistency",
 )
 ONPAGE_CORE_WEB_VITALS_COLUMNS = (
-    "time_to_first_byte_ms",
-    "largest_contentful_paint_ms",
-    "cumulative_layout_shift",
     "connection_time_ms",
     "time_to_secure_connection_ms",
     "request_sent_time_ms",
@@ -48,51 +98,16 @@ ONPAGE_CORE_WEB_VITALS_COLUMNS = (
     "fetch_end_ms",
     "dom_complete_ms",
     "time_to_interactive_ms",
-    "first_input_delay_ms",
-    "total_transfer_size",
 )
 ONPAGE_TECHNICAL_CHECKS_COLUMNS = (
-    "title_too_long",
-    "title_too_short",
-    "no_title",
-    "no_description",
-    "no_h1_tag",
-    "canonical",
-    "is_https",
-    "has_render_blocking_resources",
-    "duplicate_meta_tags",
-    "has_meta_title",
-    "irrelevant_description",
-    "low_readability_rate",
     "has_valid_structured_data",
     "micromarkup_items_count",
     "micromarkup_errors_count",
     "micromarkup_warnings_count",
-    "is_4xx_code",
-    "is_5xx_code",
-    "is_broken",
     "is_redirect",
-    "is_www",
-    "no_content_encoding",
-    "high_loading_time",
-    "high_waiting_time",
-    "no_doctype",
-    "has_html_doctype",
-    "no_encoding_meta_tag",
-    "https_to_http_links",
-    "size_greater_than_3mb",
-    "meta_charset_consistency",
-    "has_meta_refresh_redirect",
-    "low_content_rate",
     "high_content_rate",
     "high_character_count",
     "small_page_size",
-    "large_page_size",
-    "irrelevant_title",
-    "irrelevant_meta_keywords",
-    "deprecated_html_tags",
-    "duplicate_title_tag",
-    "no_image_alt",
     "no_image_title",
     "no_favicon",
     "seo_friendly_url",
@@ -101,7 +116,6 @@ ONPAGE_TECHNICAL_CHECKS_COLUMNS = (
     "lorem_ipsum",
     "has_micromarkup",
     "has_micromarkup_errors",
-    "from_sitemap",
     "description_length",
     "title_length",
     "external_links_count",
@@ -109,11 +123,7 @@ ONPAGE_TECHNICAL_CHECKS_COLUMNS = (
     "images_count",
     "images_size",
     "scripts_count",
-    "scripts_size",
     "stylesheets_count",
-    "stylesheets_size",
-    "render_blocking_scripts_count",
-    "render_blocking_stylesheets_count",
     "follow",
     "inbound_links_count",
     "duplicate_meta_tags_count",
@@ -124,16 +134,10 @@ ONPAGE_TECHNICAL_CHECKS_COLUMNS = (
     "has_twitter_tags",
     "cache_control_cachable",
     "cache_control_ttl",
-    "resource_errors_count",
     "resource_warnings_count",
-    "broken_links",
-    "broken_resources",
     "duplicate_content",
-    "duplicate_description",
-    "duplicate_title",
     "click_depth",
     "encoded_size",
-    "total_dom_size",
 )
 
 
@@ -202,7 +206,7 @@ def test_onpage_metric_families_enable_family_plackett_luce() -> None:
     )
 
 
-def test_onpage_signal_columns_cover_onpage_features_mart() -> None:
+def test_onpage_signal_columns_cover_model_eligible_onpage_features() -> None:
     analysis_spec = load_analysis_spec()
     registry = analysis_spec.signal_families
 
@@ -210,7 +214,18 @@ def test_onpage_signal_columns_cover_onpage_features_mart() -> None:
     for key in ONPAGE_FAMILY_KEYS:
         registered_columns.update(registry.family(key).signal_columns)
 
-    assert registered_columns == set(ONPAGE_SIGNAL_COLUMNS)
+    assert registered_columns == set(ONPAGE_SIGNAL_COLUMNS) - EXCLUDED_MODEL_COLUMNS
+
+
+def test_excluded_onpage_columns_are_not_registered_for_models() -> None:
+    registry = load_analysis_spec().signal_families
+    model_columns = {
+        column
+        for family in registry.families
+        for column in family.signal_columns
+    }
+
+    assert not model_columns & EXCLUDED_MODEL_COLUMNS
 
 
 @pytest.mark.parametrize(

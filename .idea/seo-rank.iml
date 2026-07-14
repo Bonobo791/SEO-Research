@@ -18,6 +18,8 @@
       <excludeFolder url="file://$MODULE_DIR$/.venv_uv" />
       <excludeFolder url="file://$MODULE_DIR$/.headroom" />
       <excludeFolder url="file://$MODULE_DIR$/.serena/cache" />
+      <excludeFolder url="file://$MODULE_DIR$/ponytail" />
+      <excludeFolder url="file://$MODULE_DIR$/serena-guard" />
     </content>
     <orderEntry type="jdk" jdkName="Python 3.12 (SEO-Research)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
