@@ -82,9 +82,73 @@ def test_ranking_importance_factor_columns_maps_registry_groups() -> None:
     assert "backlinks_count" in groups["backlinks"]
     assert "onpage_score" in groups["content"]
     assert groups["metadata_lengths"] == ("title_length", "description_length")
-    assert "title_length" not in groups["technical_checks"]
     assert "time_to_first_byte_ms" not in groups["performance"]
-    assert "title_too_long" not in groups["technical_checks"]
+    assert "title_too_long" not in groups["content"]
+
+
+def test_ranking_importance_factor_columns_decomposes_onpage_signals() -> None:
+    groups = ranking_importance_factor_columns(load_analysis_spec())
+
+    assert RANKING_IMPORTANCE_GROUP_ORDER == (
+        "similarity",
+        "textrazor",
+        "backlinks",
+        "metadata_lengths",
+        "performance",
+        "crawl_architecture",
+        "structured_markup",
+        "document_structure",
+        "quality_flags",
+        "resource_footprint",
+        "presentation_metadata",
+        "delivery_configuration",
+        "legacy_embedding",
+        "content",
+    )
+    assert groups["crawl_architecture"] == (
+        "is_redirect",
+        "follow",
+        "inbound_links_count",
+        "click_depth",
+        "seo_friendly_url",
+    )
+    assert groups["structured_markup"] == (
+        "has_valid_structured_data",
+        "has_micromarkup",
+        "has_micromarkup_errors",
+    )
+    assert groups["document_structure"] == (
+        "h1_count",
+        "h2_count",
+        "h3_count",
+        "high_content_rate",
+        "high_character_count",
+    )
+    assert groups["quality_flags"] == (
+        "duplicate_meta_tags_count",
+        "duplicate_content",
+        "lorem_ipsum",
+    )
+    assert groups["resource_footprint"] == (
+        "images_count",
+        "images_size",
+        "scripts_count",
+        "stylesheets_count",
+        "encoded_size",
+        "small_page_size",
+        "resource_warnings_count",
+    )
+    assert groups["presentation_metadata"] == (
+        "has_og_tags",
+        "has_twitter_tags",
+        "no_favicon",
+        "no_image_title",
+    )
+    assert groups["delivery_configuration"] == (
+        "cache_control_cachable",
+        "cache_control_ttl",
+    )
+    assert groups["legacy_embedding"] == ("flash", "frame")
 
 
 def test_summarize_ranking_relative_importance_computes_group_and_metric_rows() -> None:
@@ -96,6 +160,7 @@ def test_summarize_ranking_relative_importance_computes_group_and_metric_rows() 
         cv_folds=3,
         cv_repeats=2,
         bootstraps=5,
+        shapley_permutations=4,
         random_state=0,
     )
 
@@ -107,7 +172,11 @@ def test_summarize_ranking_relative_importance_computes_group_and_metric_rows() 
     assert summary["bootstraps"] == 5
     assert len(summary["groups"]) == len(RANKING_IMPORTANCE_GROUP_ORDER)
 
-    shapley_total = sum(group["shapley_share"] for group in summary["groups"])
+    shapley_total = sum(
+        group["shapley_share"]
+        for group in summary["groups"]
+        if group["shapley_share"] is not None
+    )
     assert 0.99 <= shapley_total <= 1.01
 
     computed_partials = [
@@ -146,6 +215,30 @@ def test_summarize_ranking_relative_importance_computes_group_and_metric_rows() 
     assert metric_partials
     assert all(partial >= 0 for partial in metric_partials)
     json.dumps(summary)
+
+
+def test_relative_importance_uses_permutation_shapley(monkeypatch) -> None:
+    import seo_rank.stats.textrazor_explainability as module
+
+    panel = _ranking_importance_panel_frame()
+    monkeypatch.setattr(
+        module,
+        "_build_coalition_r_squared_cache",
+        lambda *args, **kwargs: pytest.fail("exact coalition Shapley must not run"),
+        raising=False,
+    )
+
+    summary = summarize_ranking_relative_importance(
+        panel,
+        spec=load_analysis_spec(),
+        cv_folds=3,
+        cv_repeats=1,
+        bootstraps=1,
+        shapley_permutations=3,
+    )
+
+    assert summary["shapley_method"] == "permutation"
+    assert summary["shapley_permutations"] == 3
 
 
 def test_prepare_importance_context_imputes_and_demeans_without_complete_case_drop() -> None:
@@ -188,6 +281,7 @@ def test_summarize_ranking_relative_importance_reports_ordinary_r_squared() -> N
         cv_folds=3,
         cv_repeats=1,
         bootstraps=2,
+        shapley_permutations=4,
         random_state=0,
     )
 
@@ -214,6 +308,7 @@ def test_summarize_ranking_relative_importance_skips_excessively_missing_columns
         cv_folds=3,
         cv_repeats=1,
         bootstraps=2,
+        shapley_permutations=4,
         random_state=0,
         min_complete_rows=20,
     )
@@ -347,7 +442,14 @@ def test_compute_grouped_oof_reports_full_reduced_and_delta() -> None:
         "backlinks": ("backlinks_count",),
         "metadata_lengths": (),
         "performance": ("time_to_first_byte_ms",),
-        "technical_checks": (),
+        "crawl_architecture": (),
+        "structured_markup": (),
+        "document_structure": (),
+        "quality_flags": (),
+        "resource_footprint": (),
+        "presentation_metadata": (),
+        "delivery_configuration": (),
+        "legacy_embedding": (),
         "content": ("onpage_score",),
     }
     result = module._compute_grouped_oof_importance(
@@ -365,6 +467,95 @@ def test_compute_grouped_oof_reports_full_reduced_and_delta() -> None:
     assert similarity["delta_r2"] == pytest.approx(
         similarity["full_r2"] - similarity["reduced_r2"]
     )
+    assert len(result["repeat_results"]) == 2
+    assert similarity["repeat_mean_delta_r2"] is not None
+    assert similarity["repeat_sd_delta_r2"] is not None
+    assert similarity["repeat_min_delta_r2"] <= similarity["repeat_max_delta_r2"]
+
+
+def test_evidence_status_distinguishes_portability_and_missing_predictors() -> None:
+    import seo_rank.stats.textrazor_explainability as module
+
+    assert module._evidence_status((0.1, 0.2), 0.1, domain_ci=(0.1, 0.2), keyword_delta=0.1, tested=True) == "Portable"
+    assert module._evidence_status((0.1, 0.2), -0.01, keyword_delta=0.1, tested=True) == "Dataset-specific"
+    assert module._evidence_status((-0.1, 0.2), 0.5, keyword_delta=0.1, tested=True) == "Uncertain"
+    assert module._evidence_status((-0.1, 0.2), 0.5, keyword_delta=-0.1, tested=True) == "Redundant/no value"
+    assert module._evidence_status((0.1, 0.2), None, tested=True) == "Uncertain"
+    assert module._evidence_status(None, None, tested=False) == "Not tested"
+
+
+def test_evidence_status_uses_domain_ci_taxonomy() -> None:
+    import seo_rank.stats.textrazor_explainability as module
+
+    assert module._evidence_status((0.1, 0.2), 0.1, domain_ci=(0.1, 0.2), keyword_delta=0.1, tested=True) == "Portable"
+    assert module._evidence_status((0.1, 0.2), 0.1, domain_ci=(-0.1, 0.2), keyword_delta=0.1, tested=True) == "Keyword-supported"
+    assert module._evidence_status((0.1, 0.2), -0.2, domain_ci=(-0.2, -0.1), keyword_delta=0.1, tested=True) == "Harmful to portability"
+    assert module._evidence_status((0.1, 0.2), -0.01, keyword_delta=0.1, tested=True) == "Dataset-specific"
+    assert module._evidence_status((0.1, 0.2), 0.1, domain_ci=(0.0, 0.2), keyword_delta=0.1, tested=True) == "Keyword-supported"
+
+
+def test_relative_importance_marks_zero_predictor_groups_untested_and_reports_uncertainty() -> None:
+    panel = _ranking_importance_panel_frame()
+    summary = summarize_ranking_relative_importance(
+        panel,
+        spec=load_analysis_spec(),
+        cv_folds=3,
+        cv_repeats=1,
+        bootstraps=2,
+        shapley_permutations=4,
+        random_state=0,
+    )
+
+    performance = next(group for group in summary["groups"] if group["factor"] == "performance")
+    assert performance["in_sample_predictor_count"] == 0
+    assert performance["full_model_partial_r2"] is None
+    assert performance["shapley_share"] is None
+    assert performance["evidence_status"] == "Not tested"
+
+    assert summary["shapley_mcse"] is not None
+    assert summary["shapley_convergence_difference"] is not None
+
+
+def test_domain_coverage_reports_failures_folds_and_repeat_deltas() -> None:
+    import pandas as pd
+    import seo_rank.stats.textrazor_explainability as module
+
+    frame = pd.DataFrame(
+        {
+            "target_keyword_id": ["k1", "k1", "k2", "k2", "k3", "k3", "k4", "k4", "k5", "k5"],
+            "serp_rank": [1, 2] * 5,
+            "outcome": [0.0, -1.0] * 5,
+            "url": [
+                "https://a.example1.com/1", "https://a.example1.com/2",
+                "https://b.example2.com/1", "https://b.example2.com/2",
+                "https://c.example3.com/1", "https://c.example3.com/2",
+                "https://d.example4.com/1", "https://d.example4.com/2",
+                "not-a-url", "not-a-url",
+            ],
+                "signal": [1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0],
+                "noise": [0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+        }
+    )
+    frame["domain"] = frame["url"].map(module._extract_domain)
+    frame.attrs["predictor_columns"] = ("signal", "noise")
+    factors = {group: () for group in module.RANKING_IMPORTANCE_GROUP_ORDER}
+    factors["similarity"] = ("signal",)
+    factors["textrazor"] = ("noise",)
+
+    result = module._domain_holdout_oof_importance(
+        frame,
+        factors,
+        random_state=0,
+        cv_repeats=2,
+    )
+
+    assert result is not None
+    assert result["domain_rows"] == 8
+    assert result["domain_count"] == 4
+    assert result["domain_rows_with_extraction_failure"] == 2
+    assert result["domains_per_fold"] == [1, 1, 1, 1]
+    assert len(result["repeat_results"]) == 2
+    assert result["groups"]["similarity"]["repeat_mean_delta_r2"] is not None
 
 
 def test_oos_delta_ci_bootstraps_out_of_sample_delta(monkeypatch) -> None:
@@ -427,7 +618,14 @@ def test_grouped_oof_ndcg_delta_uses_reduced_model_coverage(monkeypatch) -> None
         "backlinks": (),
         "metadata_lengths": (),
         "performance": (),
-        "technical_checks": (),
+        "crawl_architecture": (),
+        "structured_markup": (),
+        "document_structure": (),
+        "quality_flags": (),
+        "resource_footprint": (),
+        "presentation_metadata": (),
+        "delivery_configuration": (),
+        "legacy_embedding": (),
         "content": (),
     }
     monkeypatch.setattr(
@@ -502,3 +700,48 @@ def test_parse_args_accepts_positive_resampling_counts(monkeypatch) -> None:
     args = _parse_args()
     assert args.cv_folds == 2
     assert args.bootstraps == 1
+
+
+def test_relative_importance_renderer_separates_explanatory_and_oos_tables() -> None:
+    from analysis.textrazor_ranking_r2 import _render_relative_importance_table
+
+    rendered = _render_relative_importance_table(
+        {
+            "status": "computed",
+            "row_count": 10,
+            "keyword_count": 2,
+            "shapley_permutations": 3,
+            "predictor_columns": ["bge_normalized_score"],
+            "excluded_predictors": [],
+            "warnings": [],
+            "groups": [
+                {
+                    "factor": "legacy_embedding",
+                    "in_sample_predictor_count": 0,
+                    "in_sample_predictor_columns": [],
+                    "in_sample_rows": None,
+                    "in_sample_keywords": None,
+                    "out_of_sample_full_r2": None,
+                    "out_of_sample_reduced_r2": None,
+                    "out_of_sample_delta_r2": None,
+                    "out_of_sample_delta_r2_ci": None,
+                    "out_of_sample_ndcg_delta": None,
+                    "domain_holdout_delta_r2": None,
+                    "domain_holdout_delta_r2_ci": None,
+                    "domain_holdout_ndcg_delta": None,
+                    "domain_holdout_ndcg_delta_ci": None,
+                    "oos_predictor_columns": [],
+                    "oos_predictor_count": 0,
+                    "domain_rows": None,
+                    "domain_count": None,
+                    "evidence_status": "Not tested",
+                }
+            ],
+        }
+    )
+
+    assert "A. Within-keyword fixed-effects explanation" in rendered
+    assert "B. Keyword-held-out predictive importance" in rendered
+    assert "C. Domain-held-out portability" in rendered
+    assert "n/a — not included" in rendered
+    assert "domain ΔR²" not in rendered.split("B. Keyword-held-out predictive importance", 1)[1].split("C. Domain-held-out portability", 1)[0]

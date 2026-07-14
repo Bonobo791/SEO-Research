@@ -76,6 +76,18 @@ def _parse_args() -> argparse.Namespace:
         default=500,
         help="Keyword-bootstrap draws for OOS delta R² CIs (default: 500, minimum 1)",
     )
+    parser.add_argument(
+        "--shapley-permutations",
+        type=_positive_int,
+        default=2000,
+        help="Permutation-Shapley draws (default: 2000, minimum 1)",
+    )
+    parser.add_argument(
+        "--domain-cv-repeats",
+        type=_positive_int,
+        default=10,
+        help="Domain-held-out CV repeats (default: 10, minimum 1)",
+    )
     return parser.parse_args()
 
 
@@ -247,75 +259,124 @@ def _render_relative_importance_table(relative_importance: object) -> str:
         row_count = relative_importance.get("row_count", 0)
         return f"Relative importance: skipped ({reason}, n={row_count})"
 
-    header = (
-        f"{'Factor':<14} {'Partial R²':>10} {'Shapley':>8} "
-        f"{'OOS R²':>9} {'OOS w/o':>9} {'OOS ΔR²':>9} {'OOS Δ CI':>21} {'ΔNDCG':>8}"
-    )
-    excluded = relative_importance.get("excluded_predictors") or []
-    excluded_note = (
-        f"  excluded_sparse_predictors: {len(excluded)}"
-        if isinstance(excluded, list)
-        else ""
-    )
+    groups = relative_importance.get("groups", [])
+    if not isinstance(groups, list):
+        groups = []
+
     lines = [
         "",
-        "Relative importance (full model)",
-        "-" * 36,
+        "A. Within-keyword fixed-effects explanation",
+        "Within-keyword fixed-effects OLS — descriptive, in-sample",
+        "-" * 64,
         f"rows: {relative_importance.get('row_count', 0)}  "
         f"keywords: {relative_importance.get('keyword_count', 0)}  "
-        f"cv_folds: {relative_importance.get('cv_folds', 0)}  "
-        f"cv_repeats: {relative_importance.get('cv_repeats', 0)}  "
-        f"bootstraps: {relative_importance.get('bootstraps', 0)}"
-        f"{excluded_note}",
-        f"oos_rows: {relative_importance.get('oos_row_count', 'n/a')}  "
-        f"oos_keywords: {relative_importance.get('oos_keyword_count', 'n/a')}  "
-        f"oos_full_R²: {_format_float(relative_importance.get('out_of_sample_full_r2'))}  "
-        f"oos_NDCG: {_format_float(relative_importance.get('out_of_sample_ndcg'))}",
-        f"metadata_only_oos_R²: {_format_float(relative_importance.get('metadata_only_oos_r_squared'))}  "
-        f"metadata_only_oos_NDCG: {_format_float(relative_importance.get('metadata_only_oos_ndcg'))}",
+        f"Shapley: permutation ({relative_importance.get('shapley_permutations', 'n/a')})",
+        f"Shapley MCSE: {relative_importance.get('shapley_mcse', 'n/a')}",
+        f"Shapley first-vs-second-half difference: "
+        f"{relative_importance.get('shapley_convergence_difference', 'n/a')}",
         "",
-        header,
-        "-" * len(header),
+        f"{'Group':<24} {'Predictors':>10} {'Rows':>8} "
+        f"{'Keywords':>9} {'Partial R²':>11} {'Shapley':>9}",
+        "-" * 78,
     ]
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        partial = group.get("full_model_partial_r2")
+        shapley = group.get("shapley_share")
+        lines.append(
+            f"{str(group.get('factor', '')):<24} "
+            f"{int(group.get('in_sample_predictor_count', 0)):>10} "
+            f"{str(group.get('in_sample_rows', 'n/a')):>8} "
+            f"{str(group.get('in_sample_keywords', 'n/a')):>9} "
+            f"{_format_float(partial) if partial is not None else 'n/a — not included':>11} "
+            f"{_format_float(shapley) if shapley is not None else 'n/a':>9}"
+        )
+        columns = group.get("in_sample_predictor_columns", [])
+        if columns:
+            lines.append("  predictors: " + ", ".join(columns))
 
-    for group in relative_importance.get("groups", []):
+    lines.extend([
+        "",
+        "B. Keyword-held-out predictive importance",
+        "Repeated keyword-grouped CV — predictive importance",
+        "-" * 64,
+        f"{'Group':<24} {'Full R²':>9} {'Without':>9} {'ΔR²':>9} "
+        f"{'ΔR² CI':>21} {'ΔNDCG':>9} {'Status':>18}",
+        "-" * 108,
+    ])
+    for group in groups:
         if not isinstance(group, dict):
             continue
         lines.append(
-            f"{str(group.get('factor', '')):<14} "
-            f"{_format_float(group.get('full_model_partial_r2')):>10} "
-            f"{_format_float(group.get('shapley_share')):>8} "
+            f"{str(group.get('factor', '')):<24} "
             f"{_format_float(group.get('out_of_sample_full_r2')):>9} "
             f"{_format_float(group.get('out_of_sample_reduced_r2')):>9} "
             f"{_format_float(group.get('out_of_sample_delta_r2')):>9} "
             f"{_format_ci(group.get('out_of_sample_delta_r2_ci')):>21} "
-            f"{_format_float(group.get('out_of_sample_ndcg_delta')):>8}"
+            f"{_format_float(group.get('out_of_sample_ndcg_delta')):>9} "
+            f"{str(group.get('evidence_status', 'n/a')):>18}"
         )
         lines.append(
-            f"  OOS predictors ({group.get('oos_predictor_count', 0)}): "
-            + ", ".join(group.get("oos_predictor_columns", []))
+            f"  repeat ΔR² mean/sd/range: "
+            f"{_format_float(group.get('repeat_mean_delta_r2'))} / "
+            f"{_format_float(group.get('repeat_sd_delta_r2'))} / "
+            f"[{_format_float(group.get('repeat_min_delta_r2'))}, "
+            f"{_format_float(group.get('repeat_max_delta_r2'))}]"
         )
+        columns = group.get("oos_predictor_columns", [])
         lines.append(
-            f"  domain ΔR²={_format_float(group.get('domain_holdout_delta_r2'))} "
-            f"domain ΔNDCG={_format_float(group.get('domain_holdout_ndcg_delta'))}"
+            f"  predictors ({group.get('oos_predictor_count', 0)}): "
+            + ", ".join(columns)
         )
-        metrics = group.get("metrics")
-        if not isinstance(metrics, list):
-            continue
-        for metric in metrics:
-            if not isinstance(metric, dict):
-                continue
-            label = str(metric.get("factor", metric.get("column", "")))
-            lines.append(
-                f"  {label:<12} "
-                f"{_format_float(metric.get('full_model_partial_r2')):>10}"
-            )
 
-    oos_note = relative_importance.get("oos_note")
-    if isinstance(oos_note, str) and oos_note:
-        lines.extend(["", oos_note])
+    lines.extend([
+        "",
+        "C. Domain-held-out portability",
+        "Domain-held-out CV — transfer to unseen websites",
+        "-" * 64,
+        f"{'Group':<24} {'ΔR²':>9} {'CI':>21} {'ΔNDCG':>9} {'CI':>21}",
+        "-" * 88,
+    ])
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        lines.append(
+            f"{str(group.get('factor', '')):<24} "
+            f"{_format_float(group.get('domain_holdout_delta_r2')):>9} "
+            f"{_format_ci(group.get('domain_holdout_delta_r2_ci')):>21} "
+            f"{_format_float(group.get('domain_holdout_ndcg_delta')):>9} "
+            f"{_format_ci(group.get('domain_holdout_ndcg_delta_ci')):>21}"
+        )
+        lines.append(
+            f"  domain rows/count: {group.get('domain_rows', 'n/a')} / "
+            f"{group.get('domain_count', 'n/a')}"
+        )
+        lines.append(
+            f"  domains/fold: {group.get('domains_per_fold', 'n/a')}  "
+            f"extraction failures: {group.get('domain_rows_with_extraction_failure', 'n/a')}"
+        )
+        lines.append(
+            "  repeat domain ΔR²: "
+            + ", ".join(_format_float(value) for value in group.get("domain_repeat_deltas", []))
+        )
+
+    lines.extend([
+        "",
+        "D. Standalone family models",
+        "Family-level univariate and curated model results remain above.",
+        "",
+        "E. Predictor coverage and exclusions",
+        f"in-sample predictors: {', '.join(relative_importance.get('predictor_columns', []))}",
+        f"excluded predictors: {len(relative_importance.get('excluded_predictors', []))}",
+        "",
+        "F. Warnings and interpretation",
+    ])
     for warning in relative_importance.get("warnings", []):
         lines.append(f"WARNING: {warning}")
+    note = relative_importance.get("oos_note")
+    if isinstance(note, str) and note:
+        lines.append(note)
     return "\n".join(lines)
 
 
@@ -379,6 +440,8 @@ def main() -> None:
         cv_folds=args.cv_folds,
         cv_repeats=args.cv_repeats,
         bootstraps=args.bootstraps,
+        shapley_permutations=args.shapley_permutations,
+        domain_cv_repeats=args.domain_cv_repeats,
     )
     summary["relative_importance"] = relative_importance
 

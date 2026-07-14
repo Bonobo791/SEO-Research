@@ -160,6 +160,33 @@ def test_summarize_backend_diagnostics_reports_null_site_scale() -> None:
     ]
 
 
+def test_format_diagnostics_lines_handles_skipped_influence() -> None:
+    lines = artifacts_module._format_diagnostics_lines(
+        {
+            "backends": {
+                "bge": {
+                    "status": "computed",
+                    "keyword_count": 1,
+                    "reset": {"status": "skipped", "skipped_reason": "insufficient_df_resid"},
+                    "breusch_pagan": {
+                        "lm_p_value": 0.1,
+                        "flagged": False,
+                        "recommended_se_type": "HC3",
+                    },
+                    "influence": {
+                        "status": "skipped",
+                        "skipped_reason": "influence_estimation_failed",
+                        "row_count": 3,
+                    },
+                }
+            }
+        }
+    )
+
+    assert "influence_status=skipped" in lines[0]
+    assert "influence_skipped_reason=influence_estimation_failed" in lines[0]
+
+
 def test_summarize_backend_diagnostics_skips_influence_sensitivity_when_trimmed_subset_is_unusable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

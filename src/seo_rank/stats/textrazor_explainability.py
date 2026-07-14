@@ -524,7 +524,14 @@ RANKING_IMPORTANCE_GROUP_ORDER: tuple[str, ...] = (
     "backlinks",
     "metadata_lengths",
     "performance",
-    "technical_checks",
+    "crawl_architecture",
+    "structured_markup",
+    "document_structure",
+    "quality_flags",
+    "resource_footprint",
+    "presentation_metadata",
+    "delivery_configuration",
+    "legacy_embedding",
     "content",
 )
 
@@ -547,8 +554,54 @@ _RANKING_IMPORTANCE_FAMILY_KEYS: dict[str, tuple[str, ...]] = {
     "textrazor": (),
     "backlinks": ("backlinks_counts",),
     "performance": ("onpage_core_web_vitals",),
-    "technical_checks": ("onpage_technical_checks",),
     "content": ("onpage_content_quality",),
+}
+
+_ONPAGE_IMPORTANCE_GROUP_COLUMNS: dict[str, tuple[str, ...]] = {
+    "crawl_architecture": (
+        "is_redirect",
+        "follow",
+        "inbound_links_count",
+        "click_depth",
+        "seo_friendly_url",
+    ),
+    "structured_markup": (
+        "has_valid_structured_data",
+        "has_micromarkup",
+        "has_micromarkup_errors",
+    ),
+    "document_structure": (
+        "h1_count",
+        "h2_count",
+        "h3_count",
+        "high_content_rate",
+        "high_character_count",
+    ),
+    "quality_flags": (
+        "duplicate_meta_tags_count",
+        "duplicate_content",
+        "lorem_ipsum",
+    ),
+    "resource_footprint": (
+        "images_count",
+        "images_size",
+        "scripts_count",
+        "stylesheets_count",
+        "encoded_size",
+        "small_page_size",
+        "resource_warnings_count",
+    ),
+    "presentation_metadata": (
+        "has_og_tags",
+        "has_twitter_tags",
+        "no_favicon",
+        "no_image_title",
+    ),
+    "delivery_configuration": (
+        "cache_control_cachable",
+        "cache_control_ttl",
+    ),
+    "legacy_embedding": ("flash", "frame"),
 }
 
 _RANKING_IMPORTANCE_JOIN_KEYS: tuple[str, ...] = (
@@ -563,6 +616,9 @@ def ranking_importance_factor_columns(spec: AnalysisSpec) -> dict[str, tuple[str
 
     groups: dict[str, tuple[str, ...]] = {}
     for group in RANKING_IMPORTANCE_GROUP_ORDER:
+        if group in _ONPAGE_IMPORTANCE_GROUP_COLUMNS:
+            groups[group] = _ONPAGE_IMPORTANCE_GROUP_COLUMNS[group]
+            continue
         if group == "similarity":
             family_keys = spec.signal_families.similarity_keys
         elif group == "textrazor":
@@ -585,12 +641,6 @@ def ranking_importance_factor_columns(spec: AnalysisSpec) -> dict[str, tuple[str
                 continue
             seen.add(column)
             deduped.append(column)
-        if group == "technical_checks":
-            deduped = [
-                column
-                for column in deduped
-                if column not in {"title_length", "description_length"}
-            ]
         groups[group] = tuple(deduped)
     return groups
 
@@ -626,6 +676,8 @@ def summarize_ranking_relative_importance(
     cv_folds: int = 5,
     cv_repeats: int = 5,
     bootstraps: int = 500,
+    shapley_permutations: int = 2000,
+    domain_cv_repeats: int = 10,
     random_state: int = 0,
     min_complete_rows: int | None = None,
 ) -> dict[str, Any]:
@@ -676,17 +728,16 @@ def summarize_ranking_relative_importance(
             "groups": [],
         }
 
-    coalition_cache = _build_coalition_r_squared_cache(
+    shapley_statistics = _permutation_shapley_statistics(
         model_data,
         factor_columns,
         selected_columns=selected_columns,
         keyword_count=keyword_count,
         control_columns=control_columns,
+        permutations=shapley_permutations,
+        random_state=random_state,
     )
-    shapley_values = _shapley_r_squared_values(
-        RANKING_IMPORTANCE_GROUP_ORDER,
-        coalition_cache,
-    )
+    shapley_values = shapley_statistics["values"]
     shapley_total = sum(shapley_values.values())
 
     oos_panel = _prepare_oos_importance_frame(panel, factor_columns)
@@ -701,12 +752,19 @@ def summarize_ranking_relative_importance(
         oos_result,
         bootstraps=bootstraps,
         random_state=random_state + 1,
+        sample_column="target_keyword_id",
     )
     domain_holdout = _domain_holdout_oof_importance(
         oos_panel,
         factor_columns,
         random_state=random_state + 2,
-        cv_repeats=cv_repeats,
+        cv_repeats=domain_cv_repeats,
+    )
+    domain_bootstrap = _bootstrap_oos_delta_ci(
+        domain_holdout,
+        bootstraps=bootstraps,
+        random_state=random_state + 4,
+        sample_column="domain",
     )
     metadata_only = _metadata_only_oof_importance(
         oos_panel,
@@ -718,6 +776,9 @@ def summarize_ranking_relative_importance(
 
     groups: list[dict[str, Any]] = []
     for group in RANKING_IMPORTANCE_GROUP_ORDER:
+        in_sample_columns = tuple(
+            column for column in factor_columns[group] if column in selected_columns
+        )
         without_columns = _columns_without_group(
             selected_columns,
             factor_columns[group],
@@ -730,7 +791,7 @@ def summarize_ranking_relative_importance(
         )
         partial_r2 = (
             _partial_r_squared(full_r2, without_r2)
-            if without_r2 is not None
+            if in_sample_columns and without_r2 is not None
             else None
         )
         shapley_share = (
@@ -750,16 +811,31 @@ def summarize_ranking_relative_importance(
         oos_group = (oos_result or {}).get("groups", {}).get(group, {})
         oos_ci = (oos_bootstrap or {}).get(group, {})
         domain_group = (domain_holdout or {}).get("groups", {}).get(group, {})
-        oos_columns = tuple(
-            column
-            for column in (oos_panel.attrs.get("predictor_columns", ()) if oos_panel is not None else ())
-            if column in factor_columns[group]
+        domain_ci = (domain_bootstrap or {}).get(group, {})
+        oos_columns = tuple(column for column in (oos_panel.attrs.get("predictor_columns", ()) if oos_panel is not None else ()) if column in factor_columns[group])
+        domain_rows = (domain_holdout or {}).get("domain_rows")
+        domain_count = (domain_holdout or {}).get("domain_count")
+        keyword_ci = oos_ci.get("delta_r2")
+        keyword_interval = (
+            (keyword_ci.get("lower"), keyword_ci.get("upper"))
+            if isinstance(keyword_ci, dict)
+            else None
+        )
+        tested = bool(oos_columns) and oos_group.get("delta_r2") is not None
+        domain_interval = (
+            (domain_ci.get("lower"), domain_ci.get("upper"))
+            if isinstance(domain_ci, dict)
+            else None
         )
         groups.append(
             {
                 "factor": group,
                 "full_model_partial_r2": partial_r2,
-                "shapley_share": shapley_share,
+                "shapley_share": shapley_share if in_sample_columns else None,
+                "in_sample_predictor_count": len(in_sample_columns),
+                "in_sample_predictor_columns": list(in_sample_columns),
+                "in_sample_rows": prepared["row_count"] if in_sample_columns else None,
+                "in_sample_keywords": keyword_count if in_sample_columns else None,
                 "out_of_sample_full_r2": oos_group.get("full_r2"),
                 "out_of_sample_reduced_r2": oos_group.get("reduced_r2"),
                 "out_of_sample_delta_r2": oos_group.get("delta_r2"),
@@ -768,9 +844,34 @@ def summarize_ranking_relative_importance(
                 "out_of_sample_ndcg_delta": oos_group.get("ndcg_delta"),
                 "out_of_sample_ndcg_delta_ci": oos_ci.get("ndcg_delta"),
                 "domain_holdout_delta_r2": domain_group.get("delta_r2"),
+                "domain_holdout_delta_r2_ci": domain_ci.get("delta_r2"),
                 "domain_holdout_ndcg_delta": domain_group.get("ndcg_delta"),
+                "domain_holdout_ndcg_delta_ci": domain_ci.get("ndcg_delta"),
                 "oos_predictor_columns": list(oos_columns),
                 "oos_predictor_count": len(oos_columns),
+                "oos_rows": oos_group.get("row_count"),
+                "oos_keywords": oos_group.get("group_count"),
+                "repeat_mean_delta_r2": oos_group.get("repeat_mean_delta_r2"),
+                "repeat_sd_delta_r2": oos_group.get("repeat_sd_delta_r2"),
+                "repeat_min_delta_r2": oos_group.get("repeat_min_delta_r2"),
+                "repeat_max_delta_r2": oos_group.get("repeat_max_delta_r2"),
+                "domain_rows": domain_rows,
+                "domain_count": domain_count,
+                "domain_rows_with_extraction_failure": (domain_holdout or {}).get(
+                    "domain_rows_with_extraction_failure"
+                ),
+                "domains_per_fold": (domain_holdout or {}).get("domains_per_fold"),
+                "domain_repeat_deltas": [
+                    result.get("groups", {}).get(group, {}).get("delta_r2")
+                    for result in (domain_holdout or {}).get("repeat_results", [])
+                ],
+                "evidence_status": _evidence_status(
+                    keyword_interval,
+                    domain_group.get("delta_r2"),
+                    domain_ci=domain_interval,
+                    keyword_delta=oos_group.get("delta_r2"),
+                    tested=tested,
+                ),
                 "metrics": metric_rows,
             }
         )
@@ -783,7 +884,12 @@ def summarize_ranking_relative_importance(
         "oos_keyword_count": None if oos_panel is None else int(oos_panel["target_keyword_id"].nunique()),
         "cv_folds": cv_folds,
         "cv_repeats": cv_repeats,
+        "domain_cv_repeats": domain_cv_repeats,
         "bootstraps": bootstraps,
+        "shapley_method": "permutation",
+        "shapley_permutations": shapley_permutations,
+        "shapley_mcse": shapley_statistics["mcse"],
+        "shapley_convergence_difference": shapley_statistics["convergence_difference"],
         "predictor_columns": list(selected_columns),
         "excluded_predictors": prepared.get("excluded_predictors", []),
         "full_model_r_squared": full_r2,
@@ -791,14 +897,71 @@ def summarize_ranking_relative_importance(
         "out_of_sample_ndcg": None if oos_result is None else oos_result.get("ndcg_full"),
         "metadata_only_oos_r_squared": None if metadata_only is None else metadata_only.get("full_r2"),
         "metadata_only_oos_ndcg": None if metadata_only is None else metadata_only.get("ndcg_full"),
-        "warnings": ["cv_repeats=1 is exploratory; fold-assignment uncertainty is not sampled."] if cv_repeats == 1 else [],
+        "warnings": ["cv_repeats=1 is exploratory; repeat uncertainty is not estimable."] if cv_repeats == 1 else [],
         "oos_note": (
             "OOS uses repeated keyword GroupKFold with fold-local Ridge "
             "(log1p counts, standardize, NZV/duplicate drop, median impute), "
-            "pooled OOF R², and keyword-bootstrap CIs for the OOS delta. "
+            "repeat-level summaries, and keyword/repeat-bootstrap CIs for the OOS delta. "
             "In-sample partial R² / Shapley stay on the complete-case OLS path."
         ),
         "groups": groups,
+        "explanatory_groups": [
+            {
+                key: group[key]
+                for key in (
+                    "factor",
+                    "full_model_partial_r2",
+                    "shapley_share",
+                    "in_sample_predictor_count",
+                    "in_sample_predictor_columns",
+                    "in_sample_rows",
+                    "in_sample_keywords",
+                )
+            }
+            for group in groups
+        ],
+        "keyword_oos_groups": [
+            {
+                key: group[key]
+                for key in (
+                    "factor",
+                    "out_of_sample_full_r2",
+                    "out_of_sample_reduced_r2",
+                    "out_of_sample_delta_r2",
+                    "out_of_sample_delta_r2_ci",
+                    "out_of_sample_ndcg_delta",
+                    "out_of_sample_ndcg_delta_ci",
+                    "oos_predictor_count",
+                    "oos_predictor_columns",
+                    "oos_rows",
+                    "oos_keywords",
+                    "repeat_mean_delta_r2",
+                    "repeat_sd_delta_r2",
+                    "repeat_min_delta_r2",
+                    "repeat_max_delta_r2",
+                    "evidence_status",
+                )
+            }
+            for group in groups
+        ],
+        "domain_oos_groups": [
+            {
+                key: group[key]
+                for key in (
+                    "factor",
+                    "domain_holdout_delta_r2",
+                    "domain_holdout_delta_r2_ci",
+                    "domain_holdout_ndcg_delta",
+                    "domain_holdout_ndcg_delta_ci",
+                    "domain_rows",
+                    "domain_count",
+                    "domain_rows_with_extraction_failure",
+                    "domains_per_fold",
+                    "domain_repeat_deltas",
+                )
+            }
+            for group in groups
+        ],
     }
 
 
@@ -1027,6 +1190,33 @@ def _partial_r_squared(full_r2: float, reduced_r2: float) -> float | None:
     return float((full_r2 - reduced_r2) / denominator)
 
 
+def _evidence_status(
+    keyword_ci: tuple[float | None, float | None] | None,
+    domain_delta: float | None,
+    *,
+    domain_ci: tuple[float | None, float | None] | None = None,
+    keyword_delta: float | None = None,
+    tested: bool,
+) -> str:
+    if not tested:
+        return "Not tested"
+    if keyword_delta is not None and keyword_delta <= 0.0:
+        return "Redundant/no value"
+    if keyword_ci is None or keyword_ci[0] is None or keyword_ci[1] is None:
+        return "Uncertain"
+    if keyword_ci[0] <= 0.0 <= keyword_ci[1]:
+        return "Uncertain"
+    if domain_delta is None:
+        return "Uncertain"
+    if domain_ci is not None and domain_ci[1] is not None and domain_ci[1] < 0.0:
+        return "Harmful to portability"
+    if domain_delta < 0.0:
+        return "Dataset-specific"
+    if domain_ci is not None and domain_ci[0] is not None and domain_ci[0] > 0.0:
+        return "Portable"
+    return "Keyword-supported"
+
+
 
 def _fit_importance_r_squared(
     model_data: Any,
@@ -1099,75 +1289,98 @@ def _oos_feature_formula(
     return f"outcome ~ {terms}"
 
 
-def _build_coalition_r_squared_cache(
+def _permutation_shapley_statistics(
     model_data: Any,
     factor_columns: Mapping[str, Sequence[str]],
     *,
     selected_columns: Sequence[str],
     keyword_count: int,
     control_columns: Sequence[str],
-) -> dict[frozenset[str], float | None]:
-    from itertools import combinations
-
-    cache: dict[frozenset[str], float | None] = {}
+    permutations: int,
+    random_state: int,
+) -> dict[str, Any]:
     groups = RANKING_IMPORTANCE_GROUP_ORDER
-    for size in range(len(groups) + 1):
-        for subset in combinations(groups, size):
-            coalition = frozenset(subset)
-            coalition_columns = _columns_for_groups(
-                factor_columns,
-                selected_columns,
-                subset,
+    shapley = {group: 0.0 for group in groups}
+    contributions = {group: [] for group in groups}
+    selected_set = set(selected_columns)
+    rng = np.random.default_rng(random_state)
+    for _ in range(max(1, permutations)):
+        order = list(groups)
+        rng.shuffle(order)
+        previous = _fit_importance_r_squared(
+            model_data,
+            (),
+            keyword_count=keyword_count,
+            control_columns=control_columns,
+        )
+        coalition: list[str] = []
+        for group in order:
+            if not any(column in selected_set for column in factor_columns[group]):
+                continue
+            coalition.append(group)
+            columns = tuple(
+                column
+                for candidate in coalition
+                for column in factor_columns[candidate]
+                if column in selected_set
             )
-            cache[coalition] = _fit_importance_r_squared(
+            current = _fit_importance_r_squared(
                 model_data,
-                coalition_columns,
+                columns,
                 keyword_count=keyword_count,
                 control_columns=control_columns,
             )
-    return cache
-
-
-def _columns_for_groups(
-    factor_columns: Mapping[str, Sequence[str]],
-    selected_columns: Sequence[str],
-    groups: Sequence[str],
-) -> tuple[str, ...]:
-    selected_set = set(selected_columns)
-    columns: list[str] = []
+            if previous is not None and current is not None:
+                contribution = current - previous
+                shapley[group] += contribution
+                contributions[group].append(float(contribution))
+            previous = current
+    values = {group: value / max(1, permutations) for group, value in shapley.items()}
+    half = max(1, permutations) // 2
+    mcse: dict[str, float | None] = {}
+    convergence: dict[str, float | None] = {}
     for group in groups:
-        for column in factor_columns[group]:
-            if column in selected_set:
-                columns.append(column)
-    return tuple(columns)
+        values_for_group = np.asarray(contributions[group], dtype=float)
+        mcse[group] = (
+            float(np.std(values_for_group, ddof=1) / np.sqrt(len(values_for_group)))
+            if len(values_for_group) > 1
+            else None
+        )
+        first = values_for_group[:half]
+        second = values_for_group[half:]
+        convergence[group] = (
+            float(np.mean(first) - np.mean(second))
+            if len(first) and len(second)
+            else None
+        )
+    return {
+        "values": values,
+        "mcse": mcse,
+        "convergence_difference": convergence,
+    }
 
 
-def _shapley_r_squared_values(
-    groups: Sequence[str],
-    coalition_cache: Mapping[frozenset[str], float | None],
+def _permutation_shapley_values(
+    model_data: Any,
+    factor_columns: Mapping[str, Sequence[str]],
+    *,
+    selected_columns: Sequence[str],
+    keyword_count: int,
+    control_columns: Sequence[str],
+    permutations: int,
+    random_state: int,
 ) -> dict[str, float]:
-    from itertools import combinations
-    from math import factorial
+    """Return permutation-Shapley values while keeping the legacy helper surface."""
 
-    player_count = len(groups)
-    shapley = {group: 0.0 for group in groups}
-    for player in groups:
-        others = [group for group in groups if group != player]
-        for coalition_size in range(len(others) + 1):
-            for subset in combinations(others, coalition_size):
-                coalition = frozenset(subset)
-                with_player = frozenset(set(subset) | {player})
-                without_value = coalition_cache.get(coalition)
-                with_value = coalition_cache.get(with_player)
-                if without_value is None or with_value is None:
-                    continue
-                weight = (
-                    factorial(coalition_size)
-                    * factorial(player_count - coalition_size - 1)
-                    / factorial(player_count)
-                )
-                shapley[player] += weight * (with_value - without_value)
-    return shapley
+    return _permutation_shapley_statistics(
+        model_data,
+        factor_columns,
+        selected_columns=selected_columns,
+        keyword_count=keyword_count,
+        control_columns=control_columns,
+        permutations=permutations,
+        random_state=random_state,
+    )["values"]
 
 
 def _prepare_oos_importance_frame(
@@ -1425,8 +1638,19 @@ def _compute_grouped_oof_importance(
         group: np.zeros(n_rows, dtype=float) for group in RANKING_IMPORTANCE_GROUP_ORDER
     }
 
+    repeat_results: list[dict[str, Any]] = []
     rng = np.random.default_rng(random_state)
     for repeat in range(max(1, cv_repeats)):
+        repeat_full_sum = np.zeros(n_rows, dtype=float)
+        repeat_full_count = np.zeros(n_rows, dtype=float)
+        repeat_leave_sum = {
+            group: np.zeros(n_rows, dtype=float)
+            for group in RANKING_IMPORTANCE_GROUP_ORDER
+        }
+        repeat_leave_count = {
+            group: np.zeros(n_rows, dtype=float)
+            for group in RANKING_IMPORTANCE_GROUP_ORDER
+        }
         repeat_rng = np.random.default_rng(int(rng.integers(0, 2**31 - 1)))
         splits = _balanced_group_folds(groups, n_splits=cv_folds, rng=repeat_rng)
         for train_idx, test_idx in splits:
@@ -1446,6 +1670,8 @@ def _compute_grouped_oof_importance(
                 continue
             full_pred_sum[test_idx] += preds
             full_pred_count[test_idx] += 1.0
+            repeat_full_sum[test_idx] += preds
+            repeat_full_count[test_idx] += 1.0
 
             for group in RANKING_IMPORTANCE_GROUP_ORDER:
                 without = tuple(
@@ -1464,6 +1690,21 @@ def _compute_grouped_oof_importance(
                     continue
                 leave_pred_sum[group][test_idx] += leave_preds
                 leave_pred_count[group][test_idx] += 1.0
+                repeat_leave_sum[group][test_idx] += leave_preds
+                repeat_leave_count[group][test_idx] += 1.0
+
+        repeat_result = _summarize_oof_predictions(
+            model_data,
+            y,
+            repeat_full_sum,
+            repeat_full_count,
+            repeat_leave_sum,
+            repeat_leave_count,
+            factor_columns,
+        )
+        if repeat_result is not None:
+            repeat_result["repeat"] = repeat
+            repeat_results.append(repeat_result)
 
     covered = full_pred_count > 0
     if not np.any(covered):
@@ -1488,6 +1729,8 @@ def _compute_grouped_oof_importance(
                 "ndcg_full": ndcg_full,
                 "ndcg_reduced": None,
                 "ndcg_delta": None,
+                **_repeat_summary([], "delta_r2"),
+                **_repeat_summary([], "ndcg_delta"),
             }
             continue
         leave_pred = np.divide(
@@ -1523,14 +1766,97 @@ def _compute_grouped_oof_importance(
                     "outcome": y[mask],
                     "full_prediction": full_pred[mask],
                     "reduced_prediction": leave_pred[mask],
+                    **({"domain": model_data.loc[mask, "domain"].to_numpy()} if "domain" in model_data else {}),
                 }
             ),
         }
 
+        repeat_deltas = [
+            result["groups"].get(group, {}).get("delta_r2")
+            for result in repeat_results
+            if result["groups"].get(group, {}).get("delta_r2") is not None
+        ]
+        repeat_ndcg_deltas = [
+            result["groups"].get(group, {}).get("ndcg_delta")
+            for result in repeat_results
+            if result["groups"].get(group, {}).get("ndcg_delta") is not None
+        ]
+        group_results[group].update(
+            _repeat_summary(repeat_deltas, "delta_r2"),
+            **_repeat_summary(repeat_ndcg_deltas, "ndcg_delta"),
+        )
+
     return {
         "full_r2": full_r2,
         "ndcg_full": ndcg_full,
+        "row_count": int(np.count_nonzero(covered)),
+        "group_count": int(model_data.loc[covered, group_column].nunique()),
+        "repeat_results": repeat_results,
         "groups": group_results,
+    }
+
+
+def _summarize_oof_predictions(
+    model_data: pd.DataFrame,
+    y: np.ndarray,
+    full_pred_sum: np.ndarray,
+    full_pred_count: np.ndarray,
+    leave_pred_sum: Mapping[str, np.ndarray],
+    leave_pred_count: Mapping[str, np.ndarray],
+    factor_columns: Mapping[str, Sequence[str]],
+) -> dict[str, Any] | None:
+    covered = full_pred_count > 0
+    if not np.any(covered):
+        return None
+    full_pred = np.divide(full_pred_sum, np.maximum(full_pred_count, 1.0))
+    group_results: dict[str, dict[str, Any]] = {}
+    for group in RANKING_IMPORTANCE_GROUP_ORDER:
+        mask = covered & (leave_pred_count[group] > 0)
+        if not np.any(mask):
+            group_results[group] = {"delta_r2": None, "ndcg_delta": None}
+            continue
+        reduced_pred = np.divide(
+            leave_pred_sum[group], np.maximum(leave_pred_count[group], 1.0)
+        )
+        full_r2 = _pooled_r_squared(y[mask], full_pred[mask])
+        reduced_r2 = _pooled_r_squared(y[mask], reduced_pred[mask])
+        full_ndcg = _keyword_ndcg(model_data.loc[mask], full_pred[mask])
+        reduced_ndcg = _keyword_ndcg(model_data.loc[mask], reduced_pred[mask])
+        group_results[group] = {
+            "delta_r2": None if full_r2 is None or reduced_r2 is None else full_r2 - reduced_r2,
+            "ndcg_delta": None if full_ndcg is None or reduced_ndcg is None else full_ndcg - reduced_ndcg,
+            "oof_predictions": pd.DataFrame(
+                {
+                    "target_keyword_id": model_data.loc[mask, "target_keyword_id"].to_numpy(),
+                    "serp_rank": model_data.loc[mask, "serp_rank"].to_numpy(),
+                    "outcome": y[mask],
+                    "full_prediction": full_pred[mask],
+                    "reduced_prediction": reduced_pred[mask],
+                    **({"domain": model_data.loc[mask, "domain"].to_numpy()} if "domain" in model_data else {}),
+                }
+            ),
+        }
+    return {
+        "full_r2": _pooled_r_squared(y[covered], full_pred[covered]),
+        "ndcg_full": _keyword_ndcg(model_data.loc[covered], full_pred[covered]),
+        "groups": group_results,
+    }
+
+
+def _repeat_summary(values: Sequence[float], metric: str) -> dict[str, float | None]:
+    if not values:
+        return {
+            f"repeat_mean_{metric}": None,
+            f"repeat_sd_{metric}": None,
+            f"repeat_min_{metric}": None,
+            f"repeat_max_{metric}": None,
+        }
+    array = np.asarray(values, dtype=float)
+    return {
+        f"repeat_mean_{metric}": float(np.mean(array)),
+        f"repeat_sd_{metric}": float(np.std(array, ddof=0)),
+        f"repeat_min_{metric}": float(np.min(array)),
+        f"repeat_max_{metric}": float(np.max(array)),
     }
 
 
@@ -1539,6 +1865,7 @@ def _bootstrap_oos_delta_ci(
     *,
     bootstraps: int,
     random_state: int,
+    sample_column: str = "target_keyword_id",
     alpha: float = 0.05,
 ) -> dict[str, dict[str, dict[str, float | None]]]:
     empty_interval = {
@@ -1559,27 +1886,35 @@ def _bootstrap_oos_delta_ci(
     lower_q = alpha / 2.0
     upper_q = 1.0 - alpha / 2.0
     for group in RANKING_IMPORTANCE_GROUP_ORDER:
+        repeat_frames = [
+            result.get("groups", {}).get(group, {}).get("oof_predictions")
+            for result in oof_result.get("repeat_results", [])
+        ]
+        repeat_frames = [frame for frame in repeat_frames if isinstance(frame, pd.DataFrame) and not frame.empty]
         frame = oof_result.get("groups", {}).get(group, {}).get("oof_predictions")
-        if not isinstance(frame, pd.DataFrame) or frame.empty:
+        if not repeat_frames and isinstance(frame, pd.DataFrame) and not frame.empty:
+            repeat_frames = [frame]
+        if not repeat_frames:
             intervals[group] = empty[group]
             continue
-        keywords = frame["target_keyword_id"].unique().tolist()
-        if len(keywords) < 2:
+        if any(sample_column not in candidate.columns for candidate in repeat_frames):
             intervals[group] = empty[group]
             continue
         r2_deltas: list[float] = []
         ndcg_deltas: list[float] = []
         for _ in range(bootstraps):
-            drawn = rng.choice(keywords, size=len(keywords), replace=True)
-            sampled = pd.concat(
-                [
-                    frame[frame["target_keyword_id"] == keyword].assign(
-                        _bootstrap_keyword_copy_id=copy_index
-                    )
-                    for copy_index, keyword in enumerate(drawn)
-                ],
-                ignore_index=True,
-            )
+            frame = repeat_frames[int(rng.integers(0, len(repeat_frames)))]
+            units = frame[sample_column].dropna().unique().tolist()
+            if len(units) < 2:
+                continue
+            drawn = rng.choice(units, size=len(units), replace=True)
+            sampled_parts = []
+            for copy_index, unit in enumerate(drawn):
+                part = frame[frame[sample_column] == unit].copy()
+                if sample_column == "target_keyword_id":
+                    part["_bootstrap_keyword_copy_id"] = copy_index
+                sampled_parts.append(part)
+            sampled = pd.concat(sampled_parts, ignore_index=True)
             full_r2 = _pooled_r_squared(
                 sampled["outcome"].to_numpy(dtype=float),
                 sampled["full_prediction"].to_numpy(dtype=float),
@@ -1593,12 +1928,12 @@ def _bootstrap_oos_delta_ci(
             ndcg_full = _keyword_ndcg(
                 sampled,
                 sampled["full_prediction"].to_numpy(dtype=float),
-                group_column="_bootstrap_keyword_copy_id",
+                group_column=("_bootstrap_keyword_copy_id" if sample_column == "target_keyword_id" else "target_keyword_id"),
             )
             ndcg_reduced = _keyword_ndcg(
                 sampled,
                 sampled["reduced_prediction"].to_numpy(dtype=float),
-                group_column="_bootstrap_keyword_copy_id",
+                group_column=("_bootstrap_keyword_copy_id" if sample_column == "target_keyword_id" else "target_keyword_id"),
             )
             if ndcg_full is not None and ndcg_reduced is not None:
                 ndcg_deltas.append(float(ndcg_full - ndcg_reduced))
@@ -1627,16 +1962,34 @@ def _domain_holdout_oof_importance(
 ) -> dict[str, Any] | None:
     if model_data is None or "domain" not in model_data.columns:
         return None
-    if model_data["domain"].nunique(dropna=True) < 4:
+    valid_domains = model_data["domain"].dropna()
+    domain_count = int(valid_domains.nunique())
+    if domain_count < 4:
         return None
-    return _compute_grouped_oof_importance(
-        model_data.dropna(subset=["domain"]),
+    valid_model_data = model_data.dropna(subset=["domain"])
+    cv_folds = min(5, domain_count)
+    result = _compute_grouped_oof_importance(
+        valid_model_data,
         factor_columns,
-        cv_folds=min(5, int(model_data["domain"].nunique(dropna=True))),
+        cv_folds=cv_folds,
         cv_repeats=cv_repeats,
         random_state=random_state,
         group_column="domain",
     )
+    if result is None:
+        return None
+    result.update(
+        {
+            "domain_rows": int(len(valid_model_data)),
+            "domain_count": domain_count,
+            "domain_rows_with_extraction_failure": int(model_data["domain"].isna().sum()),
+            "domains_per_fold": [
+                int(len(fold))
+                for fold in np.array_split(sorted(valid_domains.unique()), cv_folds)
+            ],
+        }
+    )
+    return result
 
 
 def _metadata_only_oof_importance(

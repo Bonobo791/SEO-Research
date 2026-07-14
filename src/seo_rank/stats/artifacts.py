@@ -905,6 +905,19 @@ def _format_diagnostics_lines(diagnostics: dict[str, object]) -> list[str]:
                 f"reset_p_value={reset['p_value']}, "
                 f"reset_flagged={reset['flagged']}"
             )
+        if influence.get("status") == "skipped":
+            influence_details = (
+                "influence_status=skipped, "
+                f"influence_skipped_reason={influence.get('skipped_reason', 'unknown')}"
+            )
+        else:
+            influence_details = (
+                f"cook_d_count={influence['cook_d_count']}/{influence['row_count']}, "
+                f"leverage_count={influence['leverage_count']}, "
+                f"studentized_residual_count={influence['studentized_residual_count']}, "
+                f"dffits_count={influence['dffits_count']}, "
+                f"dfbeta_count={influence['dfbeta_count']}"
+            )
         line = (
             "- "
             f"{backend}: {reset_details}, "
@@ -913,11 +926,7 @@ def _format_diagnostics_lines(diagnostics: dict[str, object]) -> list[str]:
             f"breusch_pagan_p_value={breusch_pagan['lm_p_value']}, "
             f"breusch_pagan_flagged={breusch_pagan['flagged']}, "
             f"recommended_se_type={breusch_pagan['recommended_se_type']}, "
-            f"cook_d_count={influence['cook_d_count']}/{influence['row_count']}, "
-            f"leverage_count={influence['leverage_count']}, "
-            f"studentized_residual_count={influence['studentized_residual_count']}, "
-            f"dffits_count={influence['dffits_count']}, "
-            f"dfbeta_count={influence['dfbeta_count']}"
+            f"{influence_details}"
         )
         shapiro = backend_summary.get("shapiro")
         if shapiro is not None and shapiro.get("status") != "skipped":
