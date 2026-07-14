@@ -38,7 +38,8 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Measure how much similarity backends and TextRazor page metrics "
-            "explain SERP rank using pooled OLS adjusted R²."
+            "explain SERP rank using fixed-effects OLS, Ridge cross-validation, "
+            "and domain-held-out portability."
         )
     )
     parser.add_argument(
@@ -271,9 +272,10 @@ def _render_relative_importance_table(relative_importance: object) -> str:
         f"rows: {relative_importance.get('row_count', 0)}  "
         f"keywords: {relative_importance.get('keyword_count', 0)}  "
         f"Shapley: permutation ({relative_importance.get('shapley_permutations', 'n/a')})",
-        f"Shapley MCSE: {relative_importance.get('shapley_mcse', 'n/a')}",
-        f"Shapley first-vs-second-half difference: "
-        f"{relative_importance.get('shapley_convergence_difference', 'n/a')}",
+        f"Shapley raw ΔR² MCSE: "
+        f"{relative_importance.get('shapley_raw_delta_r2_mcse', relative_importance.get('shapley_mcse', 'n/a'))}",
+        f"Shapley raw ΔR² first-vs-second-half difference: "
+        f"{relative_importance.get('shapley_raw_delta_r2_convergence_difference', relative_importance.get('shapley_convergence_difference', 'n/a'))}",
         "",
         f"{'Group':<24} {'Predictors':>10} {'Rows':>8} "
         f"{'Keywords':>9} {'Partial R²':>11} {'Shapley':>9}",
@@ -302,8 +304,8 @@ def _render_relative_importance_table(relative_importance: object) -> str:
         "Repeated keyword-grouped CV — predictive importance",
         "-" * 64,
         f"{'Group':<24} {'Full R²':>9} {'Without':>9} {'ΔR²':>9} "
-        f"{'ΔR² CI':>21} {'ΔNDCG':>9} {'Status':>18}",
-        "-" * 108,
+        f"{'ΔR² CI':>21} {'ΔNDCG':>9} {'ΔNDCG CI':>21} {'R² status':>18} {'NDCG status':>18}",
+        "-" * 150,
     ])
     for group in groups:
         if not isinstance(group, dict):
@@ -315,7 +317,9 @@ def _render_relative_importance_table(relative_importance: object) -> str:
             f"{_format_float(group.get('out_of_sample_delta_r2')):>9} "
             f"{_format_ci(group.get('out_of_sample_delta_r2_ci')):>21} "
             f"{_format_float(group.get('out_of_sample_ndcg_delta')):>9} "
-            f"{str(group.get('evidence_status', 'n/a')):>18}"
+            f"{_format_ci(group.get('out_of_sample_ndcg_delta_ci')):>21} "
+            f"{str(group.get('evidence_status', 'n/a')):>18} "
+            f"{str(group.get('ndcg_evidence_status', 'n/a')):>18}"
         )
         lines.append(
             f"  repeat ΔR² mean/sd/range: "
@@ -323,6 +327,13 @@ def _render_relative_importance_table(relative_importance: object) -> str:
             f"{_format_float(group.get('repeat_sd_delta_r2'))} / "
             f"[{_format_float(group.get('repeat_min_delta_r2'))}, "
             f"{_format_float(group.get('repeat_max_delta_r2'))}]"
+        )
+        lines.append(
+            f"  repeat ΔNDCG mean/sd/range: "
+            f"{_format_float(group.get('repeat_mean_ndcg_delta'))} / "
+            f"{_format_float(group.get('repeat_sd_ndcg_delta'))} / "
+            f"[{_format_float(group.get('repeat_min_ndcg_delta'))}, "
+            f"{_format_float(group.get('repeat_max_ndcg_delta'))}]"
         )
         columns = group.get("oos_predictor_columns", [])
         lines.append(
@@ -335,8 +346,8 @@ def _render_relative_importance_table(relative_importance: object) -> str:
         "C. Domain-held-out portability",
         "Domain-held-out CV — transfer to unseen websites",
         "-" * 64,
-        f"{'Group':<24} {'ΔR²':>9} {'CI':>21} {'ΔNDCG':>9} {'CI':>21}",
-        "-" * 88,
+        f"{'Group':<24} {'ΔR²':>9} {'CI':>21}",
+        "-" * 58,
     ])
     for group in groups:
         if not isinstance(group, dict):
@@ -344,13 +355,15 @@ def _render_relative_importance_table(relative_importance: object) -> str:
         lines.append(
             f"{str(group.get('factor', '')):<24} "
             f"{_format_float(group.get('domain_holdout_delta_r2')):>9} "
-            f"{_format_ci(group.get('domain_holdout_delta_r2_ci')):>21} "
-            f"{_format_float(group.get('domain_holdout_ndcg_delta')):>9} "
-            f"{_format_ci(group.get('domain_holdout_ndcg_delta_ci')):>21}"
+            f"{_format_ci(group.get('domain_holdout_delta_r2_ci')):>21}"
         )
         lines.append(
-            f"  domain rows/count: {group.get('domain_rows', 'n/a')} / "
+            f"  overall domain rows/count: {group.get('domain_rows', 'n/a')} / "
             f"{group.get('domain_count', 'n/a')}"
+        )
+        lines.append(
+            f"  paired domain rows/count: {group.get('domain_paired_rows', 'n/a')} / "
+            f"{group.get('domain_paired_count', 'n/a')}"
         )
         lines.append(
             f"  domains/fold: {group.get('domains_per_fold', 'n/a')}  "
@@ -368,10 +381,23 @@ def _render_relative_importance_table(relative_importance: object) -> str:
         "",
         "E. Predictor coverage and exclusions",
         f"in-sample predictors: {', '.join(relative_importance.get('predictor_columns', []))}",
+        "fold inclusion rates: "
+        + ", ".join(
+            f"{column}={_format_float(rate)}"
+            for column, rate in relative_importance.get(
+                "predictor_fold_inclusion_rates", {}
+            ).items()
+        ),
         f"excluded predictors: {len(relative_importance.get('excluded_predictors', []))}",
         "",
         "F. Warnings and interpretation",
     ])
+    for excluded in relative_importance.get("excluded_predictors", []):
+        if isinstance(excluded, dict):
+            lines.append(
+                f"excluded: {excluded.get('column', 'n/a')} "
+                f"({excluded.get('reason', 'unknown')})"
+            )
     for warning in relative_importance.get("warnings", []):
         lines.append(f"WARNING: {warning}")
     note = relative_importance.get("oos_note")
