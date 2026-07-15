@@ -361,7 +361,12 @@ run (`parquet/analysis_mart` + `parquet/textrazor_page_metrics`):
 python analysis/textrazor_ranking_r2.py --run runs/RUN_ID
 python analysis/textrazor_ranking_r2.py --run runs/RUN_ID --depth top_10
 python analysis/textrazor_ranking_r2.py --run runs/RUN_ID --no-show
+python analysis/textrazor_ranking_r2.py --run runs/RUN_ID --exhaustive
 ```
+
+Routine runs use reduced resampling budgets and log stage progress to stderr.
+`--exhaustive` restores the legacy 5-fold/5-repeat/500-bootstrap/2,000-Shapley/
+10-domain-repeat defaults; explicit resampling arguments override either preset.
 
 Writes `stats/ranking_r2.json`, `stats/ranking_r2_curated_model.png`, and
 `stats/ranking_r2_entity_relevance.png`.

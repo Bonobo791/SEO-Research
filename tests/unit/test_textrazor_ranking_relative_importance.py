@@ -857,6 +857,50 @@ def test_parse_args_accepts_positive_resampling_counts(monkeypatch) -> None:
     assert args.bootstraps == 1
 
 
+def test_parse_args_uses_fast_defaults_and_exhaustive_preset(monkeypatch) -> None:
+    from analysis.textrazor_ranking_r2 import _parse_args
+
+    monkeypatch.setattr(
+        "sys.argv", ["textrazor_ranking_r2.py", "--run", "runs/example"]
+    )
+    fast = _parse_args()
+    assert (
+        fast.cv_folds,
+        fast.cv_repeats,
+        fast.bootstraps,
+        fast.shapley_permutations,
+        fast.domain_cv_repeats,
+    ) == (3, 2, 100, 200, 2)
+
+    monkeypatch.setattr(
+        "sys.argv",
+        ["textrazor_ranking_r2.py", "--run", "runs/example", "--exhaustive"],
+    )
+    exhaustive = _parse_args()
+    assert (
+        exhaustive.cv_folds,
+        exhaustive.cv_repeats,
+        exhaustive.bootstraps,
+        exhaustive.shapley_permutations,
+        exhaustive.domain_cv_repeats,
+    ) == (5, 5, 500, 2000, 10)
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "textrazor_ranking_r2.py",
+            "--run",
+            "runs/example",
+            "--exhaustive",
+            "--shapley-permutations",
+            "7",
+        ],
+    )
+    overridden = _parse_args()
+    assert overridden.shapley_permutations == 7
+    assert overridden.bootstraps == 500
+
+
 def test_relative_importance_renderer_separates_explanatory_and_oos_tables() -> None:
     from analysis.textrazor_ranking_r2 import _render_relative_importance_table
 
@@ -1112,6 +1156,32 @@ def test_shapley_reports_successful_contribution_counts(monkeypatch) -> None:
 
     assert result["successful_contributions"]["similarity"] == 3
     assert result["values"]["similarity"] == pytest.approx(0.5)
+
+
+def test_shapley_logs_progress(monkeypatch, caplog) -> None:
+    import logging
+    import seo_rank.stats.textrazor_explainability as module
+
+    model_data = __import__("pandas").DataFrame({"outcome_fe": [0.0, 1.0]})
+    monkeypatch.setattr(
+        module,
+        "_fit_importance_r_squared",
+        lambda _data, columns, **_kwargs: 0.0 if not columns else 0.5,
+    )
+    caplog.set_level(logging.INFO, logger=module.__name__)
+
+    module._permutation_shapley_statistics(
+        model_data,
+        {"signal": ("signal",)},
+        selected_columns=("signal",),
+        keyword_count=1,
+        control_columns=(),
+        permutations=10,
+        random_state=0,
+        progress_label="signal Shapley",
+    )
+
+    assert "signal Shapley progress 10/10" in caplog.text
 
 
 def test_renderer_reports_keyword_ndcg_ci_and_omits_domain_ndcg() -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -767,6 +768,7 @@ def summarize_ranking_relative_importance(
         control_columns=control_columns,
         permutations=shapley_permutations,
         random_state=random_state,
+        progress_label="group Shapley",
     )
     shapley_values = shapley_statistics["values"]
     shapley_total = sum(
@@ -785,6 +787,7 @@ def summarize_ranking_relative_importance(
         control_columns=control_columns,
         permutations=shapley_permutations,
         random_state=random_state,
+        progress_label="signal Shapley",
     )
     signal_shapley_values = signal_shapley_statistics["values"]
     signal_shapley_total = sum(
@@ -799,12 +802,14 @@ def summarize_ranking_relative_importance(
         cv_folds=cv_folds,
         cv_repeats=cv_repeats,
         random_state=random_state,
+        progress_label="keyword CV",
     )
     oos_bootstrap = _bootstrap_oos_delta_ci(
         oos_result,
         bootstraps=bootstraps,
         random_state=random_state + 1,
         sample_column="target_keyword_id",
+        progress_label="keyword bootstrap",
     )
     domain_holdout = _domain_holdout_oof_importance(
         oos_panel,
@@ -818,6 +823,7 @@ def summarize_ranking_relative_importance(
         random_state=random_state + 4,
         sample_column="domain",
         metrics=("delta_r2",),
+        progress_label="domain bootstrap",
     )
     metadata_only = _metadata_only_oof_importance(
         oos_panel,
@@ -1488,6 +1494,7 @@ def _permutation_shapley_statistics(
     control_columns: Sequence[str],
     permutations: int,
     random_state: int,
+    progress_label: str | None = None,
 ) -> dict[str, Any]:
     groups = tuple(factor_columns)
     shapley = {group: 0.0 for group in groups}
@@ -1495,6 +1502,16 @@ def _permutation_shapley_statistics(
     selected_set = set(selected_columns)
     rng = np.random.default_rng(random_state)
     coalition_cache: dict[tuple[str, ...], float | None] = {}
+    started = time.perf_counter()
+    total_permutations = max(1, permutations)
+    progress_interval = max(1, total_permutations // 10)
+    if progress_label is not None:
+        logger.info(
+            "%s started players=%d permutations=%d",
+            progress_label,
+            len(groups),
+            total_permutations,
+        )
 
     def coalition_r_squared(columns: Sequence[str]) -> float | None:
         key = tuple(columns)
@@ -1507,7 +1524,7 @@ def _permutation_shapley_statistics(
             )
         return coalition_cache[key]
 
-    for _ in range(max(1, permutations)):
+    for permutation_index in range(total_permutations):
         order = list(groups)
         rng.shuffle(order)
         previous = coalition_r_squared(())
@@ -1528,6 +1545,17 @@ def _permutation_shapley_statistics(
                 shapley[group] += contribution
                 contributions[group].append(float(contribution))
             previous = current
+        completed = permutation_index + 1
+        if progress_label is not None and (
+            completed % progress_interval == 0 or completed == total_permutations
+        ):
+            logger.info(
+                "%s progress %d/%d elapsed=%.1fs",
+                progress_label,
+                completed,
+                total_permutations,
+                time.perf_counter() - started,
+            )
     values = {
         group: (
             None
@@ -1853,6 +1881,7 @@ def _compute_grouped_oof_importance(
     cv_repeats: int = 3,
     random_state: int = 0,
     group_column: str = "target_keyword_id",
+    progress_label: str | None = None,
 ) -> dict[str, Any] | None:
     if model_data is None or model_data.empty:
         return None
@@ -1867,6 +1896,15 @@ def _compute_grouped_oof_importance(
     if not predictor_columns or group_column not in model_data.columns:
         return None
     factor_names = tuple(factor_columns)
+    started = time.perf_counter()
+    if progress_label is not None:
+        logger.info(
+            "%s started factors=%d folds=%d repeats=%d",
+            progress_label,
+            len(factor_names),
+            cv_folds,
+            cv_repeats,
+        )
 
     y = model_data["outcome"].to_numpy(dtype=float)
     groups = model_data[group_column].to_numpy()
@@ -1996,6 +2034,14 @@ def _compute_grouped_oof_importance(
                 }
             repeat_result["repeat"] = repeat
             repeat_results.append(repeat_result)
+        if progress_label is not None:
+            logger.info(
+                "%s progress %d/%d repeats elapsed=%.1fs",
+                progress_label,
+                repeat + 1,
+                max(1, cv_repeats),
+                time.perf_counter() - started,
+            )
 
     covered = full_pred_count > 0
     if not np.any(covered):
@@ -2235,6 +2281,7 @@ def _bootstrap_oos_delta_ci(
     sample_column: str = "target_keyword_id",
     metrics: Sequence[str] = ("delta_r2", "ndcg_delta"),
     alpha: float = 0.05,
+    progress_label: str | None = None,
 ) -> dict[str, dict[str, dict[str, float | None]]]:
     factor_names = tuple((oof_result or {}).get("groups", {})) or RANKING_IMPORTANCE_GROUP_ORDER
     empty_interval = {
@@ -2250,11 +2297,19 @@ def _bootstrap_oos_delta_ci(
     if oof_result is None or bootstraps < 1:
         return empty
 
+    started = time.perf_counter()
+    if progress_label is not None:
+        logger.info(
+            "%s started factors=%d draws=%d",
+            progress_label,
+            len(factor_names),
+            bootstraps,
+        )
     rng = np.random.default_rng(random_state)
     intervals: dict[str, dict[str, dict[str, float | None]]] = {}
     lower_q = alpha / 2.0
     upper_q = 1.0 - alpha / 2.0
-    for group in oof_result.get("groups", {}):
+    for group_index, group in enumerate(oof_result.get("groups", {}), start=1):
         repeat_frames = [
             result.get("groups", {}).get(group, {}).get("oof_predictions")
             for result in oof_result.get("repeat_results", [])
@@ -2344,6 +2399,14 @@ def _bootstrap_oos_delta_ci(
             )
             for metric in metrics
         }
+        if progress_label is not None:
+            logger.info(
+                "%s progress %d/%d factors elapsed=%.1fs",
+                progress_label,
+                group_index,
+                len(factor_names),
+                time.perf_counter() - started,
+            )
     return intervals
 
 
@@ -2369,6 +2432,7 @@ def _domain_holdout_oof_importance(
         cv_repeats=cv_repeats,
         random_state=random_state,
         group_column="domain",
+        progress_label="domain CV",
     )
     if result is None:
         return None

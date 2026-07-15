@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
 
@@ -18,6 +19,23 @@ from seo_rank.stats.textrazor_explainability import (
     summarize_ranking_explainability,
     summarize_ranking_relative_importance,
 )
+
+logger = logging.getLogger(__name__)
+
+FAST_RESAMPLING_DEFAULTS = {
+    "cv_folds": 3,
+    "cv_repeats": 2,
+    "bootstraps": 100,
+    "shapley_permutations": 200,
+    "domain_cv_repeats": 2,
+}
+EXHAUSTIVE_RESAMPLING_DEFAULTS = {
+    "cv_folds": 5,
+    "cv_repeats": 5,
+    "bootstraps": 500,
+    "shapley_permutations": 2000,
+    "domain_cv_repeats": 10,
+}
 
 
 def _positive_int(value: str) -> int:
@@ -60,36 +78,50 @@ def _parse_args() -> argparse.Namespace:
         help="Skip the interactive plot window (still writes PNG when matplotlib is available)",
     )
     parser.add_argument(
+        "--exhaustive",
+        action="store_true",
+        help="Use the legacy exhaustive resampling defaults; explicit values still override",
+    )
+    parser.add_argument(
         "--cv-folds",
         type=_cv_folds,
-        default=5,
-        help="Keyword-grouped CV folds for out-of-sample delta R² (default: 5, minimum 2)",
+        default=None,
+        help="Keyword-grouped CV folds for out-of-sample delta R² (fast: 3, exhaustive: 5)",
     )
     parser.add_argument(
         "--cv-repeats",
         type=_positive_int,
-        default=5,
-        help="Repeated keyword GroupKFold repeats for OOF R² (default: 5, minimum 1)",
+        default=None,
+        help="Repeated keyword GroupKFold repeats for OOF R² (fast: 2, exhaustive: 5)",
     )
     parser.add_argument(
         "--bootstraps",
         type=_positive_int,
-        default=500,
-        help="Keyword-bootstrap draws for OOS delta R² CIs (default: 500, minimum 1)",
+        default=None,
+        help="Keyword-bootstrap draws for OOS delta R² CIs (fast: 100, exhaustive: 500)",
     )
     parser.add_argument(
         "--shapley-permutations",
         type=_positive_int,
-        default=2000,
-        help="Permutation-Shapley draws (default: 2000, minimum 1)",
+        default=None,
+        help="Permutation-Shapley draws (fast: 200, exhaustive: 2000)",
     )
     parser.add_argument(
         "--domain-cv-repeats",
         type=_positive_int,
-        default=10,
-        help="Domain-held-out CV repeats (default: 10, minimum 1)",
+        default=None,
+        help="Domain-held-out CV repeats (fast: 2, exhaustive: 10)",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    defaults = (
+        EXHAUSTIVE_RESAMPLING_DEFAULTS
+        if args.exhaustive
+        else FAST_RESAMPLING_DEFAULTS
+    )
+    for name, value in defaults.items():
+        if getattr(args, name) is None:
+            setattr(args, name, value)
+    return args
 
 
 def _require_run_artifacts(run_dir: Path) -> None:
@@ -434,7 +466,18 @@ def _print_viz_result(viz_result: object, *, no_show: bool) -> None:
 
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="[seo-rank] %(message)s")
     args = _parse_args()
+    logger.info(
+        "Relative importance budget folds=%d repeats=%d bootstraps=%d "
+        "shapley_permutations=%d domain_repeats=%d exhaustive=%s",
+        args.cv_folds,
+        args.cv_repeats,
+        args.bootstraps,
+        args.shapley_permutations,
+        args.domain_cv_repeats,
+        args.exhaustive,
+    )
     run_dir = args.run.resolve()
     if not run_dir.is_dir():
         raise SystemExit(f"Run directory not found: {run_dir}")
