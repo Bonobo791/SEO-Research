@@ -1,5 +1,11 @@
 # AGENTS.md
 
+# NON NEGOTIABLES
+
+- Always use rtk filtering - don't use rtk proxy
+- Always fail loudly - all errors should be caught immediately, never silently
+- Always create logging for all files except tests
+
 ## What this is
 
 Python CLI (`seo-rank`) for research-grade SEO ranking analysis using DataForSEO, TextRazor, BGE, and Gemini backends. Parquet lake under `runs/` (gitignored). Phase 5 statistical analysis is the active scope (`GOALS.md`).
@@ -135,7 +141,4 @@ rtk pip list            rtk pnpm install        rtk npm run <script>
 ## Rules
 - In command chains, prefix each segment: `rtk git add . && rtk git commit -m "msg"`
 - For debugging, use raw command without rtk prefix
-- `rtk proxy <cmd>` runs command without filtering but tracks usage
-- Always fail loudly - all errors should be caught immediately, never silently
-- Always create logging for all files except tests
 <!-- /headroom:rtk-instructions -->

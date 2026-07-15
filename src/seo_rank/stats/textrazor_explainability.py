@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,8 @@ from seo_rank.stats.regression import (
     _public_baseline_formula,
 )
 from seo_rank.stats.spec import AnalysisSpec, load_analysis_spec
+
+logger = logging.getLogger(__name__)
 
 TEXTRAZOR_RANKING_METRICS: tuple[tuple[str, str], ...] = (
     ("entity_confidence", "textrazor_entity_confidence_score"),
@@ -769,11 +772,30 @@ def summarize_ranking_relative_importance(
     shapley_total = sum(
         value for value in shapley_values.values() if value is not None
     )
+    signal_factor_columns = {
+        column: (column,)
+        for columns in factor_columns.values()
+        for column in columns
+    }
+    signal_shapley_statistics = _permutation_shapley_statistics(
+        model_data,
+        signal_factor_columns,
+        selected_columns=selected_columns,
+        keyword_count=keyword_count,
+        control_columns=control_columns,
+        permutations=shapley_permutations,
+        random_state=random_state,
+    )
+    signal_shapley_values = signal_shapley_statistics["values"]
+    signal_shapley_total = sum(
+        value for value in signal_shapley_values.values() if value is not None
+    )
 
     oos_panel = _prepare_oos_importance_frame(panel, factor_columns)
+    all_importance_factors = {**factor_columns, **signal_factor_columns}
     oos_result = _compute_grouped_oof_importance(
         oos_panel,
-        factor_columns,
+        all_importance_factors,
         cv_folds=cv_folds,
         cv_repeats=cv_repeats,
         random_state=random_state,
@@ -786,7 +808,7 @@ def summarize_ranking_relative_importance(
     )
     domain_holdout = _domain_holdout_oof_importance(
         oos_panel,
-        factor_columns,
+        all_importance_factors,
         random_state=random_state + 2,
         cv_repeats=domain_cv_repeats,
     )
@@ -840,6 +862,12 @@ def summarize_ranking_relative_importance(
             keyword_count=keyword_count,
             control_columns=control_columns,
             full_r2=full_r2,
+            shapley_values=signal_shapley_values,
+            shapley_total=signal_shapley_total,
+            oos_result=oos_result,
+            oos_bootstrap=oos_bootstrap,
+            domain_holdout=domain_holdout,
+            domain_bootstrap=domain_bootstrap,
         )
         oos_group = (oos_result or {}).get("groups", {}).get(group, {})
         oos_ci = (oos_bootstrap or {}).get(group, {})
@@ -1461,7 +1489,7 @@ def _permutation_shapley_statistics(
     permutations: int,
     random_state: int,
 ) -> dict[str, Any]:
-    groups = RANKING_IMPORTANCE_GROUP_ORDER
+    groups = tuple(factor_columns)
     shapley = {group: 0.0 for group in groups}
     contributions = {group: [] for group in groups}
     selected_set = set(selected_columns)
@@ -1838,6 +1866,7 @@ def _compute_grouped_oof_importance(
         )
     if not predictor_columns or group_column not in model_data.columns:
         return None
+    factor_names = tuple(factor_columns)
 
     y = model_data["outcome"].to_numpy(dtype=float)
     groups = model_data[group_column].to_numpy()
@@ -1845,31 +1874,31 @@ def _compute_grouped_oof_importance(
     full_pred_sum = np.zeros(n_rows, dtype=float)
     full_pred_count = np.zeros(n_rows, dtype=float)
     leave_pred_sum = {
-        group: np.zeros(n_rows, dtype=float) for group in RANKING_IMPORTANCE_GROUP_ORDER
+        group: np.zeros(n_rows, dtype=float) for group in factor_names
     }
     leave_pred_count = {
-        group: np.zeros(n_rows, dtype=float) for group in RANKING_IMPORTANCE_GROUP_ORDER
+        group: np.zeros(n_rows, dtype=float) for group in factor_names
     }
 
     repeat_results: list[dict[str, Any]] = []
     paired_repeat_frames: dict[str, list[pd.DataFrame]] = {
-        group: [] for group in RANKING_IMPORTANCE_GROUP_ORDER
+        group: [] for group in factor_names
     }
     inclusion_stats: dict[str, Any] = {"folds": 0, "counts": {}}
     rng = np.random.default_rng(random_state)
     for repeat in range(max(1, cv_repeats)):
         repeat_paired_frames: dict[str, list[pd.DataFrame]] = {
-            group: [] for group in RANKING_IMPORTANCE_GROUP_ORDER
+            group: [] for group in factor_names
         }
         repeat_full_sum = np.zeros(n_rows, dtype=float)
         repeat_full_count = np.zeros(n_rows, dtype=float)
         repeat_leave_sum = {
             group: np.zeros(n_rows, dtype=float)
-            for group in RANKING_IMPORTANCE_GROUP_ORDER
+            for group in factor_names
         }
         repeat_leave_count = {
             group: np.zeros(n_rows, dtype=float)
-            for group in RANKING_IMPORTANCE_GROUP_ORDER
+            for group in factor_names
         }
         repeat_rng = np.random.default_rng(int(rng.integers(0, 2**31 - 1)))
         splits = _balanced_group_folds(groups, n_splits=cv_folds, rng=repeat_rng)
@@ -1897,7 +1926,7 @@ def _compute_grouped_oof_importance(
             repeat_full_sum[test_idx] += preds
             repeat_full_count[test_idx] += 1.0
 
-            for group in RANKING_IMPORTANCE_GROUP_ORDER:
+            for group in factor_names:
                 without = tuple(
                     column
                     for column in predictor_columns
@@ -1980,7 +2009,7 @@ def _compute_grouped_oof_importance(
     ndcg_full = _keyword_ndcg(model_data.loc[covered], full_pred[covered])
 
     group_results: dict[str, dict[str, Any]] = {}
-    for group in RANKING_IMPORTANCE_GROUP_ORDER:
+    for group in factor_names:
         paired_frames = paired_repeat_frames[group]
         if paired_frames:
             paired = pd.concat(paired_frames, ignore_index=True)
@@ -2148,7 +2177,7 @@ def _summarize_oof_predictions(
         return None
     full_pred = np.divide(full_pred_sum, np.maximum(full_pred_count, 1.0))
     group_results: dict[str, dict[str, Any]] = {}
-    for group in RANKING_IMPORTANCE_GROUP_ORDER:
+    for group in factor_columns:
         mask = covered & (leave_pred_count[group] > 0)
         if not np.any(mask):
             group_results[group] = {"delta_r2": None, "ndcg_delta": None}
@@ -2207,6 +2236,7 @@ def _bootstrap_oos_delta_ci(
     metrics: Sequence[str] = ("delta_r2", "ndcg_delta"),
     alpha: float = 0.05,
 ) -> dict[str, dict[str, dict[str, float | None]]]:
+    factor_names = tuple((oof_result or {}).get("groups", {})) or RANKING_IMPORTANCE_GROUP_ORDER
     empty_interval = {
         "point": None,
         "lower": None,
@@ -2215,7 +2245,7 @@ def _bootstrap_oos_delta_ci(
     }
     empty = {
         group: {metric: dict(empty_interval) for metric in metrics}
-        for group in RANKING_IMPORTANCE_GROUP_ORDER
+        for group in factor_names
     }
     if oof_result is None or bootstraps < 1:
         return empty
@@ -2224,7 +2254,7 @@ def _bootstrap_oos_delta_ci(
     intervals: dict[str, dict[str, dict[str, float | None]]] = {}
     lower_q = alpha / 2.0
     upper_q = 1.0 - alpha / 2.0
-    for group in RANKING_IMPORTANCE_GROUP_ORDER:
+    for group in oof_result.get("groups", {}):
         repeat_frames = [
             result.get("groups", {}).get(group, {}).get("oof_predictions")
             for result in oof_result.get("repeat_results", [])
@@ -2402,34 +2432,97 @@ def _metric_relative_importance_rows(
     keyword_count: int,
     control_columns: Sequence[str],
     full_r2: float,
+    shapley_values: Mapping[str, float | None],
+    shapley_total: float,
+    oos_result: Mapping[str, Any] | None,
+    oos_bootstrap: Mapping[str, Any] | None,
+    domain_holdout: Mapping[str, Any] | None,
+    domain_bootstrap: Mapping[str, Any] | None,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for column in group_columns:
-        if column not in selected_columns:
-            continue
+        included = column in selected_columns
         without_columns = tuple(
-            selected_column
-            for selected_column in selected_columns
-            if selected_column != column
+            selected_column for selected_column in selected_columns if selected_column != column
         )
-        without_r2 = _fit_importance_r_squared(
-            model_data,
-            without_columns,
-            keyword_count=keyword_count,
-            control_columns=control_columns,
-        )
-        partial_r2 = (
-            _partial_r_squared(full_r2, without_r2)
-            if without_r2 is not None
+        without_r2 = (
+            _fit_importance_r_squared(
+                model_data,
+                without_columns,
+                keyword_count=keyword_count,
+                control_columns=control_columns,
+            )
+            if included
             else None
+        )
+        partial_r2 = _partial_r_squared(full_r2, without_r2) if without_r2 is not None else None
+        oos_signal = (oos_result or {}).get("groups", {}).get(column, {})
+        oos_ci = (oos_bootstrap or {}).get(column, {})
+        domain_signal = (domain_holdout or {}).get("groups", {}).get(column, {})
+        domain_ci = (domain_bootstrap or {}).get(column, {})
+        keyword_interval = oos_ci.get("delta_r2")
+        keyword_bounds = (
+            (keyword_interval.get("lower"), keyword_interval.get("upper"))
+            if isinstance(keyword_interval, dict)
+            else None
+        )
+        domain_interval = domain_ci.get("delta_r2")
+        domain_bounds = (
+            (domain_interval.get("lower"), domain_interval.get("upper"))
+            if isinstance(domain_interval, dict)
+            else None
+        )
+        oos_columns = _effective_oos_columns(
+            (column,),
+            (oos_result or {}).get("predictor_fold_inclusion_rates", {}),
+        )
+        tested = bool(oos_columns) and oos_signal.get("delta_r2") is not None
+        ndcg_tested = tested and oos_signal.get("ndcg_delta") is not None
+        logger.debug(
+            "Signal evidence applicability signal=%s r2_tested=%s ndcg_tested=%s group=%s",
+            column,
+            tested,
+            ndcg_tested,
+            group,
         )
         rows.append(
             {
                 "factor": column,
                 "column": column,
                 "full_model_partial_r2": partial_r2,
-                "shapley_share": None,
-                "out_of_sample_delta_r2": None,
+                "shapley_raw_delta_r2": shapley_values.get(column) if included else None,
+                "shapley_share": (
+                    float(shapley_values[column] / shapley_total)
+                    if included
+                    and shapley_total != 0
+                    and shapley_values.get(column) is not None
+                    else None
+                ),
+                "out_of_sample_full_r2": oos_signal.get("full_r2"),
+                "out_of_sample_reduced_r2": oos_signal.get("reduced_r2"),
+                "out_of_sample_delta_r2": oos_signal.get("delta_r2"),
+                "out_of_sample_delta_r2_ci": oos_ci.get("delta_r2"),
+                "out_of_sample_ndcg_delta": oos_signal.get("ndcg_delta"),
+                "out_of_sample_ndcg_delta_ci": oos_ci.get("ndcg_delta"),
+                "domain_holdout_delta_r2": domain_signal.get("delta_r2"),
+                "domain_holdout_delta_r2_ci": domain_ci.get("delta_r2"),
+                "oos_predictor_included": bool(oos_columns),
+                "evidence_status": _evidence_status(
+                    keyword_bounds,
+                    domain_signal.get("delta_r2"),
+                    domain_ci=domain_bounds,
+                    keyword_delta=oos_signal.get("delta_r2"),
+                    tested=tested,
+                ),
+                "ndcg_evidence_status": _ndcg_evidence_status(
+                    keyword_ci=(
+                        (oos_ci["ndcg_delta"].get("lower"), oos_ci["ndcg_delta"].get("upper"))
+                        if isinstance(oos_ci.get("ndcg_delta"), dict)
+                        else None
+                    ),
+                    keyword_delta=oos_signal.get("ndcg_delta"),
+                    tested=ndcg_tested,
+                ),
                 "clustered_ci": None,
             }
         )

@@ -228,6 +228,129 @@ def test_summarize_ranking_relative_importance_computes_group_and_metric_rows() 
     json.dumps(summary)
 
 
+def test_relative_importance_measures_each_signal_with_group_parity(monkeypatch) -> None:
+    import seo_rank.stats.textrazor_explainability as module
+
+    def shapley(_model_data, factor_columns, **_kwargs):
+        return {
+            "values": {name: 0.1 for name in factor_columns},
+            "mcse": {},
+            "convergence_difference": {},
+            "successful_contributions": {},
+        }
+
+    def oos(_panel, factor_columns, **_kwargs):
+        return {
+            "groups": {
+                name: {
+                    "full_r2": 0.8,
+                    "reduced_r2": 0.6,
+                    "delta_r2": 0.2,
+                    "ndcg_delta": 0.1,
+                }
+                for name in factor_columns
+            },
+            "predictor_fold_inclusion_rates": {
+                column: 1.0
+                for columns in factor_columns.values()
+                for column in columns
+            },
+        }
+
+    def bootstrap(result, **_kwargs):
+        return {
+            name: {
+                "delta_r2": {"point": 0.2, "lower": 0.1, "upper": 0.3},
+                "ndcg_delta": {"point": 0.1, "lower": 0.0, "upper": 0.2},
+            }
+            for name in result["groups"]
+        }
+
+    monkeypatch.setattr(module, "_permutation_shapley_statistics", shapley)
+    monkeypatch.setattr(module, "_compute_grouped_oof_importance", oos)
+    monkeypatch.setattr(module, "_domain_holdout_oof_importance", oos)
+    monkeypatch.setattr(module, "_bootstrap_oos_delta_ci", bootstrap)
+
+    summary = module.summarize_ranking_relative_importance(
+        _ranking_importance_panel_frame(),
+        spec=load_analysis_spec(),
+        cv_folds=3,
+        cv_repeats=2,
+        bootstraps=3,
+        shapley_permutations=4,
+        domain_cv_repeats=2,
+        random_state=0,
+    )
+
+    signal = next(
+        metric
+        for group in summary["groups"]
+        if group["factor"] == "similarity"
+        for metric in group["metrics"]
+        if metric["column"] == "bge_normalized_score"
+    )
+
+    assert signal["shapley_share"] is not None
+    assert signal["out_of_sample_delta_r2"] is not None
+    assert signal["out_of_sample_delta_r2_ci"]["point"] == pytest.approx(
+        signal["out_of_sample_delta_r2"]
+    )
+    assert signal["out_of_sample_ndcg_delta"] is not None
+    assert signal["domain_holdout_delta_r2"] == pytest.approx(0.2)
+    assert signal["evidence_status"] in {
+        "Portable",
+        "Keyword-supported",
+        "Dataset-specific",
+        "Uncertain",
+        "Redundant/no value",
+    }
+    assert signal["ndcg_evidence_status"] in {
+        "Keyword-supported",
+        "Uncertain",
+        "Redundant/no value",
+    }
+
+
+def test_signal_evidence_statuses_use_metric_specific_tested_flags(
+    monkeypatch, caplog
+) -> None:
+    import pandas as pd
+    import seo_rank.stats.textrazor_explainability as module
+
+    monkeypatch.setattr(module, "_fit_importance_r_squared", lambda *_args, **_kwargs: 0.6)
+    caplog.set_level(__import__("logging").DEBUG, logger=module.__name__)
+
+    rows = module._metric_relative_importance_rows(
+        pd.DataFrame(),
+        group="similarity",
+        group_columns=("signal",),
+        selected_columns=("signal",),
+        keyword_count=2,
+        control_columns=(),
+        full_r2=0.8,
+        shapley_values={"signal": 0.2},
+        shapley_total=0.2,
+        oos_result={
+            "groups": {"signal": {"delta_r2": 0.2, "ndcg_delta": None}},
+            "predictor_fold_inclusion_rates": {"signal": 1.0},
+        },
+        oos_bootstrap={
+            "signal": {
+                "delta_r2": {"lower": 0.1, "upper": 0.3},
+                "ndcg_delta": {"lower": None, "upper": None},
+            }
+        },
+        domain_holdout={"groups": {"signal": {"delta_r2": 0.1}}},
+        domain_bootstrap={
+            "signal": {"delta_r2": {"lower": 0.05, "upper": 0.15}}
+        },
+    )
+
+    assert rows[0]["evidence_status"] == "Portable"
+    assert rows[0]["ndcg_evidence_status"] == "Not tested"
+    assert "signal=signal r2_tested=True ndcg_tested=False" in caplog.text
+
+
 def test_relative_importance_uses_permutation_shapley(monkeypatch) -> None:
     import seo_rank.stats.textrazor_explainability as module
 
@@ -1016,6 +1139,19 @@ def test_renderer_reports_keyword_ndcg_ci_and_omits_domain_ndcg() -> None:
                     "domain_count": 1,
                     "evidence_status": "Keyword-supported",
                     "ndcg_evidence_status": "Keyword-supported",
+                    "metrics": [
+                        {
+                            "column": "bge_normalized_score",
+                            "full_model_partial_r2": 0.2,
+                            "shapley_share": 0.1,
+                            "out_of_sample_delta_r2": 0.05,
+                            "out_of_sample_delta_r2_ci": {"lower": 0.0, "upper": 0.1},
+                            "out_of_sample_ndcg_delta": 0.02,
+                            "out_of_sample_ndcg_delta_ci": {"lower": 0.0, "upper": 0.04},
+                            "domain_holdout_delta_r2": 0.03,
+                            "evidence_status": "Keyword-supported",
+                        }
+                    ],
                 }
             ],
         }
@@ -1023,5 +1159,6 @@ def test_renderer_reports_keyword_ndcg_ci_and_omits_domain_ndcg() -> None:
 
     assert "ΔNDCG CI" in rendered
     assert "NDCG status" in rendered
+    assert "signal bge_normalized_score" in rendered
     domain_section = rendered.split("C. Domain-held-out portability", 1)[1]
     assert "ΔNDCG" not in domain_section

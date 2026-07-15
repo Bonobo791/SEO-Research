@@ -340,6 +340,20 @@ def _render_relative_importance_table(relative_importance: object) -> str:
             f"  predictors ({group.get('oos_predictor_count', 0)}): "
             + ", ".join(columns)
         )
+        for signal in group.get("metrics", []):
+            if not isinstance(signal, dict):
+                continue
+            lines.append(
+                f"  signal {signal.get('column', 'n/a')}: "
+                f"partial R²={_format_float(signal.get('full_model_partial_r2'))}; "
+                f"Shapley={_format_float(signal.get('shapley_share'))}; "
+                f"ΔR²={_format_float(signal.get('out_of_sample_delta_r2'))} "
+                f"{_format_ci(signal.get('out_of_sample_delta_r2_ci'))}; "
+                f"ΔNDCG={_format_float(signal.get('out_of_sample_ndcg_delta'))} "
+                f"{_format_ci(signal.get('out_of_sample_ndcg_delta_ci'))}; "
+                f"domain ΔR²={_format_float(signal.get('domain_holdout_delta_r2'))}; "
+                f"status={signal.get('evidence_status', 'n/a')}"
+            )
 
     lines.extend([
         "",
