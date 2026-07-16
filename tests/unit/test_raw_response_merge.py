@@ -406,16 +406,24 @@ def test_merge_backlink_raw_response_rows_dedupes_by_keyword_url_and_variant() -
         endpoint="backlinks_summary",
         variant="summary",
     )
+    incoming_tracked = _backlink_raw_response_record(
+        run_id="artifacts",
+        response_id="backlink-a-summary-tracked",
+        target_keyword="technical seo",
+        url="https://example.com/a?utm_source=google&srsltid=click",
+        endpoint="backlinks_summary",
+        variant="summary",
+    )
 
     merged_summary = merge_backlink_raw_response_rows(
         [existing_summary],
-        [incoming_summary, incoming_new],
+        [incoming_summary, incoming_new, incoming_tracked],
         endpoint="backlinks_summary",
     )
 
     assert len(merged_summary) == 2
     merged_by_id = {str(row["response_id"]): row for row in merged_summary}
-    assert merged_by_id["backlink-a-summary-new"]["response_id"] == "backlink-a-summary-new"
+    assert merged_by_id["backlink-a-summary-tracked"]["response_id"] == "backlink-a-summary-tracked"
     assert merged_by_id["backlink-b-summary"]["response_id"] == "backlink-b-summary"
 
     existing_dofollow = _backlink_raw_response_record(

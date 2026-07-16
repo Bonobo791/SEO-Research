@@ -429,7 +429,12 @@ Contract: `PAGE_TEXT_RETRIEVAL_PLAN.md` (slices 1–4 shipped).
 - **Staged fetch + recovery** — `tests/unit/test_cli_run.py`
   (`test_fetch_page_text_for_urls_*`) covers stop-after-usable at each stage,
   exhaustion retaining the browser response, terminal outcomes at baseline,
-  `50402` one-second retry, and `switch_pool` after unreachable.
+  `50402` one-second retry, `switch_pool` after unreachable, and partial raw
+  persistence when a later URL fails.
+- **Crash-safe replay** — `test_cli_run.py` covers atomic raw-partition
+  replacement, tracked-versus-clean URL identity collapse, a bootstrap manifest
+  before live calls, and replaying an interrupted fresh run without re-fetching
+  its keyword expansion or SERP response.
 - **Stored-run backfill** — `test_build_resumed_keyword_result_refetches_nonusable_stored_page_text`
   and `test_run_stored_run_live_providers_refetches_nonusable_page_text_in_place`
   prove usable rows are kept, non-usable rows are replaced, and downstream

@@ -11,10 +11,13 @@ per URL.
 ## Summary
 
 Live and stored-run page-text fetching classify each validated DataForSEO
-`content_parsing/live` response, escalate rendering only when content is empty
-or JavaScript-disabled, recover once from task timeouts and pool-related
-failures, and on `--stored-run --live-providers` re-fetch every non-usable stored
-row.
+`content_parsing/live` response, checkpoint each final per-URL response to the
+raw lake, escalate rendering only when content is empty or JavaScript-disabled,
+recover once from task timeouts and pool-related failures, and on
+`--stored-run --live-providers` re-fetch every non-usable stored row.
+Fresh live runs bootstrap an atomic manifest and checkpoint keyword expansion
+and SERP responses before page-text collection, so an interrupted first run can
+also resume in place.
 
 ## Slice 1 — Content outcome contract (shipped)
 
@@ -85,9 +88,15 @@ No CLI flag, raw schema, or normalization contract changes.
   invalidates both for that URL: similarity features and scores are recomputed,
   while stale TextRazor rows are dropped or regenerated when
   `--live-textrazor` is active.
-- `write_artifacts()` rewrites the page-text raw partition from the rebuilt
-  payload, then the existing replay chain re-materializes curated tables,
-  feature marts, `analysis_mart`, and stats.
+- The fetcher checkpoints final fetched responses on normal completion and in
+  atomic per-response writes before a later URL failure or Ctrl-C can discard
+  them;
+  `write_artifacts()` later rewrites the page-text raw partition from the
+  rebuilt payload, then the existing replay chain re-materializes curated
+  tables, feature marts, `analysis_mart`, and stats.
+- Raw response identity uses `cache_identity_url()`. A usable response wins
+  over a stale non-usable tracked-URL variant during replay; otherwise the
+  newest response wins.
 
 ### Billing and validation
 
@@ -104,5 +113,7 @@ No CLI flag, raw schema, or normalization contract changes.
 ## Assumptions (unchanged)
 
 - Attempt-by-attempt persistence is out of scope; only the winning/final
-  response is stored.
+  response is checkpointed per URL. A completed checkpoint is fsynced and
+  atomically replaces the prior partition file; a response interrupted before
+  that checkpoint begins cannot be recovered.
 - File path: `PAGE_TEXT_RETRIEVAL_PLAN.md`.

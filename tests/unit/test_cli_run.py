@@ -1844,6 +1844,443 @@ def test_fetch_onpage_signals_for_urls_persists_partial_progress_on_mid_loop_fai
     assert persisted_urls == {urls[0], urls[1]}
 
 
+def test_fetch_page_text_for_urls_persists_partial_progress_on_mid_loop_failure(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "artifacts"
+    urls = [
+        "https://example.com/technical-seo/1",
+        "https://example.com/technical-seo/2",
+        "https://example.com/technical-seo/3",
+    ]
+
+    def dataforseo_transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        del method, headers, timeout
+        assert url.endswith("/on_page/content_parsing/live")
+        target_url = json.loads(body.decode("utf-8"))[0]["url"]
+        if target_url == urls[2]:
+            raise DataForSeoClientError("page text failed on third url")
+        return fixture_page_text_response(target_url, "technical seo")
+
+    with pytest.raises(DataForSeoClientError, match="third url"):
+        fetch_page_text_for_urls(
+            "technical seo",
+            urls,
+            credentials=DataForSeoCredentials("login", "password"),
+            transport=dataforseo_transport,
+            run_dir=run_dir,
+        )
+
+    page_text_path = (
+        run_dir / "parquet" / "raw_responses" / "endpoint=page_text" / "part-0.parquet"
+    )
+    assert page_text_path.exists()
+    persisted_urls = {
+        json.loads(str(row["request_metadata_json"]))["url"]
+        for row in pq.ParquetFile(page_text_path).read().to_pylist()
+    }
+    assert persisted_urls == {urls[0], urls[1]}
+
+
+def test_build_resumed_keyword_result_prefers_usable_page_text_across_tracking_urls(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seo_rank.cli import build_resumed_keyword_result
+
+    target_keyword = "technical seo"
+    clean_url = "https://example.com/technical-seo/1"
+    tracked_url = f"{clean_url}?srsltid=stale"
+    config = RunConfig(
+        seed=target_keyword,
+        location="United States",
+        language="en",
+        device="desktop",
+        depth=1,
+        keyword_limit=1,
+        output_dir=tmp_path / "artifacts",
+        model_name="fixture-similarity-v1",
+        dry_run=False,
+        skip_textrazor=True,
+        live_providers=True,
+        domain_blocklist_path=tmp_path / "blocklist.txt",
+    )
+
+    def raw_record(
+        endpoint: str,
+        response: dict[str, object],
+        url: str | None = None,
+    ) -> dict[str, object]:
+        return build_raw_response_record(
+            config.output_dir.name,
+            endpoint=endpoint,
+            provider="dataforseo",
+            response=response,
+            target_keyword=target_keyword,
+            request_metadata={"target_keyword": target_keyword, "url": url},
+            recorded_at="2026-07-16T12:00:00+00:00",
+        )
+
+    usable_response = fixture_page_text_response(clean_url, target_keyword)
+    stale_response = {**_empty_page_text_response(tracked_url), "url": tracked_url}
+    monkeypatch.setattr(
+        "seo_rank.cli.fetch_page_text_for_urls",
+        lambda *args, **kwargs: pytest.fail("usable tracked cache row must not refetch"),
+    )
+    monkeypatch.setattr("seo_rank.cli.fetch_onpage_signals_for_urls", lambda *args, **kwargs: [])
+
+    result = build_resumed_keyword_result(
+        config,
+        target_keyword=target_keyword,
+        stored_keyword_result=None,
+        raw_keyword_records={
+            "serp": [
+                raw_record("serp", fixture_serp_response(target_keyword)),
+            ],
+            "page_text": [
+                raw_record("page_text", usable_response, clean_url),
+                raw_record("page_text", stale_response, tracked_url),
+            ],
+        },
+        live_context={
+            "credentials": type(
+                "LiveCredentials",
+                (),
+                {"dataforseo": DataForSeoCredentials("login", "password")},
+            )(),
+            "live_bge_enabled": False,
+            "bge_reranker": None,
+            "gemini_api_key": None,
+            "textrazor_credentials": None,
+            "location_code": 2840,
+        },
+        network_calls=[],
+    )
+
+    assert result["raw_provider_data"]["dataforseo"]["page_text"] == [usable_response]
+
+
+def test_write_live_artifacts_bootstraps_manifest_before_live_requests(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seo_rank.cli import write_live_artifacts
+
+    config = RunConfig(
+        seed="technical seo",
+        location="United States",
+        language="en",
+        device="desktop",
+        depth=1,
+        keyword_limit=1,
+        output_dir=tmp_path / "artifacts",
+        model_name="fixture-similarity-v1",
+        dry_run=False,
+        skip_textrazor=True,
+        live_providers=True,
+        domain_blocklist_path=tmp_path / "blocklist.txt",
+    )
+    monkeypatch.setattr(
+        "seo_rank.cli.build_live_payload",
+        lambda *args, **kwargs: (_ for _ in ()).throw(KeyboardInterrupt()),
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        write_live_artifacts(config, env={})
+
+    payload = json.loads((config.output_dir / "run.json").read_text(encoding="utf-8"))
+    assert payload["config"]["seed"] == "technical seo"
+    assert payload["keyword_results"] == []
+    assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 0
+
+
+def test_rewrite_endpoint_partition_keeps_existing_file_when_replacement_fails(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    run_dir = tmp_path / "artifacts"
+    existing = build_raw_response_record(
+        run_dir.name,
+        endpoint="page_text",
+        provider="dataforseo",
+        response=fixture_page_text_response("https://example.com/old", "technical seo"),
+        target_keyword="technical seo",
+        request_metadata={"target_keyword": "technical seo", "url": "https://example.com/old"},
+        recorded_at="2026-07-16T12:00:00+00:00",
+    )
+    replacement = build_raw_response_record(
+        run_dir.name,
+        endpoint="page_text",
+        provider="dataforseo",
+        response=fixture_page_text_response("https://example.com/new", "technical seo"),
+        target_keyword="technical seo",
+        request_metadata={"target_keyword": "technical seo", "url": "https://example.com/new"},
+        recorded_at="2026-07-16T12:01:00+00:00",
+    )
+    rewrite_endpoint_partition(run_dir, "page_text", [existing])
+    partition_path = run_dir / "parquet" / "raw_responses" / "endpoint=page_text" / "part-0.parquet"
+    original_bytes = partition_path.read_bytes()
+    monkeypatch.setattr(
+        "seo_rank.cli.pq.write_table",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("disk full")),
+    )
+
+    with pytest.raises(OSError, match="disk full"):
+        rewrite_endpoint_partition(run_dir, "page_text", [replacement])
+
+    assert partition_path.read_bytes() == original_bytes
+
+
+def test_raw_response_checkpoint_replaces_tracking_url_variant(
+    tmp_path: Path,
+) -> None:
+    from seo_rank.cli import persist_raw_response_checkpoint
+
+    run_dir = tmp_path / "artifacts"
+    clean_url = "https://example.com/technical-seo/1"
+    tracked_url = f"{clean_url}?utm_source=google&srsltid=stale"
+    stale_record = build_raw_response_record(
+        run_dir.name,
+        endpoint="page_text",
+        provider="dataforseo",
+        response={**_empty_page_text_response(tracked_url), "url": tracked_url},
+        target_keyword="technical seo",
+        request_metadata={"target_keyword": "technical seo", "url": tracked_url},
+        recorded_at="2026-07-16T12:00:00+00:00",
+    )
+    usable_record = build_raw_response_record(
+        run_dir.name,
+        endpoint="page_text",
+        provider="dataforseo",
+        response=fixture_page_text_response(clean_url, "technical seo"),
+        target_keyword="technical seo",
+        request_metadata={"target_keyword": "technical seo", "url": clean_url},
+        recorded_at="2026-07-16T12:01:00+00:00",
+    )
+
+    persist_raw_response_checkpoint(run_dir, stale_record)
+    persist_raw_response_checkpoint(run_dir, usable_record)
+
+    partition_path = run_dir / "parquet" / "raw_responses" / "endpoint=page_text" / "part-0.parquet"
+    rows = pq.ParquetFile(partition_path).read().to_pylist()
+    assert len(rows) == 1
+    assert bytes(rows[0]["response_body_bytes"]) == usable_record["response_body_bytes"]
+
+
+def test_live_run_checkpoints_keyword_expansion_and_serp_before_page_interrupt(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seo_rank.cli import build_live_payload
+    from seo_rank.cli import write_live_run_bootstrap_manifest
+
+    config = RunConfig(
+        seed="technical seo",
+        location="United States",
+        language="en",
+        device="desktop",
+        depth=1,
+        keyword_limit=1,
+        output_dir=tmp_path / "artifacts",
+        model_name="fixture-similarity-v1",
+        dry_run=False,
+        skip_textrazor=True,
+        live_providers=True,
+        domain_blocklist_path=tmp_path / "blocklist.txt",
+    )
+    write_live_run_bootstrap_manifest(config)
+    monkeypatch.setattr(
+        "seo_rank.cli.prepare_live_run_context",
+        lambda *args, **kwargs: {
+            "credentials": type(
+                "LiveCredentials",
+                (),
+                {"dataforseo": DataForSeoCredentials("login", "password")},
+            )(),
+            "live_bge_enabled": False,
+            "bge_reranker": None,
+            "gemini_api_key": None,
+            "textrazor_credentials": None,
+            "location_code": 2840,
+        },
+    )
+
+    def transport(*, url: str, body: bytes, **_: object) -> dict[str, object]:
+        request = json.loads(body.decode("utf-8"))[0]
+        if url.endswith("/keywords_data/google_ads/keywords_for_keywords/live"):
+            return fixture_keyword_expansion_response("technical seo")
+        if url.endswith("/serp/google/organic/live/advanced"):
+            return fixture_serp_response("technical seo")
+        if url.endswith("/on_page/instant_pages"):
+            return fixture_onpage_instant_pages_response(request["url"])
+        if url.endswith("/on_page/content_parsing/live"):
+            raise KeyboardInterrupt()
+        raise AssertionError(f"unexpected DataForSEO URL: {url}")
+
+    with pytest.raises(KeyboardInterrupt):
+        build_live_payload(
+            config,
+            env={},
+            dataforseo_transport=transport,
+            textrazor_transport=None,
+        )
+
+    raw_responses_dir = config.output_dir / "parquet" / "raw_responses"
+    assert (raw_responses_dir / "endpoint=keyword_expansion" / "part-0.parquet").exists()
+    assert (raw_responses_dir / "endpoint=serp" / "part-0.parquet").exists()
+
+
+def test_expand_stored_run_resumes_interrupted_fresh_run_without_refetching_upstream(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seo_rank.cli import build_live_payload
+    from seo_rank.cli import expand_stored_run
+    from seo_rank.cli import load_run_payload
+    from seo_rank.cli import write_live_run_bootstrap_manifest
+
+    config = RunConfig(
+        seed="technical seo",
+        location="United States",
+        language="en",
+        device="desktop",
+        depth=1,
+        keyword_limit=1,
+        output_dir=tmp_path / "artifacts",
+        model_name="fixture-similarity-v1",
+        dry_run=True,
+        skip_textrazor=True,
+        live_providers=True,
+        domain_blocklist_path=tmp_path / "blocklist.txt",
+    )
+    write_live_run_bootstrap_manifest(config)
+    monkeypatch.setattr(
+        "seo_rank.cli.prepare_live_run_context",
+        lambda *args, **kwargs: {
+            "credentials": type(
+                "LiveCredentials",
+                (),
+                {"dataforseo": DataForSeoCredentials("login", "password")},
+            )(),
+            "live_bge_enabled": False,
+            "bge_reranker": None,
+            "gemini_api_key": None,
+            "textrazor_credentials": None,
+            "location_code": 2840,
+        },
+    )
+
+    def interrupted_transport(*, url: str, body: bytes, **_: object) -> dict[str, object]:
+        request = json.loads(body.decode("utf-8"))[0]
+        if url.endswith("/keywords_data/google_ads/keywords_for_keywords/live"):
+            return fixture_keyword_expansion_response("technical seo")
+        if url.endswith("/serp/google/organic/live/advanced"):
+            return fixture_serp_response("technical seo")
+        if url.endswith("/on_page/instant_pages"):
+            return fixture_onpage_instant_pages_response(request["url"])
+        if url.endswith("/on_page/content_parsing/live"):
+            raise KeyboardInterrupt()
+        raise AssertionError(f"unexpected DataForSEO URL: {url}")
+
+    with pytest.raises(KeyboardInterrupt):
+        build_live_payload(
+            config,
+            env={},
+            dataforseo_transport=interrupted_transport,
+            textrazor_transport=None,
+        )
+
+    resumed_targets: list[str] = []
+
+    def resumed_transport(*, url: str, body: bytes, **_: object) -> dict[str, object]:
+        request = json.loads(body.decode("utf-8"))[0]
+        if url.endswith("/on_page/content_parsing/live"):
+            resumed_targets.append(request["url"])
+            return fixture_page_text_response(request["url"], "technical seo")
+        raise AssertionError(f"unexpected resumed DataForSEO URL: {url}")
+
+    monkeypatch.setattr("seo_rank.cli.DEFAULT_DATAFORSEO_TRANSPORT", resumed_transport)
+    expand_stored_run(
+        config.output_dir,
+        load_run_payload(config.output_dir),
+        cli_config=config,
+        requested_keyword_limit=1,
+    )
+
+    assert resumed_targets == ["https://example.com/technical-seo/1"]
+
+
+def test_expand_stored_run_bootstrap_without_responses_restarts_live_run(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seo_rank.cli import expand_stored_run
+    from seo_rank.cli import load_run_payload
+    from seo_rank.cli import write_live_run_bootstrap_manifest
+
+    config = RunConfig(
+        seed="technical seo",
+        location="United States",
+        language="en",
+        device="desktop",
+        depth=1,
+        keyword_limit=1,
+        output_dir=tmp_path / "artifacts",
+        model_name="fixture-similarity-v1",
+        dry_run=True,
+        skip_textrazor=True,
+        live_providers=True,
+        domain_blocklist_path=tmp_path / "blocklist.txt",
+    )
+    write_live_run_bootstrap_manifest(config)
+    monkeypatch.setattr(
+        "seo_rank.cli.prepare_live_run_context",
+        lambda *args, **kwargs: {
+            "credentials": type(
+                "LiveCredentials",
+                (),
+                {"dataforseo": DataForSeoCredentials("login", "password")},
+            )(),
+            "live_bge_enabled": False,
+            "bge_reranker": None,
+            "gemini_api_key": None,
+            "textrazor_credentials": None,
+            "location_code": 2840,
+        },
+    )
+    requested_endpoints: list[str] = []
+
+    def transport(*, url: str, body: bytes, **_: object) -> dict[str, object]:
+        request = json.loads(body.decode("utf-8"))[0]
+        requested_endpoints.append(url)
+        if url.endswith("/keywords_data/google_ads/keywords_for_keywords/live"):
+            return fixture_keyword_expansion_response("technical seo")
+        if url.endswith("/serp/google/organic/live/advanced"):
+            return fixture_serp_response("technical seo")
+        if url.endswith("/on_page/instant_pages"):
+            return fixture_onpage_instant_pages_response(request["url"])
+        if url.endswith("/on_page/content_parsing/live"):
+            return fixture_page_text_response(request["url"], "technical seo")
+        raise AssertionError(f"unexpected DataForSEO URL: {url}")
+
+    monkeypatch.setattr("seo_rank.cli.DEFAULT_DATAFORSEO_TRANSPORT", transport)
+    expand_stored_run(
+        config.output_dir,
+        load_run_payload(config.output_dir),
+        cli_config=config,
+        requested_keyword_limit=1,
+    )
+
+    assert requested_endpoints[0].endswith("/keywords_data/google_ads/keywords_for_keywords/live")
+
+
 def test_fetch_onpage_signals_for_urls_retains_target_page_timeout(
     tmp_path: Path,
 ) -> None:

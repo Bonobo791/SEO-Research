@@ -8,6 +8,7 @@ import os
 import re
 import sys
 import shutil
+import tempfile
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
@@ -612,6 +613,7 @@ def write_live_artifacts(
     progress: RunProgress | None = None,
 ) -> None:
     config.output_dir.mkdir(parents=True, exist_ok=True)
+    write_live_run_bootstrap_manifest(config)
     payload = build_live_payload(
         config,
         env=env,
@@ -809,25 +811,37 @@ def expand_stored_run(
             progress=progress,
         )
 
-    keyword_expansion = load_stored_keyword_expansion_response(stored_run)
     requested_keyword_limit = base_config.keyword_limit
-    target_keywords = normalize_keyword_expansion(
-        keyword_expansion,
-        seed=base_config.seed,
-        limit=requested_keyword_limit,
-    )
     network_calls = list(
         stored_payload.get("network_calls", [])
         if isinstance(stored_payload.get("network_calls", []), list)
         else []
     )
     refreshed_keyword_expansion = False
+    try:
+        keyword_expansion = load_stored_keyword_expansion_response(stored_run)
+    except CliCommandError:
+        if live_context is None:
+            raise
+        keyword_expansion = {}
+        target_keywords: list[str] = []
+        refreshed_keyword_expansion = True
+    else:
+        target_keywords = normalize_keyword_expansion(
+            keyword_expansion,
+            seed=base_config.seed,
+            limit=requested_keyword_limit,
+        )
     should_refresh_keyword_expansion = (
-        "keyword_limit" in scope_overrides
-        and requested_keyword_limit > len(target_keywords)
-        and live_context is not None
+        refreshed_keyword_expansion
+        or (
+            "keyword_limit" in scope_overrides
+            and requested_keyword_limit > len(target_keywords)
+            and live_context is not None
+        )
     )
     if should_refresh_keyword_expansion:
+        assert live_context is not None
         keyword_request = build_keyword_expansion_request(
             base_config.seed,
             location_code=int(live_context["location_code"]),
@@ -838,6 +852,18 @@ def expand_stored_run(
             keyword_request,
             credentials=live_context["credentials"].dataforseo,
             transport=DEFAULT_DATAFORSEO_TRANSPORT,
+        )
+        persist_raw_response_checkpoint(
+            stored_run,
+            build_raw_response_record(
+                stored_run.name,
+                endpoint="keyword_expansion",
+                provider="dataforseo",
+                response=keyword_expansion,
+                target_keyword=None,
+                request_metadata={"seed": base_config.seed},
+                recorded_at=datetime.now(UTC).isoformat(),
+            ),
         )
         network_calls.append("dataforseo.keyword_expansion")
         refreshed_keyword_expansion = True
@@ -1011,6 +1037,11 @@ def run_config_from_payload(
         live_bge=bool(config.get("live_bge", False)),
         live_gemini=bool(config.get("live_gemini", False)),
         live_textrazor=bool(config.get("live_textrazor", False)),
+        domain_blocklist_path=(
+            Path(str(config["domain_blocklist_path"]))
+            if config.get("domain_blocklist_path") is not None
+            else None
+        ),
         debug=bool(config.get("debug", False)),
     )
 
@@ -1075,13 +1106,16 @@ def build_expanded_run_payload(
 
 
 def load_stored_keyword_expansion_response(run_dir: Path) -> dict[str, object]:
-    rows = (
-        scan_raw_responses(run_dir)
-        .filter(pl.col("endpoint") == "keyword_expansion")
-        .select(["response_body_bytes"])
-        .collect()
-        .to_dicts()
-    )
+    try:
+        rows = (
+            scan_raw_responses(run_dir)
+            .filter(pl.col("endpoint") == "keyword_expansion")
+            .select(["response_body_bytes"])
+            .collect()
+            .to_dicts()
+        )
+    except STORAGE_COMMAND_EXCEPTIONS as error:
+        raise CliCommandError(str(error)) from error
     if not rows:
         raise CliCommandError(
             f"Stored run {run_dir} does not contain a keyword_expansion response"
@@ -1162,7 +1196,35 @@ def raw_response_record_identity(record: Mapping[str, object]) -> tuple[str, str
             url = extract_response_url(
                 json.loads(bytes(response_body_bytes).decode("utf-8"))
             )
-    return endpoint, target_keyword, str(url or record.get("response_id", ""))
+    if isinstance(url, str) and url.strip():
+        return endpoint, target_keyword, cache_identity_url(url.strip())
+    return endpoint, target_keyword, str(record.get("response_id", ""))
+
+
+def persist_raw_response_checkpoint(
+    run_dir: Path,
+    record: Mapping[str, object],
+) -> None:
+    endpoint = str(record.get("endpoint", ""))
+    if not endpoint:
+        raise CliCommandError("raw response checkpoint is missing endpoint")
+    try:
+        merged_rows = {
+            raw_response_record_identity(existing): existing
+            for existing in load_raw_response_partition_rows(run_dir, endpoint)
+        }
+        normalized_record = validate_raw_response_record(record, endpoint=endpoint)
+        merged_rows[raw_response_record_identity(normalized_record)] = normalized_record
+        # ponytail: rewrites the endpoint snapshot per checkpoint; use append-only shards if volume matters.
+        rewrite_endpoint_partition(run_dir, endpoint, list(merged_rows.values()))
+        refresh_run_json_raw_response_catalog(run_dir)
+        logging.getLogger("seo_rank.cli").debug(
+            "checkpointed raw response endpoint=%s target_keyword=%r",
+            endpoint,
+            normalized_record.get("target_keyword"),
+        )
+    except STORAGE_COMMAND_EXCEPTIONS as error:
+        raise CliCommandError(str(error)) from error
 
 
 def load_stored_keyword_results_by_keyword(
@@ -1464,10 +1526,11 @@ def _usable_backlinks_by_url_variant_from_records(
     return existing_backlinks_by_url_variant
 
 
-def _usable_page_text_by_url_from_records(
+def _page_text_by_url_from_records(
     raw_keyword_records: Mapping[str, Sequence[Mapping[str, object]]],
 ) -> dict[str, dict[str, object]]:
     existing_page_text_by_url: dict[str, dict[str, object]] = {}
+    response_rank_by_url: dict[str, tuple[bool, str, str]] = {}
     for record in raw_keyword_records.get("page_text", []):
         response_body_bytes = record.get("response_body_bytes")
         if not isinstance(response_body_bytes, (bytes, bytearray)):
@@ -1475,11 +1538,33 @@ def _usable_page_text_by_url_from_records(
         response = json.loads(bytes(response_body_bytes).decode("utf-8"))
         url = extract_response_url(response)
         if not isinstance(url, str):
+            metadata = json.loads(str(record.get("request_metadata_json", "{}")))
+            url = metadata.get("url")
+            if isinstance(url, str):
+                response = {**response, "url": url}
+        if not isinstance(url, str):
             continue
-        if classify_page_text_response(response) != "usable":
+        cache_key = cache_identity_url(url)
+        candidate_rank = (
+            classify_page_text_response(response) == "usable",
+            str(record.get("timestamp", "")),
+            str(record.get("response_id", "")),
+        )
+        if candidate_rank <= response_rank_by_url.get(cache_key, (False, "", "")):
             continue
-        existing_page_text_by_url[cache_identity_url(url)] = {**dict(response), "url": url}
+        response_rank_by_url[cache_key] = candidate_rank
+        existing_page_text_by_url[cache_key] = dict(response)
     return existing_page_text_by_url
+
+
+def _usable_page_text_by_url_from_records(
+    raw_keyword_records: Mapping[str, Sequence[Mapping[str, object]]],
+) -> dict[str, dict[str, object]]:
+    return {
+        url: response
+        for url, response in _page_text_by_url_from_records(raw_keyword_records).items()
+        if classify_page_text_response(response) == "usable"
+    }
 
 
 def _textrazor_responses_by_url_from_records(
@@ -1723,15 +1808,7 @@ def build_resumed_keyword_result(
         for url in serp_urls
         if cache_identity_url(url) in existing_onpage_by_url
     ]
-    existing_page_text_by_url: dict[str, dict[str, object]] = {}
-    for record in raw_keyword_records.get("page_text", []):
-        response_body_bytes = record.get("response_body_bytes")
-        if not isinstance(response_body_bytes, (bytes, bytearray)):
-            continue
-        response = json.loads(bytes(response_body_bytes).decode("utf-8"))
-        url = extract_response_url(response)
-        if isinstance(url, str):
-            existing_page_text_by_url[cache_identity_url(url)] = response
+    existing_page_text_by_url = _page_text_by_url_from_records(raw_keyword_records)
 
     page_text_urls_to_fetch = {
         url
@@ -1762,6 +1839,7 @@ def build_resumed_keyword_result(
                 [url],
                 credentials=live_context["credentials"].dataforseo,
                 transport=DEFAULT_DATAFORSEO_TRANSPORT,
+                run_dir=config.output_dir,
                 blocklist=blocklist,
             )
             if not staged_responses:
@@ -2497,14 +2575,9 @@ def write_artifacts(
     )
     if progress is not None:
         progress.log("run: writing run.json")
-    (output_dir / "run.json").write_text(
-        json.dumps(
-            build_run_json_payload(payload, run_id=run_id, catalog=catalog),
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
+    write_json_atomically(
+        output_dir / "run.json",
+        build_run_json_payload(payload, run_id=run_id, catalog=catalog),
     )
     config = payload.get("config", {})
     if isinstance(config, Mapping) and config.get("debug", False):
@@ -2906,6 +2979,18 @@ def build_live_payload(
         credentials=live_context["credentials"].dataforseo,
         transport=dataforseo_transport,
     )
+    persist_raw_response_checkpoint(
+        config.output_dir,
+        build_raw_response_record(
+            config.output_dir.name,
+            endpoint="keyword_expansion",
+            provider="dataforseo",
+            response=keyword_expansion,
+            target_keyword=None,
+            request_metadata={"seed": config.seed},
+            recorded_at=datetime.now(UTC).isoformat(),
+        ),
+    )
     network_calls.append("dataforseo.keyword_expansion")
     keywords = normalize_keyword_expansion(
         keyword_expansion,
@@ -3007,17 +3092,30 @@ def build_live_keyword_result(
     blocklist = DomainBlocklist.load(config.domain_blocklist_path)
     if progress is not None:
         progress.keyword_log(target_keyword, "dataforseo serp request")
+    serp_request = build_serp_request(
+        target_keyword,
+        location_code=location_code,
+        language_code=config.language,
+        device=config.device,
+        depth=config.depth,
+    )
     serp_response = execute_validated_dataforseo_request(
         "serp",
-        build_serp_request(
-            target_keyword,
-            location_code=location_code,
-            language_code=config.language,
-            device=config.device,
-            depth=config.depth,
-        ),
+        serp_request,
         credentials=credentials.dataforseo,
         transport=dataforseo_transport,
+    )
+    persist_raw_response_checkpoint(
+        config.output_dir,
+        build_raw_response_record(
+            config.output_dir.name,
+            endpoint="serp",
+            provider="dataforseo",
+            response=serp_response,
+            target_keyword=target_keyword,
+            request_metadata={"target_keyword": target_keyword},
+            recorded_at=datetime.now(UTC).isoformat(),
+        ),
     )
     raise_for_failed_dataforseo_tasks(
         "serp",
@@ -3169,6 +3267,7 @@ def build_live_keyword_result(
         page_text_urls_to_fetch,
         credentials=credentials.dataforseo,
         transport=dataforseo_transport,
+        run_dir=config.output_dir,
         blocklist=blocklist,
     )
     if fetched_page_text_responses:
@@ -3576,6 +3675,7 @@ def fetch_page_text_for_urls(
     *,
     credentials: DataForSeoCredentials,
     transport,
+    run_dir: Path | None = None,
     blocklist: DomainBlocklist | None = None,
     sleep=time.sleep,
 ) -> list[dict[str, object]]:
@@ -3635,6 +3735,19 @@ def fetch_page_text_for_urls(
         except DataForSeoClientError:
             raise
         responses.append(response)
+        if run_dir is not None:
+            persist_raw_response_checkpoint(
+                run_dir,
+                build_raw_response_record(
+                    run_dir.name,
+                    endpoint="page_text",
+                    provider="dataforseo",
+                    response=response,
+                    target_keyword=target_keyword,
+                    request_metadata={"target_keyword": target_keyword, "url": url},
+                    recorded_at=datetime.now(UTC).isoformat(),
+                ),
+            )
     return responses
 
 
@@ -4525,7 +4638,7 @@ def backlink_raw_response_key(record: Mapping[str, object]) -> tuple[str, str, s
     if not isinstance(variant, str) or not variant.strip():
         variant = BACKLINKS_QUERY_SUMMARY
 
-    return target_keyword.casefold().strip(), url.strip(), variant
+    return target_keyword.casefold().strip(), cache_identity_url(url.strip()), variant
 
 
 def rewrite_backlink_endpoint_partition(
@@ -4535,15 +4648,13 @@ def rewrite_backlink_endpoint_partition(
     endpoint: str = "backlinks_summary",
 ) -> None:
     partition_dir = Path(run_dir) / "parquet" / "raw_responses" / f"endpoint={endpoint}"
-    if partition_dir.exists():
-        shutil.rmtree(partition_dir)
     partition_dir.mkdir(parents=True, exist_ok=True)
 
     sorted_rows = sorted(
         (validate_raw_response_record(row, endpoint=endpoint) for row in rows),
         key=backlink_raw_response_key,
     )
-    pq.write_table(
+    write_parquet_atomically(
         pa.Table.from_pylist(sorted_rows, schema=RAW_RESPONSE_SCHEMA),
         partition_dir / "part-0.parquet",
         compression="zstd",
@@ -4580,10 +4691,7 @@ def refresh_run_json_raw_response_catalog(run_dir: Path) -> None:
     assert isinstance(dataset_catalog, dict)
     dataset_catalog["raw_responses"] = build_raw_response_catalog_from_disk(run_dir)
     run_payload["catalog"] = catalog
-    run_json_path.write_text(
-        json.dumps(run_payload, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    write_json_atomically(run_json_path, run_payload)
 
 
 BACKLINKS_VARIANT_ENDPOINTS: dict[str, str] = {
@@ -4714,7 +4822,7 @@ def entity_raw_response_key(record: Mapping[str, object]) -> tuple[str, str]:
     if not isinstance(url, str) or not url.strip():
         raise ValueError("raw response record is missing a usable url")
 
-    return target_keyword.casefold().strip(), url.strip()
+    return target_keyword.casefold().strip(), cache_identity_url(url.strip())
 
 
 def rewrite_endpoint_partition(
@@ -4723,23 +4831,94 @@ def rewrite_endpoint_partition(
     rows: Sequence[Mapping[str, object]],
 ) -> None:
     partition_dir = Path(run_dir) / "parquet" / "raw_responses" / f"endpoint={endpoint}"
-    if partition_dir.exists():
-        shutil.rmtree(partition_dir)
     partition_dir.mkdir(parents=True, exist_ok=True)
 
     sorted_rows = sorted(
         (dict(row) for row in rows),
         key=lambda row: (
-            entity_raw_response_key(row)[0],
-            entity_raw_response_key(row)[1],
+            raw_response_record_identity(row)[0],
+            raw_response_record_identity(row)[1],
+            raw_response_record_identity(row)[2],
             str(row.get("response_id", "")),
         ),
     )
-    pq.write_table(
+    write_parquet_atomically(
         pa.Table.from_pylist(sorted_rows, schema=RAW_RESPONSE_SCHEMA),
         partition_dir / "part-0.parquet",
         compression="zstd",
         write_statistics=True,
+    )
+
+
+def write_parquet_atomically(table: pa.Table, path: Path, **kwargs: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        delete=False,
+    ) as temporary_file:
+        temporary_path = Path(temporary_file.name)
+    try:
+        pq.write_table(table, temporary_path, **kwargs)
+        with temporary_path.open("rb") as temporary_file:
+            os.fsync(temporary_file.fileno())
+        os.replace(temporary_path, path)
+        fsync_directory(path.parent)
+    except BaseException:
+        temporary_path.unlink(missing_ok=True)
+        raise
+
+
+def write_json_atomically(path: Path, payload: Mapping[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        delete=False,
+    ) as temporary_file:
+        json.dump(payload, temporary_file, indent=2, sort_keys=True)
+        temporary_file.write("\n")
+        temporary_file.flush()
+        os.fsync(temporary_file.fileno())
+        temporary_path = Path(temporary_file.name)
+    try:
+        os.replace(temporary_path, path)
+        fsync_directory(path.parent)
+    except BaseException:
+        temporary_path.unlink(missing_ok=True)
+        raise
+
+
+def fsync_directory(path: Path) -> None:
+    directory_fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
+def write_live_run_bootstrap_manifest(config: RunConfig) -> None:
+    run_id = config.output_dir.name
+    raw_responses_catalog = build_raw_response_catalog_from_disk(config.output_dir)
+    write_json_atomically(
+        config.output_dir / "run.json",
+        build_run_json_payload(
+            {
+                "config": serialized_config(config),
+                "keywords": [],
+                "keyword_results": [],
+                "network_calls": [],
+            },
+            run_id=run_id,
+            catalog={
+                "schema_version": RUN_CATALOG_SCHEMA_VERSION,
+                "datasets": {"raw_responses": raw_responses_catalog},
+            },
+        ),
     )
 
 
@@ -4814,7 +4993,7 @@ def write_raw_response_dataset(
         if file_path.exists() and pq.ParquetFile(file_path).read().to_pylist() == sorted_records:
             files.append(file_path.relative_to(output_dir).as_posix())
             continue
-        pq.write_table(
+        write_parquet_atomically(
             pa.Table.from_pylist(sorted_records, schema=RAW_RESPONSE_SCHEMA),
             file_path,
             compression="zstd",
