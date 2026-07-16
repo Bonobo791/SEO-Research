@@ -48,6 +48,7 @@ from seo_rank.dataforseo import (
     build_onpage_instant_pages_request,
     build_page_text_request,
     build_serp_request,
+    cache_identity_url,
     classify_page_text_response,
     page_text_response_is_pool_related,
     nested_http_failure,
@@ -707,12 +708,23 @@ def backfill_textrazor_run(
     )
     textrazor_records: list[dict[str, object]] = []
     blocklist = DomainBlocklist.load(config.domain_blocklist_path)
+    existing_textrazor_entity_keys = (
+        load_existing_textrazor_entity_keys(run_dir)
+        if not config.refresh_textrazor
+        else set()
+    )
 
     for index, keyword in enumerate(
         [keyword for keyword in stored_keywords if isinstance(keyword, str)],
         start=1,
     ):
         pages = load_pages_for_textrazor(run_dir, keyword)
+        if existing_textrazor_entity_keys:
+            pages = [
+                page
+                for page in pages
+                if textrazor_page_identity(page) not in existing_textrazor_entity_keys
+            ]
         if progress is not None:
             progress.keyword_step(index, len(stored_keywords), keyword, "done")
         if not pages:
@@ -885,6 +897,7 @@ def expand_stored_run(
                     network_calls=network_calls,
                     progress=progress,
                     raw_keyword_records=raw_keyword_records,
+                    stored_keyword_result=stored_keyword_result,
                     minimum_organic_results=base_config.depth,
                 )
             else:
@@ -1177,6 +1190,31 @@ def load_pages_for_textrazor(run_dir: Path, target_keyword: str) -> list[dict[st
     return _load_curated_pages_for_textrazor(run_dir, target_keyword_key, target_keyword)
 
 
+def load_existing_textrazor_entity_keys(run_dir: Path) -> set[tuple[str, str]]:
+    rows = load_raw_response_partition_rows(run_dir, "entities")
+    keys: set[tuple[str, str]] = set()
+    for row in rows:
+        record = validate_raw_response_record(row, endpoint="entities")
+        response = json.loads(bytes(record["response_body_bytes"]).decode("utf-8"))
+        if isinstance(response, Mapping) and textrazor_response_is_usable(response):
+            keys.add(entity_raw_response_key(record))
+    return keys
+
+
+def textrazor_page_identity(page: Mapping[str, object]) -> tuple[str, str]:
+    target_keyword = page.get("target_keyword")
+    url = page.get("url")
+    if not isinstance(target_keyword, str) or not target_keyword.strip():
+        raise ValueError("textrazor page is missing target_keyword")
+    if not isinstance(url, str) or not url.strip():
+        raise ValueError("textrazor page is missing url")
+    return target_keyword.casefold().strip(), url.strip()
+
+
+def textrazor_response_is_usable(response: Mapping[str, object]) -> bool:
+    return response.get("error") is None
+
+
 def _load_raw_page_text_pages(
     run_dir: Path,
     target_keyword_key: str,
@@ -1337,7 +1375,7 @@ def _register_usable_backlink_response(
         usable = backlinks_response_has_variant_aggregates(response, variant=variant)
     if not usable:
         return False
-    existing_backlinks_by_url_variant[(url, variant)] = {
+    existing_backlinks_by_url_variant[(cache_identity_url(url), variant)] = {
         **dict(response),
         "variant": variant,
     }
@@ -1352,7 +1390,7 @@ def _register_usable_onpage_response(
 ) -> bool:
     if not onpage_instant_pages_response_is_usable(response):
         return False
-    existing_onpage_by_url[url] = {**dict(response), "url": url}
+    existing_onpage_by_url[cache_identity_url(url)] = {**dict(response), "url": url}
     return True
 
 
@@ -1376,12 +1414,114 @@ def _usable_onpage_by_url_from_records(
     return existing_onpage_by_url
 
 
+def _usable_backlinks_by_url_variant_from_records(
+    raw_keyword_records: Mapping[str, Sequence[Mapping[str, object]]],
+    *,
+    variants: Sequence[str],
+) -> dict[tuple[str, str], dict[str, object]]:
+    existing_backlinks_by_url_variant: dict[tuple[str, str], dict[str, object]] = {}
+    for variant in variants:
+        endpoint = BACKLINKS_VARIANT_ENDPOINTS[variant]
+        for record in raw_keyword_records.get(endpoint, []):
+            response_body_bytes = record.get("response_body_bytes")
+            if not isinstance(response_body_bytes, (bytes, bytearray)):
+                continue
+            response = json.loads(bytes(response_body_bytes).decode("utf-8"))
+            url = extract_response_url(response)
+            if not isinstance(url, str):
+                continue
+            _register_usable_backlink_response(
+                existing_backlinks_by_url_variant,
+                response=response,
+                url=url,
+                variant=variant,
+            )
+    for record in raw_keyword_records.get("backlinks", []):
+        response_body_bytes = record.get("response_body_bytes")
+        if not isinstance(response_body_bytes, (bytes, bytearray)):
+            continue
+        response = json.loads(bytes(response_body_bytes).decode("utf-8"))
+        url = extract_response_url(response)
+        if not isinstance(url, str):
+            continue
+        metadata = json.loads(str(record.get("request_metadata_json", "{}")))
+        variant = metadata.get("variant") or metadata.get("backlinks_query")
+        if variant == BACKLINKS_QUERY_DOFOLLOW:
+            resolved_variant = BACKLINKS_QUERY_DOFOLLOW
+        elif variant == BACKLINKS_QUERY_DETAIL:
+            resolved_variant = BACKLINKS_QUERY_DETAIL
+        else:
+            resolved_variant = BACKLINKS_QUERY_SUMMARY
+        key = (cache_identity_url(url), resolved_variant)
+        if key in existing_backlinks_by_url_variant:
+            continue
+        _register_usable_backlink_response(
+            existing_backlinks_by_url_variant,
+            response=response,
+            url=url,
+            variant=resolved_variant,
+        )
+    return existing_backlinks_by_url_variant
+
+
+def _usable_page_text_by_url_from_records(
+    raw_keyword_records: Mapping[str, Sequence[Mapping[str, object]]],
+) -> dict[str, dict[str, object]]:
+    existing_page_text_by_url: dict[str, dict[str, object]] = {}
+    for record in raw_keyword_records.get("page_text", []):
+        response_body_bytes = record.get("response_body_bytes")
+        if not isinstance(response_body_bytes, (bytes, bytearray)):
+            continue
+        response = json.loads(bytes(response_body_bytes).decode("utf-8"))
+        url = extract_response_url(response)
+        if not isinstance(url, str):
+            continue
+        if classify_page_text_response(response) != "usable":
+            continue
+        existing_page_text_by_url[cache_identity_url(url)] = {**dict(response), "url": url}
+    return existing_page_text_by_url
+
+
+def _textrazor_responses_by_url_from_records(
+    raw_keyword_records: Mapping[str, Sequence[Mapping[str, object]]],
+) -> dict[str, dict[str, object]]:
+    existing_textrazor_by_url: dict[str, dict[str, object]] = {}
+    for record in raw_keyword_records.get("entities", []):
+        response_body_bytes = record.get("response_body_bytes")
+        if not isinstance(response_body_bytes, (bytes, bytearray)):
+            continue
+        response = json.loads(bytes(response_body_bytes).decode("utf-8"))
+        if not isinstance(response, Mapping) or not textrazor_response_is_usable(response):
+            continue
+        url = extract_response_url(response)
+        if not isinstance(url, str):
+            continue
+        existing_textrazor_by_url[cache_identity_url(url)] = {**dict(response), "url": url}
+    return existing_textrazor_by_url
+
+
+def _unique_serp_urls(serp_results: Sequence[Mapping[str, object]]) -> list[str]:
+    urls: list[str] = []
+    seen: set[str] = set()
+    for result in serp_results:
+        url = str(result["url"])
+        cache_key = cache_identity_url(url)
+        if cache_key in seen:
+            continue
+        seen.add(cache_key)
+        urls.append(url)
+    return urls
+
+
 def _missing_serp_urls(
     serp_results: Sequence[Mapping[str, object]],
     existing_by_url: Mapping[str, object],
 ) -> list[str]:
-    serp_urls = list(dict.fromkeys(str(result["url"]) for result in serp_results))
-    return [url for url in serp_urls if url not in existing_by_url]
+    return [
+        url
+        for url in _unique_serp_urls(serp_results)
+        if cache_identity_url(url) not in existing_by_url
+    ]
 
 
 def _backlinks_variants_for_replay(
@@ -1443,6 +1583,8 @@ def build_resumed_keyword_result(
                 textrazor_transport=DEFAULT_TEXTRAZOR_TRANSPORT,
                 network_calls=network_calls,
                 progress=progress,
+                raw_keyword_records=raw_keyword_records,
+                stored_keyword_result=stored_keyword_result,
                 minimum_organic_results=config.depth,
             )
         return build_offline_keyword_result(
@@ -1507,12 +1649,13 @@ def build_resumed_keyword_result(
             variant=resolved_variant,
         )
 
-    serp_urls = [str(result["url"]) for result in serp_results]
+    serp_urls = _unique_serp_urls(serp_results)
     missing_backlink_urls_by_variant: dict[str, list[str]] = {
         variant: [
             url
             for url in serp_urls
-            if (url, variant) not in existing_backlinks_by_url_variant
+            if (cache_identity_url(url), variant)
+            not in existing_backlinks_by_url_variant
         ]
         for variant in replay_backlinks_variants
     }
@@ -1541,12 +1684,12 @@ def build_resumed_keyword_result(
                 for response in fetched_backlinks:
                     url = extract_response_url(response)
                     if isinstance(url, str):
-                        existing_backlinks_by_url_variant[(url, variant)] = response
+                        existing_backlinks_by_url_variant[(cache_identity_url(url), variant)] = response
     backlinks_responses = [
-        existing_backlinks_by_url_variant[(str(result["url"]), variant)]
-        for result in serp_results
+        existing_backlinks_by_url_variant[(cache_identity_url(url), variant)]
+        for url in serp_urls
         for variant in replay_backlinks_variants
-        if (str(result["url"]), variant) in existing_backlinks_by_url_variant
+        if (cache_identity_url(url), variant) in existing_backlinks_by_url_variant
     ]
     existing_onpage_by_url = _usable_onpage_by_url_from_records(raw_keyword_records)
     missing_onpage_urls = _missing_serp_urls(serp_results, existing_onpage_by_url)
@@ -1576,9 +1719,9 @@ def build_resumed_keyword_result(
                         url=url,
                     )
     onpage_responses = [
-        existing_onpage_by_url[str(result["url"])]
-        for result in serp_results
-        if str(result["url"]) in existing_onpage_by_url
+        existing_onpage_by_url[cache_identity_url(url)]
+        for url in serp_urls
+        if cache_identity_url(url) in existing_onpage_by_url
     ]
     existing_page_text_by_url: dict[str, dict[str, object]] = {}
     for record in raw_keyword_records.get("page_text", []):
@@ -1588,16 +1731,16 @@ def build_resumed_keyword_result(
         response = json.loads(bytes(response_body_bytes).decode("utf-8"))
         url = extract_response_url(response)
         if isinstance(url, str):
-            existing_page_text_by_url[url] = response
+            existing_page_text_by_url[cache_identity_url(url)] = response
 
     page_text_urls_to_fetch = {
-        str(result["url"])
-        for result in serp_results
-        if str(result["url"]) not in existing_page_text_by_url
+        url
+        for url in serp_urls
+        if cache_identity_url(url) not in existing_page_text_by_url
         or (
             config.live_providers
             and classify_page_text_response(
-                existing_page_text_by_url[str(result["url"])]
+                existing_page_text_by_url[cache_identity_url(url)]
             )
             != "usable"
         )
@@ -1605,11 +1748,10 @@ def build_resumed_keyword_result(
     if page_text_urls_to_fetch and progress is not None:
         progress.keyword_log(
             target_keyword,
-            f"page text ({len(serp_results)} urls)",
+            f"page text ({len(page_text_urls_to_fetch)} urls)",
         )
     refreshed_page_text_urls: set[str] = set()
-    for result in serp_results:
-        url = str(result["url"])
+    for url in serp_urls:
         if url not in page_text_urls_to_fetch:
             continue
         if blocklist.is_blocked(url):
@@ -1628,13 +1770,13 @@ def build_resumed_keyword_result(
             network_calls.append("dataforseo.page_text")
         else:
             response = fixture_page_text_response(url, target_keyword)
-        existing_page_text_by_url[url] = response
-        refreshed_page_text_urls.add(url)
+        existing_page_text_by_url[cache_identity_url(url)] = response
+        refreshed_page_text_urls.add(cache_identity_url(url))
 
     page_text_responses = [
-        existing_page_text_by_url[str(result["url"])]
-        for result in serp_results
-        if str(result["url"]) in existing_page_text_by_url
+        existing_page_text_by_url[cache_identity_url(url)]
+        for url in serp_urls
+        if cache_identity_url(url) in existing_page_text_by_url
     ]
 
     parsed_pages = [
@@ -1656,7 +1798,10 @@ def build_resumed_keyword_result(
             continue
         response = json.loads(bytes(response_body_bytes).decode("utf-8"))
         response_url = extract_response_url(response)
-        if not isinstance(response_url, str) or response_url in refreshed_page_text_urls:
+        if (
+            not isinstance(response_url, str)
+            or cache_identity_url(response_url) in refreshed_page_text_urls
+        ):
             continue
         textrazor_responses.append(response)
         textrazor_entities.extend(
@@ -1673,7 +1818,8 @@ def build_resumed_keyword_result(
             [
                 annotate_target_keyword(page_text, target_keyword)
                 for page_text in parsed_pages
-                if page_text.get("url") in refreshed_page_text_urls
+                if cache_identity_url(str(page_text.get("url", "")))
+                in refreshed_page_text_urls
             ]
         )
         if refreshed_textrazor_pages and progress is not None:
@@ -1710,7 +1856,8 @@ def build_resumed_keyword_result(
                 score
                 for score in stored_page_similarity_value
                 if isinstance(score, Mapping)
-                and score.get("url") not in refreshed_page_text_urls
+                and cache_identity_url(str(score.get("url", "")))
+                not in refreshed_page_text_urls
             ]
 
     if (
@@ -2854,6 +3001,7 @@ def build_live_keyword_result(
     network_calls: list[str],
     progress: RunProgress | None = None,
     raw_keyword_records: Mapping[str, Sequence[Mapping[str, object]]] | None = None,
+    stored_keyword_result: Mapping[str, object] | None = None,
     minimum_organic_results: int | None = None,
 ) -> dict[str, object]:
     blocklist = DomainBlocklist.load(config.domain_blocklist_path)
@@ -2897,38 +3045,72 @@ def build_live_keyword_result(
         str(result["url"]): str(result["title"]) for result in serp_results
     }
 
+    serp_urls = _unique_serp_urls(serp_results)
     backlinks_responses: list[dict[str, object]] = []
     if config.live_backlinks:
-        if progress is not None:
-            progress.keyword_log(
-                target_keyword,
-                f"dataforseo backlinks ({len(serp_results)} urls)",
-            )
         live_backlinks_variants = [
             BACKLINKS_QUERY_SUMMARY,
             BACKLINKS_QUERY_DOFOLLOW,
         ]
         if config.live_backlinks_detail:
             live_backlinks_variants.append(BACKLINKS_QUERY_DETAIL)
-        backlinks_responses = fetch_dataforseo_backlinks_for_urls(
-            target_keyword,
-            [str(result["url"]) for result in serp_results],
-            credentials=credentials.dataforseo,
-            transport=dataforseo_transport,
-            variants=tuple(live_backlinks_variants),
-            progress=None,
-            run_dir=config.output_dir,
-            blocklist=blocklist,
+        existing_backlinks_by_url_variant = (
+            _usable_backlinks_by_url_variant_from_records(
+                raw_keyword_records,
+                variants=tuple(live_backlinks_variants),
+            )
+            if raw_keyword_records
+            else {}
         )
-        if backlinks_responses:
-            partitioned = partition_backlinks_responses_by_variant(backlinks_responses)
-            for variant, responses_for_variant in partitioned.items():
-                if responses_for_variant:
-                    network_calls.append(
-                        f"dataforseo.{BACKLINKS_VARIANT_ENDPOINTS[variant]}"
-                    )
+        missing_backlink_urls_by_variant = {
+            variant: [
+                url
+                for url in serp_urls
+                if (cache_identity_url(url), variant)
+                not in existing_backlinks_by_url_variant
+            ]
+            for variant in live_backlinks_variants
+        }
+        if progress is not None:
+            progress.keyword_log(
+                target_keyword,
+                f"dataforseo backlinks ({len(set().union(*missing_backlink_urls_by_variant.values()))} urls)",
+            )
+        for variant in live_backlinks_variants:
+            missing_urls_for_variant = missing_backlink_urls_by_variant[variant]
+            if not missing_urls_for_variant:
+                continue
+            fetched_backlinks = fetch_dataforseo_backlinks_for_urls(
+                target_keyword,
+                missing_urls_for_variant,
+                credentials=credentials.dataforseo,
+                transport=dataforseo_transport,
+                variants=(variant,),
+                progress=None,
+                run_dir=config.output_dir,
+                blocklist=blocklist,
+            )
+            if fetched_backlinks:
+                network_calls.append(
+                    f"dataforseo.{BACKLINKS_VARIANT_ENDPOINTS[variant]}"
+                )
+            for response in fetched_backlinks:
+                url = extract_response_url(response)
+                if not isinstance(url, str):
+                    continue
+                _register_usable_backlink_response(
+                    existing_backlinks_by_url_variant,
+                    response=response,
+                    url=url,
+                    variant=variant,
+                )
+        backlinks_responses = [
+            existing_backlinks_by_url_variant[(cache_identity_url(url), variant)]
+            for url in serp_urls
+            for variant in live_backlinks_variants
+            if (cache_identity_url(url), variant) in existing_backlinks_by_url_variant
+        ]
 
-    serp_urls = list(dict.fromkeys(str(result["url"]) for result in serp_results))
     existing_onpage_by_url = (
         _usable_onpage_by_url_from_records(raw_keyword_records) if raw_keyword_records else {}
     )
@@ -2955,32 +3137,54 @@ def build_live_keyword_result(
             url = extract_response_url(response)
             if not isinstance(url, str):
                 continue
-            fetched_onpage_by_url[url] = response
+            fetched_onpage_by_url[cache_identity_url(url)] = response
             _register_usable_onpage_response(
                 existing_onpage_by_url,
                 response=response,
                 url=url,
             )
     onpage_responses = [
-        existing_onpage_by_url[url] if url in existing_onpage_by_url else fetched_onpage_by_url[url]
+        existing_onpage_by_url[cache_identity_url(url)]
+        if cache_identity_url(url) in existing_onpage_by_url
+        else fetched_onpage_by_url[cache_identity_url(url)]
         for url in serp_urls
-        if url in existing_onpage_by_url or url in fetched_onpage_by_url
+        if cache_identity_url(url) in existing_onpage_by_url
+        or cache_identity_url(url) in fetched_onpage_by_url
     ]
 
+    existing_page_text_by_url = (
+        _usable_page_text_by_url_from_records(raw_keyword_records)
+        if raw_keyword_records
+        else {}
+    )
+    page_text_urls_to_fetch = _missing_serp_urls(serp_results, existing_page_text_by_url)
     if progress is not None:
         progress.keyword_log(
             target_keyword,
-            f"dataforseo page text ({len(serp_results)} urls)",
+            f"dataforseo page text ({len(page_text_urls_to_fetch)} urls)",
         )
-    page_text_responses = fetch_page_text_for_urls(
+    fetched_page_text_urls: set[str] = set()
+    fetched_page_text_responses = fetch_page_text_for_urls(
         target_keyword,
-        [str(result["url"]) for result in serp_results],
+        page_text_urls_to_fetch,
         credentials=credentials.dataforseo,
         transport=dataforseo_transport,
         blocklist=blocklist,
     )
-    if page_text_responses:
+    if fetched_page_text_responses:
         network_calls.append("dataforseo.page_text")
+    for response in fetched_page_text_responses:
+        url = extract_response_url(response)
+        if not isinstance(url, str):
+            continue
+        cache_key = cache_identity_url(url)
+        existing_page_text_by_url[cache_key] = response
+        fetched_page_text_urls.add(cache_key)
+    page_text_responses = [
+        existing_page_text_by_url[cache_identity_url(url)]
+        for url in serp_urls
+        if cache_identity_url(url) in existing_page_text_by_url
+    ]
     parsed_pages = [
         page_text
         for response in page_text_responses
@@ -2999,12 +3203,51 @@ def build_live_keyword_result(
         }
         for page_text in parsed_pages
     ]
-    if gemini_api_key is not None:
+    stored_gemini_scores: list[dict[str, object]] = []
+    if stored_keyword_result is not None:
+        stored_scores = stored_keyword_result.get("page_similarity", [])
+        parsed_page_urls = {
+            cache_identity_url(str(page_text["url"])) for page_text in parsed_pages
+        }
+        if isinstance(stored_scores, list):
+            for score in stored_scores:
+                if not isinstance(score, Mapping):
+                    continue
+                url = score.get("url")
+                page_similarity = score.get("page_similarity")
+                if (
+                    not isinstance(url, str)
+                    or cache_identity_url(url) not in parsed_page_urls
+                    or cache_identity_url(url) in fetched_page_text_urls
+                    or not isinstance(page_similarity, Mapping)
+                ):
+                    continue
+                gemini_scores = {
+                    backend: page_similarity[backend]
+                    for backend in (
+                        "gemini_doc_retrieval",
+                        "gemini_semantic_similarity",
+                    )
+                    if isinstance(page_similarity.get(backend), Mapping)
+                }
+                if len(gemini_scores) == 2:
+                    stored_gemini_scores.append(
+                        {"url": url, "page_similarity": gemini_scores}
+                    )
+    stored_gemini_urls = {
+        cache_identity_url(str(score["url"])) for score in stored_gemini_scores
+    }
+    gemini_pages_to_fetch = [
+        page_text
+        for page_text in gemini_pages
+        if cache_identity_url(str(page_text["url"])) not in stored_gemini_urls
+    ]
+    if gemini_api_key is not None and gemini_pages_to_fetch:
         if progress is not None:
             progress.keyword_log(target_keyword, "gemini embeddings")
         similarity_scores = compute_gemini_page_similarity_scores(
             target_keyword,
-            gemini_pages,
+            gemini_pages_to_fetch,
             api_key=gemini_api_key,
             on_page_progress=(
                 None
@@ -3019,7 +3262,12 @@ def build_live_keyword_result(
         if progress is not None:
             progress.keyword_log(target_keyword, "similarity")
         similarity_scores = compute_page_similarity_scores(target_keyword, parsed_pages)
-    if gemini_api_key is not None and parsed_pages:
+    if stored_gemini_scores:
+        similarity_scores = merge_page_similarity_scores(
+            similarity_scores,
+            stored_gemini_scores,
+        )
+    if gemini_api_key is not None and gemini_pages_to_fetch:
         network_calls.append("genai.embed_content")
     if live_bge_enabled:
         if progress is not None:
@@ -3036,10 +3284,23 @@ def build_live_keyword_result(
     textrazor_responses: list[dict[str, object]] = []
     textrazor_entities: list[dict[str, object]] = []
     if config.live_textrazor and textrazor_credentials is not None:
+        existing_textrazor_by_url = (
+            _textrazor_responses_by_url_from_records(raw_keyword_records)
+            if raw_keyword_records
+            else {}
+        )
+        if fetched_page_text_urls:
+            existing_textrazor_by_url = {
+                url: response
+                for url, response in existing_textrazor_by_url.items()
+                if url not in fetched_page_text_urls
+            }
         textrazor_pages = pages_missing_textrazor(
             [
                 annotate_target_keyword(page_text, target_keyword)
                 for page_text in parsed_pages
+                if cache_identity_url(str(page_text["url"]))
+                not in existing_textrazor_by_url
             ]
         )
         if progress is not None:
@@ -3047,21 +3308,34 @@ def build_live_keyword_result(
                 target_keyword,
                 f"textrazor entities ({len(textrazor_pages)} pages)",
             )
-        textrazor_responses = fetch_textrazor_entities_for_pages(
+        fetched_textrazor_responses = fetch_textrazor_entities_for_pages(
             textrazor_pages,
             credentials=textrazor_credentials,
             transport=textrazor_transport,
             blocklist=blocklist,
         )
-        if textrazor_responses:
+        if fetched_textrazor_responses:
             network_calls.append("textrazor.entities")
+        for response in fetched_textrazor_responses:
+            url = extract_response_url(response)
+            if not isinstance(url, str):
+                continue
+            existing_textrazor_by_url[cache_identity_url(url)] = response
+        textrazor_responses = [
+            existing_textrazor_by_url[cache_identity_url(url)]
+            for url in serp_urls
+            if cache_identity_url(url) in existing_textrazor_by_url
+        ]
         textrazor_entities = []
         for response in textrazor_responses:
+            response_url = extract_response_url(response)
+            if not isinstance(response_url, str):
+                continue
             textrazor_entities.extend(
                 annotate_target_keyword(entity, target_keyword)
                 for entity in normalize_textrazor_response(
                     response,
-                    url=str(response["url"]),
+                    url=response_url,
                 )
             )
 
@@ -3092,6 +3366,7 @@ def raise_for_failed_dataforseo_tasks(
     *,
     target_keyword: str | None = None,
 ) -> None:
+    logger = logging.getLogger("seo_rank.cli")
     top_level_status_code = response.get("status_code")
     if isinstance(top_level_status_code, int) and top_level_status_code != 20000:
         status_message = response.get("status_message")
@@ -3105,10 +3380,11 @@ def raise_for_failed_dataforseo_tasks(
             if isinstance(target_keyword, str) and target_keyword
             else ""
         )
-        raise DataForSeoClientError(
+        logger.warning(
             f"DataForSEO {endpoint} response failed{keyword_context} "
             f"with status_code={top_level_status_code}: {rendered_message}"
         )
+        return
 
     tasks = response.get("tasks", [])
     if not isinstance(tasks, list):
@@ -3144,7 +3420,7 @@ def raise_for_failed_dataforseo_tasks(
             if isinstance(keyword, str) and keyword
             else ""
         )
-        raise DataForSeoClientError(
+        logger.warning(
             f"DataForSEO {endpoint} task failed{keyword_context} "
             f"at tasks[{task_index}] with status_code={status_code}: {rendered_message}"
         )
@@ -3801,6 +4077,8 @@ def dataforseo_location_code(location: str) -> int:
 def serialized_config(config: RunConfig) -> dict[str, object]:
     serialized = asdict(config)
     serialized["output_dir"] = str(config.output_dir)
+    if serialized.get("domain_blocklist_path") is not None:
+        serialized["domain_blocklist_path"] = str(config.domain_blocklist_path)
     if serialized.get("keyword_limit") == DEFAULT_KEYWORD_LIMIT:
         serialized.pop("keyword_limit", None)
     return serialized

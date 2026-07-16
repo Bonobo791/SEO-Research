@@ -65,7 +65,7 @@ Plackett-Luce is deferred backlog work only and is not wired in code today.
 | 20 | Rank-depth fixtures and tests | Stats | Shipped | `test_stats_rank_depth.py` |
 | 21 | TextRazor-only flags and gates | CLI | Shipped | `--live-textrazor-only`, `--refresh-textrazor` |
 | 22 | TextRazor ingest core | Data | Shipped | `fetch_textrazor_entities_for_pages`, endpoint registry |
-| 23 | Raw lake merge for entities | Data | Shipped | `merge_raw_response_records` (keyword+url dedupe) |
+| 23 | Raw lake merge for entities | Data | Shipped | `merge_raw_response_records` (keyword+url dedupe; existing rows skipped unless refresh) |
 | 24 | Stored-run TextRazor backfill | CLI | Shipped | `backfill_textrazor_run` from stored `page_text` |
 | 25 | Brand-new TextRazor-only run | CLI | Shipped | `write_textrazor_only_artifacts` + fixture DFS + live TextRazor |
 | 26 | TextRazor-only tests and docs | CLI | Shipped | CLI tests and docs; shared raw-response schema contract |
@@ -332,7 +332,8 @@ schema drift).
       `raw_responses` `endpoint=page_text` (fallback: curated `pages`).
     - `backfill_textrazor_run()` for `--stored-run … --live-textrazor-only`; no
       `build_live_keyword_result` / no DataForSEO HTTP.
-    - Merge entities into raw lake; refresh `textrazor_entities` in `run.json`;
+    - Merge entities into raw lake, skipping existing keyword/URL rows unless
+      `--refresh-textrazor`; refresh `textrazor_entities` in `run.json`;
       `materialize_run_tree(..., respect_dry_run=False)`.
     - Covered by `tests/unit/test_textrazor_backfill.py`.
 
@@ -555,7 +556,8 @@ schema drift).
 - Phase 5.7 TextRazor request tuning (`cleanup.mode`, custom dictionaries,
   Prolog `rules`, `url` fetch mode) — deferred unless a slice explicitly adds CLI
   flags.
-- Phase 5.1 DataForSEO live fail-fast (`ROADMAP.md` § 5.1).
+- Phase 5.1 DataForSEO fatal-task preflight/classifier hardening
+  (`ROADMAP.md` § 5.1); current task failures warn and continue.
 - Phase 5.2 Gemini/BGE empty-output fail-fast (`ROADMAP.md` § 5.2).
 - Phase 5.4 exploratory extensions (rank-decile segments; keyword holdout and
   time-split validation in Phase 5.6).

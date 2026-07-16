@@ -299,7 +299,8 @@ the existing `raw_responses` lake using `endpoint=entities`, `provider=textrazor
 
 23. **[x] Slice 23 — Raw lake merge for entities**
     - `merge_raw_response_records()` + partition rewrite for `endpoint=entities`.
-    - Dedupe `(target_keyword, url)`; `--refresh-textrazor` latest-wins replace.
+    - Dedupe `(target_keyword, url)`; default skips existing rows and
+      `--refresh-textrazor` latest-wins replaces them.
     - Other endpoint partitions unchanged (`test_raw_response_merge.py`).
 
 24. **[x] Slice 24 — Stored-run TextRazor backfill**
@@ -478,14 +479,12 @@ seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-textrazor-on
 | Phase 5.7 signal-family registry and stats dispatch | 5.7 Slice 41 | Open |
 | Salience explainability + Phase 5.7 golden fixtures | 5.7 Slice 42 | Open |
 
-### Phase 5.1 — Live provider fail-fast on DataForSEO denial
+### Phase 5.1 — Live provider failure handling
 
-Stop multi-keyword live runs as soon as DataForSEO returns a **fatal** task error
-(e.g. `40207` IP not whitelisted, auth failures) instead of treating
-`tasks[].result: null` as an empty SERP and continuing through the keyword
-loop. Prevents burning API quota and writing poisoned `parquet/raw_responses`
-rows that downstream normalize silently drops. Empty Gemini/BGE scoring after
-upstream fetches is **Phase 5.2**.
+DataForSEO top-level and task-level failures are logged as warnings and the live
+run continues. The failed response is retained in `parquet/raw_responses`; its
+empty result is allowed to flow through normalization so the run can finish and
+report the affected keyword.
 
 **Root cause (Columbus run, 2026-07-02):** SERP schema allows `result: null`;
 `normalize_serp_results()` returns `[]` without checking `status_code`. Runs
@@ -495,30 +494,24 @@ resumes from the saved raw lake and existing keyword results, so completed work
 survives replay; interrupting mid-run still loses in-RAM SERP + embedding
 progress for in-flight refresh work.
 
-**Primary behavior**
+**Implemented behavior**
 
-- Classify DataForSEO task `status_code` values as success (`20000`) vs fatal
-  (abort entire run with exit **2**).
-- Call the classifier on **every** live DataForSEO endpoint: `keyword_expansion`,
-  `serp`, and each `page_text` response.
-- Distinguish **fatal auth/IP errors** from **per-URL crawl failures** (S5-11):
-  skip individual `page_text` tasks with `result: null` on crawl failure; still
-  abort on fatal codes.
-- Optional preflight probe (reuse `scripts/test_provider_connectivity.py` logic)
-  before loading BGE and entering a multi-keyword loop.
+- Log a warning for a failed top-level DataForSEO response.
+- Log a warning for each failed task, including endpoint, task index, status,
+  and keyword context when available.
+- Preserve failed raw responses and continue the keyword loop; a failed SERP
+  task produces no SERP rows for that keyword.
 - `replay_stored_run` / `expand_stored_run`: CLI `--live-providers`,
   `--live-gemini`, `--live-bge` override stale `run.json` config for execution.
-- On stale-SERP refresh, replace failed raw rows for refreshed keywords; do not
-  OR-retain unusable SERP parquet over newer success (FIXUPS S6-10).
 
-**CLI contract:** live `seo-rank run` exits **2** on first fatal DataForSEO task;
-stderr message includes `status_code`, endpoint, and `target_keyword` when known.
-No `run.json` / raw parquet write on abort mid-loop (today's behavior for
-`DataForSeoClientError`).
+**CLI contract:** a failed DataForSEO task does not by itself change the exit
+code. The warning includes `status_code`, endpoint, and `target_keyword` when
+known; raw response persistence and the normal completion marker still occur.
+Transport and configuration errors remain hard failures.
 
-**Related FIXUPS:** S5-11 (page_text crawl `null` vs fatal), S6-10 (stale SERP
-retention), S6-12 (shared fatal classifier with `stored_serp_response_is_usable`),
-S6-15 (stored-run live replay exits `2` on SERP task failure).
+The preflight/fatal-classifier ideas in the remaining dev slices are deferred
+hardening, not the current live-run contract. Related follow-ups are S5-11,
+S6-10, and S6-12.
 
 #### Dev slices
 
@@ -532,13 +525,11 @@ S6-15 (stored-run live replay exits `2` on SERP task failure).
      `stored_serp_response_is_usable()` through the shared helper (S6-12).
    - Unit tests in `tests/unit/test_dataforseo_requests.py`.
 
-2. **[ ] Slice 2 — Fail-fast on all live DataForSEO endpoints**
-   - `raise_for_failed_dataforseo_tasks()` after `keyword_expansion` in
-     `write_live_artifacts`.
-   - After each live `page_text` response in `build_live_keyword_result`; fatal
-     codes abort, crawl-null skips per S5-11.
-   - CLI tests: expansion `40207` → exit `2`; SERP `40207` on keyword 2 of 3 →
-     keyword 3 never requested; page_text `40207` → exit `2` (S6-15).
+2. **[ ] Slice 2 — Optional fatal-task policy hardening**
+   - If a future policy distinguishes fatal auth/IP responses, keep the current
+     warning-and-continue default explicit and add an opt-in abort contract.
+   - Preserve the current behavior that failed SERP tasks are retained and the
+     keyword loop continues.
 
 3. **[ ] Slice 3 — DataForSEO preflight before multi-keyword loops**
    - Cheap DataForSEO connectivity / auth probe before keyword iteration on
@@ -1517,7 +1508,7 @@ collect the source automatically; (4) `--stored-run` backfill — extend
 in this phase, not a per-source CLI flag; (5) curated builder in
 `data/normalize.py`, feature mart entry in `data/features.py` joined on the
 correct grain (URL sources join like `backlinks_analysis` on
-`["run_id","target_keyword_id","canonical_url_hash","url"]`; domain sources
+`["run_id","target_keyword_id","canonical_url_hash"]`; domain sources
 derive `domain` the way `domain_features` does), a new family `kind` in
 `stats/families.py` (`VALID_SIGNAL_FAMILY_KINDS` + `SOURCE_MART_BY_KIND`),
 and a family block appended (never reordered) to
@@ -1528,8 +1519,9 @@ fixtures and a stored-run regression proving only the missing source gets
 
 #### 7.1 — OnPage page signals (`on_page/instant_pages`)
 
-URL grain (`canonical_url_hash` + `url`), one synchronous live call per SERP
-URL with `enable_javascript`, `enable_browser_rendering`, `load_resources`,
+URL grain (`target_keyword_id × canonical_url_hash` with the original `url`
+retained), one synchronous live call per SERP URL with `enable_javascript`,
+`enable_browser_rendering`, `load_resources`,
 and `validate_micromarkup: true` all set on the same request — structured-data
 validation rides along in one call, no separate `on_page/microdata` endpoint
 or task id needed, and no `task_post` crawl/poll flow.
@@ -1581,7 +1573,7 @@ or task id needed, and no `task_post` crawl/poll flow.
 7. **[x] Slice 7 — Feature mart** — `onpage_features`, URL-grain join of
    curated `onpage_signals` onto the `analysis_mart` panel
    (`build_feature_lazyframes` left join on
-   `run_id`, `target_keyword_id`, `canonical_url_hash`, `url`); bounded
+   `run_id`, `target_keyword_id`, `canonical_url_hash`); bounded
    validation (`onpage_score` 0–100, non-negative counts/timing). Tests in
    `tests/unit/test_feature_marts.py`.
 8. **[x] Slice 8 — Family registry + stats source wiring** — new kind `onpage_metric` mapped to
@@ -2241,11 +2233,10 @@ redirected URL.
   `write_textrazor_only_artifacts()` (fixture DataForSEO structure + live
   TextRazor, zero `dataforseo.*` in `network_calls`). Cross-doc schema contract
   (slice 26) is shipped.
-- **Phase 5.1 planned (2026-07-02):** live provider fail-fast on fatal DataForSEO
-  task errors (`40207` IP whitelist, auth failures) — shared classifier, abort on
-  all live endpoints, optional preflight, CLI flag override on stored-run replay,
-  safer stale-SERP retention. Motivated by Columbus run continuing through 23
-  denied SERPs before `raise_for_failed_dataforseo_tasks()` shipped.
+- **Phase 5.1 updated (2026-07-16):** DataForSEO top-level and task-level
+  failures now log warnings, retain raw responses, and let live runs continue;
+  failed SERP tasks produce empty SERP rows for the affected keyword. Fatal-task
+  classification and preflight remain deferred hardening.
 - **Phase 5 Slices 8–10 shipped (2026-07-03):** influence refit appendix
   (`influence_sensitivity` block, `### Influence robustness` report sections,
   `influential_rows_rate` warn guardrail), similarity golden fixtures

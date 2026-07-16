@@ -5,6 +5,7 @@ import json
 import logging
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -44,6 +45,29 @@ REQUIRED_BACKLINKS_QUERIES = frozenset(
     {BACKLINKS_QUERY_SUMMARY, BACKLINKS_QUERY_DOFOLLOW}
 )
 BACKLINKS_DOFOLLOW_FILTERS: list[object] = ["dofollow", "=", True]
+_CACHE_IDENTITY_QUERY_KEYS = frozenset(
+    {"srsltid", "gclid", "dclid", "msclkid", "fbclid", "gbraid", "wbraid"}
+)
+
+
+def cache_identity_url(url: str) -> str:
+    """Return a URL key that ignores known click-tracking parameters."""
+
+    parsed = urllib.parse.urlsplit(url)
+    query = urllib.parse.urlencode(
+        [
+            (key, value)
+            for key, value in urllib.parse.parse_qsl(
+                parsed.query, keep_blank_values=True
+            )
+            if key.casefold() not in _CACHE_IDENTITY_QUERY_KEYS
+            and not key.casefold().startswith("utm_")
+        ],
+        doseq=True,
+    )
+    return urllib.parse.urlunsplit(
+        (parsed.scheme, parsed.netloc, parsed.path, query, "")
+    )
 
 
 @dataclass(frozen=True)

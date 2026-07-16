@@ -1487,6 +1487,36 @@ def test_build_onpage_signals_frame_dedupes_by_target_keyword_and_url() -> None:
     assert row["onpage_score"] == 99.0
 
 
+def test_build_onpage_signals_frame_dedupes_canonical_url_variants() -> None:
+    target_keyword = "technical seo"
+    base_url = "https://example.com/technical-seo"
+    older_url = f"{base_url}?srsltid=older"
+    newer_url = f"{base_url}?srsltid=newer"
+    run_id = "run-dedupe-onpage-canonical"
+    records = []
+    for url, response_id, recorded_at in (
+        (older_url, "onpage-older", "2026-07-05T12:00:00+00:00"),
+        (newer_url, "onpage-newer", "2026-07-05T12:01:00+00:00"),
+    ):
+        record = build_raw_response_record(
+            run_id,
+            endpoint="onpage_instant_pages",
+            provider="dataforseo",
+            response={**fixture_onpage_instant_pages_response(url), "url": url},
+            target_keyword=target_keyword,
+            request_metadata={"target_keyword": target_keyword, "url": url},
+            recorded_at=recorded_at,
+        )
+        record["response_id"] = response_id
+        record["timestamp"] = recorded_at
+        records.append(record)
+
+    result = build_onpage_signals_frame(pl.DataFrame(records), run_id=run_id)
+
+    assert result.height == 1
+    assert result.to_dicts()[0]["response_id"] == "onpage-newer"
+
+
 def test_dry_run_materializes_textrazor_topic_and_page_metrics(
     tmp_path: Path,
     monkeypatch,

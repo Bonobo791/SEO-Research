@@ -10,7 +10,7 @@ _DEPRECATED_HTML_TAGS_COLUMN = "deprecated_html_tags"
 _META_KEYWORDS_CONSISTENCY_COLUMN = "meta_keywords_to_content_consistency"
 _TIME_TO_FIRST_BYTE_COLUMN = "time_to_first_byte_ms"
 _SITE_SCALE_COLUMN = "site_scale"
-_ANALYSIS_JOIN_KEYS = ["run_id", "target_keyword_id", "canonical_url_hash", "url"]
+_ANALYSIS_JOIN_KEYS = ["run_id", "target_keyword_id", "canonical_url_hash"]
 
 _BACKENDS = ("bge", "gemini_doc_retrieval", "gemini_semantic_similarity")
 
@@ -46,7 +46,7 @@ def build_analysis_lazyframe(feature_frames: Mapping[str, pl.LazyFrame]) -> pl.L
         feature_frames["keyword_serp"]
         .join(
             feature_frames["page_features"],
-            on=["run_id", "target_keyword_id", "canonical_url_hash", "url"],
+            on=["run_id", "target_keyword_id", "canonical_url_hash"],
             how="left",
             suffix="_page",
         )

@@ -78,12 +78,12 @@ placeholders only.
 | `test_stats_rank_depth.py` | Rank-depth confirmatory slices: spec accessors, panel filtering, per-depth Spearman/OLS/PL, monotonic row counts, `rank_depths` JSON + report sections |
 | `test_stats_scale.py` | Within-keyword and global z-score helpers (`stats.scale`) for OLS/PL effect-size contract |
 | `test_textrazor_ingest.py` | TextRazor endpoint registry, page entity fetch, and dedupe helpers with injected transport |
-| `test_textrazor_backfill.py` | Stored-run TextRazor backfill: `load_pages_for_textrazor`, `--stored-run --live-textrazor-only` CLI path, no DataForSEO HTTP |
+| `test_textrazor_backfill.py` | Stored-run TextRazor backfill: `load_pages_for_textrazor`, `--stored-run --live-textrazor-only` CLI path, no DataForSEO HTTP, and skipping existing entity URLs unless refresh is requested |
 | `test_raw_response_merge.py` | `merge_raw_response_records` for `endpoint=entities` dedupe and refresh semantics |
 | `test_round_trip.py` | Dedicated Parquet lake write → normalize → build-features → analyze round-trip regression sweep on real Parquet artifacts; validates `run.json` updates, keyword-filtered `analyze` output, and OnPage nested-fixture pipeline through stats (slice 18) |
 | `test_onpage_stored_run_regression.py` | Stored-run OnPage backfill end-to-end: live overlay fetches only onpage/backlinks, materializes `onpage_signals`/`onpage_features`/`stats_*` with nested `meta.content`/CLS fields (slice 18) |
 | `test_keyword_expansion.py` | 1-keyword default, deduplication, raw provider payload |
-| `test_serp_normalization.py` | Organic-only SERP rows, depth cap |
+| `test_serp_normalization.py` | Organic-only SERP rows, depth cap, and declared-schema empty frames |
 | `test_env.py` | `.env` discovery, parsing, and override of shell exports |
 | `test_bge_reranker.py` | Live BGE GPU gate, pinned model loading, tokenizer compatibility shim, and batched score shaping |
 | `test_gemini_embeddings.py` | Live Gemini prompt formatting, model args, and score shaping with injected embeddings |
@@ -211,7 +211,8 @@ exist.
   `pages_missing_textrazor()` with injected transport.
 - **Raw lake merge** — `tests/unit/test_raw_response_merge.py` covers
   `merge_raw_response_records()` dedupe on `(target_keyword, url)` and
-  `--refresh-textrazor` latest-wins replace for `endpoint=entities` only.
+  default skip of existing rows plus `--refresh-textrazor` latest-wins replace
+  for `endpoint=entities` only.
 - **Stored-run backfill** — `tests/unit/test_textrazor_backfill.py` covers
   `load_pages_for_textrazor()` (raw `page_text` authoritative over curated
   `pages`) and the `--stored-run --live-textrazor-only` CLI path with zero
@@ -262,6 +263,9 @@ exist.
 - **Backlink merge** — `tests/unit/test_raw_response_merge.py` covers
   `merge_backlink_raw_response_rows()` variant-aware dedupe and
   `persist_backlink_raw_responses()` partition rewrite per batch.
+- **Stored-run reuse** — CLI tests cover reusing usable stored backlinks,
+  page-text, and TextRazor rows, plus invalidating TextRazor when page text is
+  refreshed.
 - **Curated normalization** — `tests/unit/test_run_normalize.py` covers
   `backlinks` table materialization from paired raw responses (42 / 12 / 35),
   null `dofollow_backlinks_count` when the dofollow variant is absent,
@@ -418,6 +422,10 @@ Contract: `PAGE_TEXT_RETRIEVAL_PLAN.md` (slices 1–4 shipped).
   and ignores pool/JS markers inside page body vs status fields.
 - **Request shapes** — same file covers baseline vs JS vs browser
   `build_page_text_request()` bodies and `switch_pool`.
+- **DataForSEO failure continuation** — `test_dataforseo_requests.py` verifies
+  top-level and task-level failures are logged as warnings, while
+  `test_cli_run.py` verifies a failed SERP task is retained and the live run
+  completes with an empty SERP result for that keyword.
 - **Staged fetch + recovery** — `tests/unit/test_cli_run.py`
   (`test_fetch_page_text_for_urls_*`) covers stop-after-usable at each stage,
   exhaustion retaining the browser response, terminal outcomes at baseline,
@@ -491,6 +499,8 @@ relative ranks are Phase 6.1.
 
 - Feature marts and `analysis_mart` join keys (`run_id`, `target_keyword_id`,
   `canonical_url_hash`, `response_id`, `passage_id`)
+- URL identity tests cover tracking-parameter variants sharing one cache key and
+  canonical URL hash while preserving the original URL value.
 - Passage / domain similarity scopes (feature marts; Phase 5.5 scoring)
 
 ### Phase 5 — statistical analysis (see `ROADMAP.md` slices 31+)

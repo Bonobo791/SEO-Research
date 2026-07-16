@@ -158,6 +158,10 @@ those URLs is rebuilt with fixture scorers. Billable DataForSEO page-text
 requests are issued only for non-usable rows; staged rendering, timeout retry,
 and pool switching can add attempts per URL. See `PAGE_TEXT_RETRIEVAL_PLAN.md`.
 
+Stored-run reuse treats known click-tracking query parameters as non-identity
+data, so URL variants such as `?utm_source=...` and `?srsltid=...` share cached
+provider results while the original URL remains in the report.
+
 **Backfill DataForSEO backlinks on a stored run** (also fetches missing
 `endpoint=onpage_instant_pages` rows):
 
@@ -165,9 +169,9 @@ and pool switching can add attempts per URL. See `PAGE_TEXT_RETRIEVAL_PLAN.md`.
 seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-providers --live-backlinks
 ```
 
-Only missing SERP URLs are requested. Backlinks: two `backlinks/summary/live`
-calls per URL (unfiltered + dofollow). OnPage: one `on_page/instant_pages/live`
-call per URL. Raw partitions:
+Only missing URL/variant rows are requested; usable stored rows are reused.
+Backlinks: up to two `backlinks/summary/live` calls per URL (unfiltered +
+dofollow). OnPage: one `on_page/instant_pages/live` call per missing URL. Raw partitions:
 `backlinks_summary`, `backlinks_dofollow_summary`, `onpage_instant_pages`.
 
 **Backfill live TextRazor on a stored run** (no DataForSEO HTTP):
@@ -180,7 +184,8 @@ seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-textrazor-on
 Requires `SEO_RANK_ENABLE_TEXTRAZOR=1` and `TEXTRAZOR_API_KEY`. Mutually
 exclusive with `--live-providers` and `--skip-textrazor`. Pass
 `--refresh-textrazor` to replace existing `endpoint=entities` rows for the same
-`(target_keyword, url)`.
+`(target_keyword, url)`; without it, already-materialized entity rows are
+skipped.
 
 **Brand-new run with live TextRazor only** (fixture DataForSEO structure + live
 entities; no `dataforseo.*` in `network_calls`):

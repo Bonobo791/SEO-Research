@@ -32,6 +32,7 @@ from seo_rank.cli import main
 from seo_rank.cli import RunConfig
 from seo_rank.cli import prepare_textrazor_only_context
 from seo_rank.cli import render_markdown_report
+from seo_rank.cli import serialized_config
 from seo_rank.cli import rewrite_backlink_endpoint_partition
 from seo_rank.cli import rewrite_endpoint_partition
 from seo_rank.cli import merge_stored_run_cli_overlay
@@ -882,6 +883,26 @@ def test_stored_run_debug_flag_is_an_explicit_overlay(tmp_path: Path) -> None:
     assert merged.debug is False
 
 
+def test_serialized_config_stringifies_domain_blocklist_path(tmp_path: Path) -> None:
+    config = RunConfig(
+        seed="technical seo",
+        location="United States",
+        language="en",
+        device="desktop",
+        depth=20,
+        output_dir=tmp_path / "artifacts",
+        model_name="fixture-similarity-v1",
+        dry_run=False,
+        skip_textrazor=False,
+        domain_blocklist_path=tmp_path / "domain_blocklist.txt",
+    )
+
+    serialized = serialized_config(config)
+
+    assert serialized["domain_blocklist_path"] == str(tmp_path / "domain_blocklist.txt")
+    assert serialized["output_dir"] == str(tmp_path / "artifacts")
+
+
 def test_render_markdown_report_includes_textrazor_entity_metrics() -> None:
     payload = {
         "config": {
@@ -1117,6 +1138,10 @@ def test_run_live_textrazor_only_uses_offline_dataforseo_fixtures_and_live_textr
     monkeypatch.setattr("seo_rank.cli.fixture_page_metrics_response", lambda *args, **kwargs: pytest.fail("offline TextRazor fixtures should not be used"))
     monkeypatch.setattr("seo_rank.cli.DEFAULT_DATAFORSEO_TRANSPORT", dataforseo_transport)
     monkeypatch.setattr("seo_rank.cli.DEFAULT_TEXTRAZOR_TRANSPORT", textrazor_transport)
+    monkeypatch.setattr(
+        "seo_rank.cli.DomainBlocklist.load",
+        lambda *args, **kwargs: DomainBlocklist(Path("/tmp/empty-blocklist.txt"), set()),
+    )
 
     exit_code = main(
         [
@@ -2271,6 +2296,72 @@ def test_run_live_warns_and_continues_after_short_keyword_expansion(
     assert len(requested_urls) == 1
 
 
+def test_run_live_warns_and_continues_after_failed_serp_task(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import logging
+
+    monkeypatch.setenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", "1")
+    monkeypatch.setenv("DATAFORSEO_LOGIN", "analyst@example.com")
+    monkeypatch.setenv("DATAFORSEO_PASSWORD", "dataforseo-secret")
+
+    def dataforseo_transport(*, url: str, body: bytes, **_: object) -> dict[str, object]:
+        del body
+        if url.endswith("/keywords_data/google_ads/keywords_for_keywords/live"):
+            return fixture_keyword_expansion_response("technical seo")
+        if url.endswith("/serp/google/organic/live/advanced"):
+            response = fixture_serp_response("technical seo")
+            response["tasks"][0]["status_code"] = 40101
+            response["tasks"][0]["status_message"] = "Internal SE Server Error."
+            response["tasks"][0]["result"] = []
+            return response
+        raise AssertionError(f"unexpected DataForSEO request: {url}")
+
+    monkeypatch.setattr("seo_rank.cli.DEFAULT_DATAFORSEO_TRANSPORT", dataforseo_transport)
+
+    output_dir = tmp_path / "artifacts"
+    with caplog.at_level(logging.WARNING, logger="seo_rank.cli"):
+        assert (
+            main(
+                [
+                    "run",
+                    "--seed",
+                    "technical seo",
+                    "--output-dir",
+                    str(output_dir),
+                    "--keyword-limit",
+                    "1",
+                    "--depth",
+                    "1",
+                    "--dry-run",
+                    "--live-providers",
+                    "--skip-textrazor",
+                ]
+            )
+            == 0
+        )
+    captured = capsys.readouterr()
+
+    payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
+    assert len(payload["keyword_results"]) == 1
+    assert payload["keyword_results"][0]["target_keyword"] == "technical seo"
+    assert payload["keyword_results"][0]["serp_results"] == []
+    serp_rows = pq.ParquetFile(
+        output_dir / "parquet" / "raw_responses" / "endpoint=serp" / "part-0.parquet"
+    ).read().to_pylist()
+    assert len(serp_rows) == 1
+    assert (
+        json.loads(bytes(serp_rows[0]["response_body_bytes"]).decode("utf-8"))["tasks"][0][
+            "status_code"
+        ]
+        == 40101
+    )
+    assert "[seo-rank] run: finished ->" in captured.err
+
+
 def test_build_live_payload_uses_requested_keyword_limit_when_available(
     monkeypatch,
 ) -> None:
@@ -2933,6 +3024,275 @@ def test_build_resumed_keyword_result_refetches_empty_stored_onpage_response(
     assert len(onpage_responses) == 2
     assert onpage_responses[0]["url"] == url_a
     assert onpage_responses[1]["url"] == url_b
+
+
+def test_build_live_keyword_result_reuses_existing_live_api_rows(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seo_rank.cli import build_live_keyword_result
+
+    target_keyword = "technical seo"
+    serp_response = fixture_serp_response(target_keyword)
+    organic_items = serp_response["tasks"][0]["result"][0]["items"]
+    url_a = organic_items[1]["url"]
+    url_b = organic_items[2]["url"]
+    cached_url_a = f"{url_a}?utm_source=google&srsltid=cached"
+    config = RunConfig(
+        seed=target_keyword,
+        location="United States",
+        language="en",
+        device="desktop",
+        depth=2,
+        keyword_limit=1,
+        output_dir=tmp_path / "artifacts",
+        model_name="fixture-similarity-v1",
+        dry_run=False,
+        skip_textrazor=False,
+        live_providers=True,
+        live_backlinks=True,
+        live_gemini=True,
+        live_textrazor=True,
+    )
+    requested_page_text_urls: list[str] = []
+    requested_backlink_urls: list[str] = []
+    requested_onpage_urls: list[str] = []
+    requested_textrazor_urls: list[str] = []
+    requested_gemini_urls: list[str] = []
+
+    def transport(*, body: bytes, **_: object) -> dict[str, object]:
+        request = json.loads(body.decode("utf-8"))[0]
+        if "keyword" in request:
+            return serp_response
+        requested_page_text_urls.append(request["url"])
+        return fixture_page_text_response(request["url"], target_keyword)
+
+    def fetch_backlinks(
+        target_keyword_arg: str,
+        urls,
+        *,
+        credentials,
+        transport,
+        variants,
+        progress=None,
+        run_dir=None,
+        blocklist=None,
+    ):
+        del (
+            target_keyword_arg,
+            credentials,
+            transport,
+            progress,
+            run_dir,
+            blocklist,
+        )
+        requested_backlink_urls.extend(urls)
+        responses: list[dict[str, object]] = []
+        for url in urls:
+            for variant in variants:
+                responses.append(
+                    {
+                        **fixture_backlinks_response(
+                            url,
+                            dofollow_only=variant == "dofollow",
+                        ),
+                        "url": url,
+                        "variant": variant,
+                    }
+                )
+        return responses
+
+    def fetch_onpage(
+        target_keyword_arg: str,
+        urls,
+        *,
+        credentials,
+        transport,
+        progress=None,
+        run_dir=None,
+        blocklist=None,
+    ):
+        del (
+            target_keyword_arg,
+            credentials,
+            transport,
+            progress,
+            run_dir,
+            blocklist,
+        )
+        requested_onpage_urls.extend(urls)
+        return [
+            {**fixture_onpage_instant_pages_response(url), "url": url}
+            for url in urls
+        ]
+
+    def fetch_textrazor(pages, **_: object) -> list[dict[str, object]]:
+        requested_textrazor_urls.extend(str(page["url"]) for page in pages)
+        return [
+            {
+                **fixture_entity_response(
+                    str(page["url"]),
+                    str(page["text"]),
+                ),
+                "url": str(page["url"]),
+                "target_keyword": target_keyword,
+            }
+            for page in pages
+        ]
+
+    def compute_gemini(_keyword, pages, **_: object) -> list[dict[str, object]]:
+        requested_gemini_urls.extend(str(page["url"]) for page in pages)
+        return [
+            {
+                "url": str(page["url"]),
+                "page_similarity": {
+                    "gemini_doc_retrieval": {"normalized_score": 0.8},
+                    "gemini_semantic_similarity": {"normalized_score": 0.7},
+                },
+            }
+            for page in pages
+        ]
+
+    monkeypatch.setattr("seo_rank.cli.fetch_dataforseo_backlinks_for_urls", fetch_backlinks)
+    monkeypatch.setattr("seo_rank.cli.fetch_onpage_signals_for_urls", fetch_onpage)
+    monkeypatch.setattr("seo_rank.cli.fetch_textrazor_entities_for_pages", fetch_textrazor)
+    monkeypatch.setattr("seo_rank.cli.compute_gemini_page_similarity_scores", compute_gemini)
+    monkeypatch.setattr(
+        "seo_rank.cli.DomainBlocklist.load",
+        lambda *_args, **_kwargs: DomainBlocklist(
+            config.output_dir / "blocklist.txt",
+            set(),
+        ),
+    )
+
+    def raw_record(
+        *,
+        endpoint: str,
+        response: dict[str, object],
+        response_url: str,
+        provider: str = "dataforseo",
+    ) -> dict[str, object]:
+        return build_raw_response_record(
+            config.output_dir.name,
+            endpoint=endpoint,
+            provider=provider,
+            response={**response, "url": response_url},
+            target_keyword=target_keyword,
+            request_metadata={"target_keyword": target_keyword, "url": response_url},
+            recorded_at="2026-07-16T12:00:00+00:00",
+        )
+
+    result = build_live_keyword_result(
+        config,
+        target_keyword=target_keyword,
+        credentials=type(
+            "LiveCredentials",
+            (),
+            {"dataforseo": DataForSeoCredentials("login", "password")},
+        )(),
+        live_bge_enabled=False,
+        bge_reranker=None,
+        gemini_api_key="gemini-secret",
+        textrazor_credentials=TextRazorCredentials(api_key="textrazor-secret"),
+        location_code=2840,
+        dataforseo_transport=transport,
+        textrazor_transport=lambda **_: {},
+        network_calls=[],
+        raw_keyword_records={
+            "page_text": [
+                raw_record(
+                    endpoint="page_text",
+                    response=fixture_page_text_response(url_a, target_keyword),
+                    response_url=cached_url_a,
+                )
+            ],
+            "backlinks_summary": [
+                raw_record(
+                    endpoint="backlinks_summary",
+                    response=fixture_backlinks_response(url_a),
+                    response_url=cached_url_a,
+                )
+            ],
+            "backlinks_dofollow_summary": [
+                raw_record(
+                    endpoint="backlinks_dofollow_summary",
+                    response=fixture_backlinks_response(url_a, dofollow_only=True),
+                    response_url=cached_url_a,
+                )
+            ],
+            "onpage_instant_pages": [
+                raw_record(
+                    endpoint="onpage_instant_pages",
+                    response=fixture_onpage_instant_pages_response(url_a),
+                    response_url=cached_url_a,
+                ),
+                raw_record(
+                    endpoint="onpage_instant_pages",
+                    response=fixture_onpage_instant_pages_response(url_b),
+                    response_url=url_b,
+                ),
+            ],
+            "entities": [
+                raw_record(
+                    endpoint="entities",
+                    response=fixture_entity_response(
+                        url_a,
+                        "usable stored text",
+                    ),
+                    response_url=cached_url_a,
+                    provider="textrazor",
+                )
+            ],
+        },
+        stored_keyword_result={
+            "page_similarity": [
+                {
+                    "url": url_a,
+                    "page_similarity": {
+                        "gemini_doc_retrieval": {"normalized_score": 0.9},
+                        "gemini_semantic_similarity": {"normalized_score": 0.85},
+                    },
+                }
+            ]
+        },
+    )
+
+    assert requested_page_text_urls == [url_b]
+    assert requested_backlink_urls == [url_b, url_b]
+    assert requested_onpage_urls == []
+    assert requested_textrazor_urls == [url_b]
+    assert requested_gemini_urls == [url_b]
+    assert [
+        extract_response_url(response)
+        for response in result["raw_provider_data"]["dataforseo"]["page_text"]
+    ] == [cached_url_a, url_b]
+    assert [
+        response["url"]
+        for response in result["raw_provider_data"]["textrazor"]["entities"]
+    ] == [cached_url_a, url_b]
+
+
+def test_textrazor_error_response_is_not_reused_as_cached_data(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from seo_rank.cli import _textrazor_responses_by_url_from_records
+    from seo_rank.cli import load_existing_textrazor_entity_keys
+
+    url = "https://example.com/error"
+    record = build_raw_response_record(
+        "artifacts",
+        endpoint="entities",
+        provider="textrazor",
+        response={"url": url, "error": {"code": 429, "message": "Rate limited"}},
+        target_keyword="technical seo",
+        request_metadata={"target_keyword": "technical seo", "url": url},
+        recorded_at="2026-07-16T12:00:00+00:00",
+    )
+
+    assert _textrazor_responses_by_url_from_records({"entities": [record]}) == {}
+    monkeypatch.setattr("seo_rank.cli.load_raw_response_partition_rows", lambda *_: [record])
+    assert load_existing_textrazor_entity_keys(tmp_path) == set()
 
 
 def test_run_materializes_feature_marts_analysis_and_stats_for_fresh_runs(
@@ -5019,6 +5379,10 @@ def test_run_stored_run_refreshes_textrazor_entities_latest_wins_without_touchin
         raise AssertionError("refresh-only stored run should not rebuild keywords")
 
     monkeypatch.setattr("seo_rank.cli.build_live_keyword_result", fail_if_keyword_refresh_requested)
+    monkeypatch.setattr(
+        "seo_rank.cli.DomainBlocklist.load",
+        lambda *args, **kwargs: DomainBlocklist(Path("/tmp/empty-blocklist.txt"), set()),
+    )
 
     exit_code = main(
         [

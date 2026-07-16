@@ -776,7 +776,7 @@ def build_feature_lazyframes(
     page_features = (
         pages.join(
             similarity_scores,
-            on=["run_id", "target_keyword_id", "canonical_url_hash", "url"],
+            on=["run_id", "target_keyword_id", "canonical_url_hash"],
             how="inner",
         )
         .with_columns(
@@ -838,7 +838,7 @@ def build_feature_lazyframes(
             onpage_signals.select(
                 ["run_id", "target_keyword_id", "canonical_url_hash", "url", *SITE_SCALE_COLUMNS]
             ),
-            on=["run_id", "target_keyword_id", "canonical_url_hash", "url"],
+            on=["run_id", "target_keyword_id", "canonical_url_hash"],
             how="left",
         )
     )
@@ -916,7 +916,7 @@ def build_feature_lazyframes(
                     *BACKLINKS_ANALYSIS_EXTRA_COLUMNS,
                 ]
             ),
-            on=["run_id", "target_keyword_id", "canonical_url_hash", "url"],
+            on=["run_id", "target_keyword_id", "canonical_url_hash"],
             how="left",
         )
         .with_columns(pl.lit(FEATURE_SCHEMA_VERSION).alias("schema_version"))
@@ -933,7 +933,7 @@ def build_feature_lazyframes(
                     *ONPAGE_FEATURES_EXTRA_COLUMNS,
                 ]
             ),
-            on=["run_id", "target_keyword_id", "canonical_url_hash", "url"],
+            on=["run_id", "target_keyword_id", "canonical_url_hash"],
             how="left",
         )
         .with_columns(pl.lit(FEATURE_SCHEMA_VERSION).alias("schema_version"))
@@ -1004,7 +1004,7 @@ def build_entity_signals_lazyframe(
         )
         .group_by(["run_id", "target_keyword_id", "canonical_url_hash", "url"])
         .agg(pl.col("serp_rank").min()),
-        on=["run_id", "target_keyword_id", "canonical_url_hash", "url"],
+        on=["run_id", "target_keyword_id", "canonical_url_hash"],
         how="inner",
     )
     return (

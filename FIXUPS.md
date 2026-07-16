@@ -420,7 +420,7 @@ if none of these block deps/docs/round-trip work.
 
 | ID | Fix | Phase | Priority | Status |
 | --- | --- | --- | --- | --- |
-| S3-01 | Return explicit Polars schemas from empty `build_*_frame` UDFs (`keywords`, `serp_items`, `pages_and_passages`, `entities`), matching each `map_batches(..., schema=...)` contract — same pattern as `build_similarity_scores_frame`. **Partial:** uncommitted Slice 5 diff covers `keywords` + `pages_and_passages` (S476-43); `serp_items` + `entities` still open | 4.5 Slice 3 | nice-to-have | open |
+| S3-01 | Return explicit Polars schemas from empty `build_*_frame` UDFs (`keywords`, `serp_items`, `pages_and_passages`, `entities`), matching each `map_batches(..., schema=...)` contract — same pattern as `build_similarity_scores_frame`. **Partial:** `keywords` + `pages_and_passages` are covered by S476-43; `serp_items` is now covered; `entities` remains open | 4.5 Slice 3 | nice-to-have | partial |
 | S3-02 | Filter null `target_keyword` on serp / page_text / entities lazy branches (`.filter(pl.col("target_keyword").is_not_null())`) to restore pre-refactor skip behavior | 4.5 Slice 3 | nice-to-have | open |
 | S3-03 | Document or relocate `load_raw_response_rows` so it is clearly replay/debug-only, not the normalize read path | 4.5 Slice 3 | nice-to-have | open |
 | S3-04 | Strengthen lazy-path test: assert raw scan is not fully collected before transforms (e.g. guard `collect` on `scan_raw_responses`, not only `load_raw_response_rows`) | 4.5 Slice 3 | nice-to-have | open |
@@ -451,11 +451,11 @@ replacement). None block the shipped behavior unless marked **required**.
 | ID | Fix | Phase | Priority | Status |
 | --- | --- | --- | --- | --- |
 | S6-10 | `load_stored_serp_statuses` OR semantics: if parquet has multiple `endpoint=serp` rows per keyword (failed replay + older success), any usable row skips refresh and failed rows are retained — prefer latest-wins or any-failure-forces-refresh if duplicate SERP rows are possible | 4.5 Slice 6 | nice-to-have | open |
-| S6-11 | Document or extend refresh criteria beyond SERP: keywords with usable SERP but stale/missing `page_text` or `entities` are not re-fetched today (`keywords_to_refresh` is SERP-only) | 4.5 Slice 6 | nice-to-have | open |
-| S6-12 | Deduplicate DataForSEO task-failure semantics: `stored_serp_response_is_usable()` and `raise_for_failed_dataforseo_tasks()` both interpret `status_code != 20000` — extract a shared helper so live validation and stored usability cannot drift | 4.5 Slice 6 | nice-to-have | open |
+| S6-11 | Document or extend refresh criteria beyond SERP: stored-run replay now reuses usable `page_text`/`entities` and fetches missing URL work; refreshed page text invalidates the URL's TextRazor response | 4.5 Slice 6 | nice-to-have | done |
+| S6-12 | Deduplicate DataForSEO task-failure semantics: `stored_serp_response_is_usable()` and `raise_for_failed_dataforseo_tasks()` both interpret `status_code != 20000` — extract a shared helper so live validation and stored usability cannot drift. Current live validation logs warnings and continues | 4.5 Slice 6 | nice-to-have | open |
 | S6-13 | Restore no-op replay fast path or cache: every `--stored-run` replay scans SERP parquet via `load_stored_serp_statuses` even when `keyword_limit` is unchanged and all SERPs are usable (early return removed from `replay_stored_run`) | 4.5 Slice 6 | nice-to-have | open |
 | S6-14 | Add unit tests for `merge_keyword_results()`: refreshed result overrides stored for the same keyword, `CliCommandError` when a `target_keywords` entry has no stored or refreshed result, case-insensitive keyword matching | 4.5 Slice 6 | nice-to-have | open |
-| S6-15 | Restore CLI test that stored-run live replay exits `2` when a stale keyword's SERP refresh hits `raise_for_failed_dataforseo_tasks` (replaces removed `test_run_stored_run_live_expansion_reports_serp_task_error` failure-path coverage) | 4.5 Slice 6 | nice-to-have | open |
+| S6-15 | Replace the obsolete exit-2 expectation for stored-run SERP task failures with warning-and-continue coverage | 4.5 Slice 6 | nice-to-have | done |
 
 ---
 
@@ -604,7 +604,7 @@ None block slices 27–31 unless marked **required**.
 
 | ID | Fix | Phase | Priority | Status |
 | --- | --- | --- | --- | --- |
-| S5-20 | **Stored-run backfill re-fetches every page:** `backfill_textrazor_run()` calls `fetch_textrazor_entities_for_pages()` for all loaded pages even when `(target_keyword, url)` keys already exist in `endpoint=entities`; dedupe happens only at merge time (`refresh=False` skips writes). Re-running backfill on a complete run still burns TextRazor API quota. Before fetching, filter pages whose keys already exist in the entities partition unless `--refresh-textrazor` | 5 Slices 23–24 | nice-to-have | open |
+| S5-20 | **Stored-run backfill re-fetches every page:** fixed by filtering pages whose `(target_keyword, url)` keys already exist in the entities partition unless `--refresh-textrazor` | 5 Slices 23–24 | nice-to-have | done |
 | S5-21 | **`network_calls` semantics differ between paths:** brand-new textrazor-only runs record `["textrazor.entities"]` once; stored-run backfill appends `"textrazor.entities"` per keyword with responses, so multi-keyword runs can produce duplicate entries. Deduplicate when appending, or document that `network_calls` is append-only accounting, not a unique call list | 5 Slices 21, 24 | nice-to-have | open |
 | S5-22 | **Raw-lake merge logic lives in `cli.py`:** `merge_raw_response_records`, `merge_entity_raw_response_rows`, `load_raw_response_partition_rows`, and `rewrite_endpoint_partition` (~2.7k-line CLI module) are data-layer concerns from Slice 23. Move to something like `src/seo_rank/data/raw_responses.py` when touching this area again | 5 Slice 23 | nice-to-have | open |
 

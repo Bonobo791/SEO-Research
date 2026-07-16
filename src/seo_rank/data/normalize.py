@@ -17,6 +17,7 @@ from seo_rank.domain_blocklist import DomainBlocklist
 from seo_rank.dataforseo import (
     BACKLINKS_QUERY_DOFOLLOW,
     BACKLINKS_QUERY_SUMMARY,
+    cache_identity_url,
     DATAFORSEO_RESPONSE_SCHEMAS,
     DEFAULT_KEYWORD_LIMIT,
     backlinks_response_is_successful_empty,
@@ -1279,7 +1280,7 @@ def build_serp_items_frame(
                     "target_keyword": target_keyword,
                     "response_id": response_id,
                     "serp_item_id": stable_id(run_id, target_keyword, url, result["rank"]),
-                    "canonical_url_hash": stable_id(url),
+                    "canonical_url_hash": stable_id(cache_identity_url(url)),
                     "url": url,
                     "serp_rank": int(result["rank"]),
                     "title": str(result["title"]),
@@ -1287,7 +1288,14 @@ def build_serp_items_frame(
                     "schema_version": CURATED_SCHEMA_VERSION,
                 }
         )
-    return pl.DataFrame(rows)
+    if not rows:
+        return pl.DataFrame(
+            schema=CURATED_VALIDATION_RULES["serp_items"]["expected_schema"]
+        )
+    return pl.DataFrame(
+        rows,
+        schema=CURATED_VALIDATION_RULES["serp_items"]["expected_schema"],
+    )
 
 
 def build_backlinks_frame(
@@ -1400,7 +1408,7 @@ def build_onpage_signals_frame(
         if url is None:
             continue
         target_keyword = str(record["target_keyword"])
-        group_key = (target_keyword, url)
+        group_key = (target_keyword, cache_identity_url(url))
         if group_key in seen_keys:
             continue
         item = extract_onpage_instant_pages_item(body)
@@ -1443,7 +1451,7 @@ def build_pages_and_passages_frame(
         raw_html = str(page.get("raw_html", "")).strip()
         if not url or (not text and not raw_html):
             continue
-        canonical_url_hash = stable_id(url)
+        canonical_url_hash = stable_id(cache_identity_url(url))
         page_id = stable_id(run_id, target_keyword, url)
         if page_id in seen_page_ids:
             continue
@@ -1503,7 +1511,7 @@ def build_page_content_fields_frame(
         url = str(page.get("url", "")).strip()
         if not url:
             continue
-        canonical_url_hash = stable_id(url)
+        canonical_url_hash = stable_id(cache_identity_url(url))
         page_id = stable_id(run_id, target_keyword, url)
         field_records, _ = decode_content_parsing_items(body)
         for field_record in field_records:
@@ -1560,7 +1568,7 @@ def build_page_html_frame(
         raw_html = str(page.get("raw_html", "")).strip()
         if not url or not raw_html:
             continue
-        canonical_url_hash = stable_id(url)
+        canonical_url_hash = stable_id(cache_identity_url(url))
         page_id = stable_id(run_id, target_keyword, url)
         rows.append(
             {
@@ -1589,7 +1597,7 @@ def build_entities_frame(frame: pl.DataFrame, *, run_id: str) -> pl.DataFrame:
         target_keyword_id = stable_id(target_keyword)
         body = json.loads(bytes(record["response_body_bytes"]).decode("utf-8"))
         url = str(body.get("url", ""))
-        canonical_url_hash = stable_id(url)
+        canonical_url_hash = stable_id(cache_identity_url(url))
         for entity in normalize_entities(body, url=url):
             entity_row_id = stable_id(
                 run_id,
@@ -1646,7 +1654,7 @@ def build_textrazor_page_metrics_frame(
                 "target_keyword_id": target_keyword_id,
                 "target_keyword": target_keyword,
                 "response_id": response_id,
-                "canonical_url_hash": stable_id(url),
+                "canonical_url_hash": stable_id(cache_identity_url(url)),
                 "url": url,
                 "page_metrics_row_id": stable_id(run_id, target_keyword, url),
                 **metrics,
@@ -1976,7 +1984,7 @@ def _onpage_signals_row(
         "target_keyword": target_keyword,
         "response_id": response_id,
         "onpage_signal_id": stable_id(run_id, target_keyword, url),
-        "canonical_url_hash": stable_id(url),
+        "canonical_url_hash": stable_id(cache_identity_url(url)),
         "url": url,
         "onpage_score": float(score),
         "plain_text_word_count": _optional_mapping_number(content, "plain_text_word_count"),
@@ -2137,7 +2145,7 @@ def _summary_backlinks_row(
             "summary_response_id": summary_response_id,
             "dofollow_summary_response_id": dofollow_summary_response_id,
             "backlink_id": stable_id(run_id, target_keyword, url),
-            "canonical_url_hash": stable_id(url),
+            "canonical_url_hash": stable_id(cache_identity_url(url)),
             "url": url,
             "backlinks_count": _legacy_backlinks_count(summary_result),
             "referring_domains_count": None,
@@ -2180,7 +2188,7 @@ def _summary_backlinks_row(
         "summary_response_id": summary_response_id,
         "dofollow_summary_response_id": dofollow_summary_response_id,
         "backlink_id": stable_id(run_id, target_keyword, url),
-        "canonical_url_hash": stable_id(url),
+        "canonical_url_hash": stable_id(cache_identity_url(url)),
         "url": url,
         "backlinks_count": _required_backlink_metric(summary_result, "backlinks"),
         "referring_domains_count": _required_backlink_metric(

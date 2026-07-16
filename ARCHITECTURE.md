@@ -138,6 +138,14 @@ remain open.
   credentials before executing the minimal live provider smoke path.
 - **Provider HTTP clients (shipped):** standard-library DataForSEO and TextRazor
   request execution with injectable transports for offline tests.
+- **URL identity (shipped):** `cache_identity_url()` removes known click-tracking
+  query parameters (`utm_*`, `gclid`, `dclid`, `msclkid`, `fbclid`, `gbraid`,
+  `wbraid`, and `srsltid`) before cache keys, deduplication, stable URL hashes,
+  and mart joins are computed. The original URL is retained for reporting.
+- **DataForSEO task failures:** failed top-level or task-level responses are
+  retained in `raw_responses` and logged as warnings; the live run continues so
+  downstream stages can handle the resulting empty response. Transport and
+  configuration errors remain hard failures.
 - **Text pipeline (shipped, offline):** passage split (`text.py`); passage
   aggregation and page-level fixture similarity for BGE, Gemini Doc Retrieval,
   and Gemini Semantic Similarity (`similarity.py`).
@@ -211,6 +219,12 @@ current `run.json`, reuses existing raw responses and completed
 measurements, refreshes only missing work, and then re-materializes the
 downstream chain. Replay overlays CLI live-provider flags onto the stored
 config (`merge_stored_run_cli_overlay`); `--skip-textrazor` stays sticky and
+TextRazor-only backfill skips existing `(target_keyword, url)` entity rows unless
+`--refresh-textrazor` is set. Path-valued settings such as
+`domain_blocklist_path` are serialized as strings in `run.json`.
+Stored-run live-provider replay likewise reuses usable backlinks, page-text, and
+TextRazor responses, fetching only missing URL/variant work. Replacing page text
+invalidates the cached TextRazor response for that URL so it can be regenerated.
 suppresses TextRazor even when the saved run had it enabled. `run --stored-run --live-textrazor-only` backfills live
 TextRazor entities from stored `page_text` without DataForSEO HTTP (slice 24).
 When the effective replay config enables `--live-providers`, stored `page_text`
@@ -385,7 +399,8 @@ Derived from curated tables via `features.py`. Filter and select **before** join
 
 Built by `marts.py` when Phase 5 analysis needs a single panel. One row per
 `target_keyword × SERP URL`. Join curated and feature marts only on stable IDs:
-`run_id`, `target_keyword_id`, `canonical_url_hash`, `response_id`, `passage_id`.
+`run_id`, `target_keyword_id`, `canonical_url_hash`, `response_id`, `passage_id`;
+raw `url` is not a join key because tracking variants share one URL identity.
 
 ### Schema policy
 
@@ -397,6 +412,8 @@ Built by `marts.py` when Phase 5 analysis needs a single panel. One row per
 - **`run.json` is catalog-only** — table schemas, row counts per table, mapping
   from curated rows to source `response_id`s, and per-file checksums. No
   duplicate raw payloads in JSON.
+- Empty curated frames, including `serp_items`, use their declared validation
+  schema so empty partitions remain compatible with downstream writes.
 
 ### Write contract
 

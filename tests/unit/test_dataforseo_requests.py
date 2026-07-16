@@ -9,6 +9,7 @@ from seo_rank.dataforseo import (
     DataForSeoParseError,
     BACKLINKS_DOFOLLOW_FILTERS,
     BACKLINKS_QUERY_SUMMARY,
+    cache_identity_url,
     classify_page_text_response,
     response_has_crawl_status,
     build_backlinks_detail_request,
@@ -60,6 +61,19 @@ def test_response_has_crawl_status_ignores_other_statuses() -> None:
     response = {"tasks": [{"result": [{"crawl_status": "finished"}]}]}
 
     assert not response_has_crawl_status(response, "Page content is empty")
+
+
+def test_cache_identity_url_ignores_click_tracking_parameters() -> None:
+    cached = (
+        "https://example.com/service?"
+        "page=2&utm_source=google&srsltid=old&gclid=click"
+    )
+    fresh = "https://example.com/service?page=2&fbclid=click"
+
+    assert cache_identity_url(cached) == cache_identity_url(fresh)
+    assert cache_identity_url(cached) != cache_identity_url(
+        "https://example.com/service?page=3"
+    )
 
 
 def test_build_keyword_expansion_request_uses_dataforseo_live_endpoint() -> None:
@@ -460,20 +474,32 @@ def test_validate_dataforseo_response_rejects_backlinks_summary_missing_backlink
     assert exc_info.value.path == "tasks[0].result[0].backlinks"
 
 
-def test_raise_for_failed_dataforseo_tasks_surfaces_top_level_status_message() -> None:
+def test_raise_for_failed_dataforseo_tasks_warns_on_top_level_status_message(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import logging
+
     response = {
         "status_code": 40001,
         "status_message": "Top-level failure",
         "tasks": [],
     }
 
-    with pytest.raises(DataForSeoClientError, match="Top-level failure") as exc_info:
+    with caplog.at_level(logging.WARNING, logger="seo_rank.cli"):
         raise_for_failed_dataforseo_tasks("backlinks_summary", response)
 
-    assert "status_code=40001" in str(exc_info.value)
+    assert caplog.records
+    assert (
+        "DataForSEO backlinks_summary response failed with status_code=40001: Top-level failure"
+        in caplog.records[0].getMessage()
+    )
 
 
-def test_raise_for_failed_dataforseo_tasks_surfaces_task_level_status_message() -> None:
+def test_raise_for_failed_dataforseo_tasks_warns_on_task_level_status_message(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import logging
+
     response = {
         "status_code": 20000,
         "tasks": [
@@ -484,14 +510,20 @@ def test_raise_for_failed_dataforseo_tasks_surfaces_task_level_status_message() 
         ],
     }
 
-    with pytest.raises(DataForSeoClientError, match="Task-level failure") as exc_info:
+    with caplog.at_level(logging.WARNING, logger="seo_rank.cli"):
         raise_for_failed_dataforseo_tasks(
             "backlinks_summary",
             response,
             target_keyword="technical seo",
         )
 
-    assert "tasks[0]" in str(exc_info.value)
+    assert caplog.records
+    message = caplog.records[0].getMessage()
+    assert "DataForSEO backlinks_summary task failed" in message
+    assert "target_keyword='technical seo'" in message
+    assert "tasks[0]" in message
+    assert "status_code=40002" in message
+    assert "Task-level failure" in message
 
 
 def test_find_skippable_onpage_task_status_returns_code_for_target_timeout() -> None:
