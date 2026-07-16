@@ -894,12 +894,12 @@ def test_serialized_config_stringifies_domain_blocklist_path(tmp_path: Path) -> 
         model_name="fixture-similarity-v1",
         dry_run=False,
         skip_textrazor=False,
-        domain_blocklist_path=tmp_path / "domain_blocklist.txt",
+        domain_blocklist_path=tmp_path / "blocklist.txt",
     )
 
     serialized = serialized_config(config)
 
-    assert serialized["domain_blocklist_path"] == str(tmp_path / "domain_blocklist.txt")
+    assert serialized["domain_blocklist_path"] == str(tmp_path / "blocklist.txt")
     assert serialized["output_dir"] == str(tmp_path / "artifacts")
 
 
