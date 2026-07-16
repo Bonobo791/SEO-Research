@@ -73,8 +73,14 @@ from seo_rank.bge_reranker import (
     load_bge_reranker,
 )
 from seo_rank.gemini_embeddings import (
+    GEMINI_EMBEDDING_DIMENSIONALITY,
+    GEMINI_EMBEDDING_MODEL,
     GeminiEmbeddingError,
+    GeminiEmbeddingIdentity,
+    GeminiEmbeddingRequest,
     compute_gemini_page_similarity_scores,
+    embedding_values_from_payload,
+    gemini_embedding_identity,
 )
 from seo_rank.similarity import (
     compute_page_similarity_features,
@@ -107,6 +113,7 @@ DATAFORSEO_LOCATION_CODES = {
 }
 RAW_RESPONSE_SCHEMA_VERSION = "raw_responses.v1"
 RUN_CATALOG_SCHEMA_VERSION = "run_catalog.v1"
+GEMINI_EMBEDDINGS_ENDPOINT = "gemini_embeddings"
 COMBINED_ANALYSIS_REQUIRED_TABLES = ("analysis_mart",)
 COMBINED_ANALYSIS_OPTIONAL_TABLES = (
     "textrazor_page_metrics",
@@ -623,7 +630,17 @@ def write_live_artifacts(
     )
     if progress is not None:
         progress.log("run: writing artifacts")
-    write_artifacts(config.output_dir, payload, progress=progress)
+    raw_response_records = merge_replayed_raw_response_records(
+        load_raw_response_records(config.output_dir),
+        build_raw_response_records(config.output_dir.name, payload),
+        refresh_keyword_expansion=False,
+    )
+    write_artifacts(
+        config.output_dir,
+        payload,
+        progress=progress,
+        raw_response_records=raw_response_records,
+    )
     materialize_run_tree(
         config.output_dir,
         progress=progress,
@@ -810,7 +827,6 @@ def expand_stored_run(
             env=os.environ,
             progress=progress,
         )
-
     requested_keyword_limit = base_config.keyword_limit
     network_calls = list(
         stored_payload.get("network_calls", [])
@@ -885,6 +901,11 @@ def expand_stored_run(
     )
     stored_keyword_results = load_stored_keyword_results_by_keyword(stored_payload)
     raw_response_records = load_raw_response_records(stored_run)
+    gemini_responses = (
+        load_gemini_embedding_responses(raw_response_records)
+        if base_config.live_gemini
+        else {}
+    )
     stored_entities_present = any(
         record.get("endpoint") == "entities" for record in raw_response_records
     )
@@ -906,8 +927,9 @@ def expand_stored_run(
         keyword_key = keyword.casefold()
         raw_keyword_records = raw_response_index.get(keyword_key, {})
         stored_keyword_result = stored_keyword_results.get(keyword_key)
-        if keyword in keywords_to_refresh:
-            if base_config.live_providers:
+        pending_gemini_records: list[dict[str, object]] = []
+        try:
+            if keyword in keywords_to_refresh and base_config.live_providers:
                 assert live_context is not None
                 keyword_result = build_live_keyword_result(
                     base_config,
@@ -925,27 +947,29 @@ def expand_stored_run(
                     raw_keyword_records=raw_keyword_records,
                     stored_keyword_result=stored_keyword_result,
                     minimum_organic_results=base_config.depth,
+                    gemini_responses=gemini_responses,
+                    pending_gemini_records=pending_gemini_records,
                 )
-            else:
+            elif keyword in keywords_to_refresh:
                 keyword_result = build_offline_keyword_result(
                     base_config,
                     target_keyword=keyword,
                     progress=progress,
                 )
-            resolved_keyword_results.append(keyword_result)
-            if progress is not None:
-                progress.keyword_step(index, len(target_keywords), keyword, "done")
-            continue
-
-        keyword_result = build_resumed_keyword_result(
-            base_config,
-            target_keyword=keyword,
-            stored_keyword_result=stored_keyword_result,
-            raw_keyword_records=raw_keyword_records,
-            live_context=live_context,
-            network_calls=network_calls,
-            progress=progress,
-        )
+            else:
+                keyword_result = build_resumed_keyword_result(
+                    base_config,
+                    target_keyword=keyword,
+                    stored_keyword_result=stored_keyword_result,
+                    raw_keyword_records=raw_keyword_records,
+                    live_context=live_context,
+                    network_calls=network_calls,
+                    progress=progress,
+                    gemini_responses=gemini_responses,
+                    pending_gemini_records=pending_gemini_records,
+                )
+        finally:
+            persist_gemini_raw_responses(stored_run, pending_gemini_records)
         resolved_keyword_results.append(keyword_result)
         if progress is not None:
             progress.keyword_step(index, len(target_keywords), keyword, "done")
@@ -980,6 +1004,7 @@ def expand_stored_run(
     merged_raw_provider_data["dataforseo"] = merged_dataforseo
     merged_payload["raw_provider_data"] = merged_raw_provider_data
     rebuilt_raw_response_records = build_raw_response_records(run_id, merged_payload)
+    raw_response_records = load_raw_response_records(stored_run)
     raw_response_records = merge_replayed_raw_response_records(
         raw_response_records,
         rebuilt_raw_response_records,
@@ -1189,6 +1214,12 @@ def raw_response_record_identity(record: Mapping[str, object]) -> tuple[str, str
     if endpoint in {"keyword_expansion", "serp"}:
         return endpoint, target_keyword, ""
     metadata = json.loads(str(record.get("request_metadata_json", "{}")))
+    if endpoint == GEMINI_EMBEDDINGS_ENDPOINT:
+        identity = _gemini_identity_from_metadata(
+            metadata,
+            target_keyword=str(record.get("target_keyword") or "") or None,
+        )
+        return endpoint, target_keyword, json.dumps(identity, separators=(",", ":"))
     url = metadata.get("url")
     if not isinstance(url, str):
         response_body_bytes = record.get("response_body_bytes")
@@ -1199,6 +1230,71 @@ def raw_response_record_identity(record: Mapping[str, object]) -> tuple[str, str
     if isinstance(url, str) and url.strip():
         return endpoint, target_keyword, cache_identity_url(url.strip())
     return endpoint, target_keyword, str(record.get("response_id", ""))
+
+
+def _gemini_identity_from_metadata(
+    metadata: Mapping[str, object],
+    *,
+    target_keyword: str | None,
+) -> GeminiEmbeddingIdentity:
+    role = metadata.get("role")
+    input_sha256 = metadata.get("input_sha256")
+    model = metadata.get("model")
+    output_dimensionality = metadata.get("output_dimensionality")
+    url = metadata.get("url")
+    if not isinstance(role, str) or not role:
+        raise GeminiEmbeddingError("Stored Gemini response is missing role metadata")
+    if not isinstance(input_sha256, str) or not input_sha256:
+        raise GeminiEmbeddingError("Stored Gemini response is missing input_sha256 metadata")
+    if not isinstance(model, str) or not model:
+        raise GeminiEmbeddingError("Stored Gemini response is missing model metadata")
+    if not isinstance(output_dimensionality, int):
+        raise GeminiEmbeddingError(
+            "Stored Gemini response is missing output_dimensionality metadata"
+        )
+    if url is not None and not isinstance(url, str):
+        raise GeminiEmbeddingError("Stored Gemini response contains invalid URL metadata")
+    return gemini_embedding_identity(
+        role=role,
+        target_keyword=target_keyword,
+        url=url,
+        input_sha256=input_sha256,
+        model=model,
+        output_dimensionality=output_dimensionality,
+    )
+
+
+def load_gemini_embedding_responses(
+    records: Sequence[Mapping[str, object]],
+) -> dict[GeminiEmbeddingIdentity, Mapping[str, object]]:
+    responses: dict[GeminiEmbeddingIdentity, Mapping[str, object]] = {}
+    gemini_records = sorted(
+        (
+            record
+            for record in records
+            if record.get("endpoint") == GEMINI_EMBEDDINGS_ENDPOINT
+        ),
+        key=lambda record: str(record.get("timestamp", "")),
+    )
+    for record in gemini_records:
+        try:
+            normalized = validate_raw_response_record(
+                record,
+                endpoint=GEMINI_EMBEDDINGS_ENDPOINT,
+            )
+            metadata = json.loads(str(normalized["request_metadata_json"]))
+            payload = json.loads(bytes(normalized["response_body_bytes"]).decode("utf-8"))
+            if not isinstance(metadata, Mapping) or not isinstance(payload, Mapping):
+                raise ValueError("Gemini raw response is not a JSON object")
+            embedding_values_from_payload(payload)
+            identity = _gemini_identity_from_metadata(
+                metadata,
+                target_keyword=str(normalized.get("target_keyword") or "") or None,
+            )
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+            raise GeminiEmbeddingError(f"Stored Gemini response is invalid: {error}") from error
+        responses[identity] = dict(payload)
+    return responses
 
 
 def persist_raw_response_checkpoint(
@@ -1638,6 +1734,8 @@ def build_resumed_keyword_result(
     live_context: Mapping[str, object] | None,
     network_calls: list[str],
     progress: RunProgress | None = None,
+    gemini_responses: dict[GeminiEmbeddingIdentity, Mapping[str, object]] | None = None,
+    pending_gemini_records: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     blocklist = DomainBlocklist.load(config.domain_blocklist_path)
     serp_records = raw_keyword_records.get("serp", [])
@@ -1671,6 +1769,8 @@ def build_resumed_keyword_result(
                 raw_keyword_records=raw_keyword_records,
                 stored_keyword_result=stored_keyword_result,
                 minimum_organic_results=config.depth,
+                gemini_responses=gemini_responses,
+                pending_gemini_records=pending_gemini_records,
             )
         return build_offline_keyword_result(
             config,
@@ -1969,6 +2069,9 @@ def build_resumed_keyword_result(
         parsed_pages,
         config=config,
         live_context=live_context,
+        gemini_responses=gemini_responses,
+        pending_gemini_records=pending_gemini_records,
+        network_calls=network_calls,
     )
     if stored_page_similarity:
         complete_scores = merge_page_similarity_scores(
@@ -2965,6 +3068,16 @@ def build_live_payload(
         progress.log("run: starting live")
     live_context = prepare_live_run_context(config, env=env, progress=progress)
     network_calls: list[str] = []
+    gemini_responses = (
+        load_gemini_embedding_responses(
+            load_raw_response_partition_rows(
+                config.output_dir,
+                GEMINI_EMBEDDINGS_ENDPOINT,
+            )
+        )
+        if config.live_gemini
+        else {}
+    )
 
     if progress is not None:
         progress.log("run: keyword expansion request")
@@ -3006,8 +3119,9 @@ def build_live_payload(
         progress.log(f"run: expanded {len(keywords)} keywords")
     keyword_results = []
     for index, keyword in enumerate(keywords, start=1):
-        keyword_results.append(
-            build_live_keyword_result(
+        pending_gemini_records: list[dict[str, object]] = []
+        try:
+            keyword_result = build_live_keyword_result(
                 config,
                 target_keyword=keyword,
                 credentials=live_context["credentials"],
@@ -3020,8 +3134,15 @@ def build_live_payload(
                 textrazor_transport=textrazor_transport,
                 network_calls=network_calls,
                 progress=progress,
+                gemini_responses=gemini_responses,
+                pending_gemini_records=pending_gemini_records,
             )
-        )
+        finally:
+            persist_gemini_raw_responses(
+                config.output_dir,
+                pending_gemini_records,
+            )
+        keyword_results.append(keyword_result)
         if progress is not None:
             progress.keyword_step(index, len(keywords), keyword, "done")
 
@@ -3088,6 +3209,8 @@ def build_live_keyword_result(
     raw_keyword_records: Mapping[str, Sequence[Mapping[str, object]]] | None = None,
     stored_keyword_result: Mapping[str, object] | None = None,
     minimum_organic_results: int | None = None,
+    gemini_responses: dict[GeminiEmbeddingIdentity, Mapping[str, object]] | None = None,
+    pending_gemini_records: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     blocklist = DomainBlocklist.load(config.domain_blocklist_path)
     if progress is not None:
@@ -3139,10 +3262,6 @@ def build_live_keyword_result(
             f"{len(serp_results)} remained after domain blocklist filtering; "
             "continuing with available results"
         )
-    serp_titles_by_url = {
-        str(result["url"]): str(result["title"]) for result in serp_results
-    }
-
     serp_urls = _unique_serp_urls(serp_results)
     backlinks_responses: list[dict[str, object]] = []
     if config.live_backlinks:
@@ -3295,13 +3414,7 @@ def build_live_keyword_result(
         for page_text in parsed_pages
         for passage in normalize_page_text(page_text)
     ]
-    gemini_pages = [
-        {
-            **page_text,
-            "title": serp_titles_by_url.get(page_text["url"], page_text.get("title", "")),
-        }
-        for page_text in parsed_pages
-    ]
+    gemini_pages = parsed_pages
     stored_gemini_scores: list[dict[str, object]] = []
     if stored_keyword_result is not None:
         stored_scores = stored_keyword_result.get("page_similarity", [])
@@ -3344,10 +3457,32 @@ def build_live_keyword_result(
     if gemini_api_key is not None and gemini_pages_to_fetch:
         if progress is not None:
             progress.keyword_log(target_keyword, "gemini embeddings")
+        if gemini_responses is None:
+            gemini_responses = {}
+        response_count_before = len(gemini_responses)
+
+        def record_gemini_response(
+            request: GeminiEmbeddingRequest,
+            response: Mapping[str, object],
+        ) -> None:
+            if pending_gemini_records is None:
+                return
+            pending_gemini_records.append(
+                build_gemini_raw_response_record(
+                    config.output_dir.name,
+                    request_metadata=request.metadata(),
+                    response=response,
+                    target_keyword=request.target_keyword,
+                    recorded_at=datetime.now(UTC).isoformat(),
+                )
+            )
+
         similarity_scores = compute_gemini_page_similarity_scores(
             target_keyword,
             gemini_pages_to_fetch,
             api_key=gemini_api_key,
+            stored_responses=gemini_responses,
+            on_embedding_response=record_gemini_response,
             on_page_progress=(
                 None
                 if progress is None
@@ -3357,6 +3492,8 @@ def build_live_keyword_result(
                 )
             ),
         )
+        if len(gemini_responses) > response_count_before:
+            network_calls.append("genai.embed_content")
     else:
         if progress is not None:
             progress.keyword_log(target_keyword, "similarity")
@@ -3366,8 +3503,6 @@ def build_live_keyword_result(
             similarity_scores,
             stored_gemini_scores,
         )
-    if gemini_api_key is not None and gemini_pages_to_fetch:
-        network_calls.append("genai.embed_content")
     if live_bge_enabled:
         if progress is not None:
             progress.keyword_log(target_keyword, "bge scoring")
@@ -4044,16 +4179,23 @@ def complete_page_similarity_scores(
     *,
     config: RunConfig,
     live_context: Mapping[str, object] | None = None,
+    gemini_responses: dict[GeminiEmbeddingIdentity, Mapping[str, object]] | None = None,
+    pending_gemini_records: list[dict[str, object]] | None = None,
+    network_calls: list[str] | None = None,
 ) -> list[dict[str, object]]:
     computed_scores = compute_page_similarity_scores(keyword, parsed_pages)
     if config.live_providers and live_context is not None:
         if config.live_gemini and live_context.get("gemini_api_key"):
             computed_scores = merge_page_similarity_scores(
                 computed_scores,
-                compute_gemini_page_similarity_scores(
-                    keyword,
-                    parsed_pages,
+                _compute_live_gemini_scores(
+                    keyword=keyword,
+                    parsed_pages=parsed_pages,
                     api_key=str(live_context["gemini_api_key"]),
+                    run_id=config.output_dir.name,
+                    gemini_responses=gemini_responses,
+                    pending_gemini_records=pending_gemini_records,
+                    network_calls=network_calls,
                 ),
             )
         if config.live_bge and live_context.get("bge_reranker") is not None:
@@ -4066,6 +4208,47 @@ def complete_page_similarity_scores(
                 ),
             )
     return computed_scores
+
+
+def _compute_live_gemini_scores(
+    *,
+    keyword: str,
+    parsed_pages: Sequence[Mapping[str, object]],
+    api_key: str,
+    run_id: str,
+    gemini_responses: dict[GeminiEmbeddingIdentity, Mapping[str, object]] | None,
+    pending_gemini_records: list[dict[str, object]] | None,
+    network_calls: list[str] | None,
+) -> list[dict[str, object]]:
+    responses = gemini_responses if gemini_responses is not None else {}
+    response_count_before = len(responses)
+
+    def record_response(
+        request: GeminiEmbeddingRequest,
+        response: Mapping[str, object],
+    ) -> None:
+        if pending_gemini_records is None:
+            return
+        pending_gemini_records.append(
+            build_gemini_raw_response_record(
+                run_id,
+                request_metadata=request.metadata(),
+                response=response,
+                target_keyword=request.target_keyword,
+                recorded_at=datetime.now(UTC).isoformat(),
+            )
+        )
+
+    scores = compute_gemini_page_similarity_scores(
+        keyword,
+        [dict(page) for page in parsed_pages],
+        api_key=api_key,
+        stored_responses=responses,
+        on_embedding_response=record_response,
+    )
+    if network_calls is not None and len(responses) > response_count_before:
+        network_calls.append("genai.embed_content")
+    return scores
 
 
 def build_keyword_result_from_responses(
@@ -4575,6 +4758,73 @@ def build_raw_response_record(
         "sha256": hashlib.sha256(response_body_bytes).hexdigest(),
         "schema_version": RAW_RESPONSE_SCHEMA_VERSION,
     }
+
+
+def build_gemini_raw_response_record(
+    run_id: str,
+    *,
+    request_metadata: Mapping[str, object | None],
+    response: Mapping[str, object],
+    target_keyword: str | None,
+    recorded_at: str,
+) -> dict[str, object]:
+    record = build_raw_response_record(
+        run_id,
+        endpoint=GEMINI_EMBEDDINGS_ENDPOINT,
+        provider="gemini",
+        response=response,
+        target_keyword=target_keyword,
+        request_metadata=request_metadata,
+        recorded_at=recorded_at,
+    )
+    identity = _gemini_identity_from_metadata(
+        request_metadata,
+        target_keyword=target_keyword,
+    )
+    record["response_id"] = hashlib.sha256(
+        (
+            f"{run_id}|{GEMINI_EMBEDDINGS_ENDPOINT}|"
+            f"{json.dumps(identity, separators=(',', ':'))}|{record['sha256']}"
+        ).encode("utf-8")
+    ).hexdigest()[:32]
+    return record
+
+
+def persist_gemini_raw_responses(
+    run_dir: Path,
+    records: Sequence[Mapping[str, object]],
+) -> None:
+    if not records:
+        return
+    try:
+        merged = {
+            raw_response_record_identity(row): validate_raw_response_record(
+                row,
+                endpoint=GEMINI_EMBEDDINGS_ENDPOINT,
+            )
+            for row in load_raw_response_partition_rows(
+                run_dir,
+                GEMINI_EMBEDDINGS_ENDPOINT,
+            )
+        }
+        for record in records:
+            normalized = validate_raw_response_record(
+                record,
+                endpoint=GEMINI_EMBEDDINGS_ENDPOINT,
+            )
+            merged[raw_response_record_identity(normalized)] = normalized
+        rewrite_endpoint_partition(
+            run_dir,
+            GEMINI_EMBEDDINGS_ENDPOINT,
+            list(merged.values()),
+        )
+        refresh_run_json_raw_response_catalog(run_dir)
+        logging.getLogger("seo_rank.cli").debug(
+            "persisted Gemini raw responses rows=%d",
+            len(records),
+        )
+    except STORAGE_COMMAND_EXCEPTIONS as error:
+        raise CliCommandError(str(error)) from error
 
 
 def serialized_response_bytes(response: Mapping[str, object]) -> bytes:

@@ -35,13 +35,20 @@ def test_compute_gemini_page_similarity_scores_formats_live_inputs() -> None:
         prepare_semantic_input("Technical SEO helps crawlers find pages."): (0.0, 1.0),
     }
 
-    def embed_content(
+    class FakeEmbeddingResponse:
+        def __init__(self, values: tuple[float, ...]) -> None:
+            self.values = values
+
+        def to_json_dict(self) -> dict[str, object]:
+            return {"embeddings": [{"values": list(self.values)}]}
+
+    def embed_response(
         content: str,
         *,
         api_key: str,
         model: str,
         output_dimensionality: int,
-    ) -> tuple[float, ...]:
+    ) -> FakeEmbeddingResponse:
         calls.append(
             {
                 "content": content,
@@ -50,13 +57,13 @@ def test_compute_gemini_page_similarity_scores_formats_live_inputs() -> None:
                 "output_dimensionality": output_dimensionality,
             }
         )
-        return vectors[content]
+        return FakeEmbeddingResponse(vectors[content])
 
     scores = compute_gemini_page_similarity_scores(
         "technical seo",
         pages,
         api_key="gemini-secret",
-        embed_content=embed_content,
+        embed_response=embed_response,
     )
 
     assert calls == [

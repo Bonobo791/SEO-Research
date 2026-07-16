@@ -323,14 +323,14 @@ runs/{run_id}/
 
 ### Layer 1 — `raw_responses` (authoritative)
 
-One row per DataForSEO HTTP response. This layer is the system of record for
+One row per provider API response. This layer is the system of record for
 every downloaded payload.
 
 | Column (conceptual) | Role |
 |---------------------|------|
 | `response_id` | Stable UUID for this HTTP response within the run |
-| `endpoint` | Low-cardinality partition key: `keyword_expansion`, `serp`, `page_text`, `entities`, `backlinks_summary`, `backlinks_dofollow_summary` (legacy `backlinks` read-compat on normalize) |
-| `provider` | `dataforseo` or `textrazor` (entities partition may be TextRazor-only) |
+| `endpoint` | Low-cardinality partition key: `keyword_expansion`, `serp`, `page_text`, `entities`, `backlinks_summary`, `backlinks_dofollow_summary`, `gemini_embeddings` (legacy `backlinks` read-compat on normalize) |
+| `provider` | `dataforseo`, `textrazor`, or `gemini` |
 | `task_id` | DataForSEO task identifier when present |
 | `timestamp` | Response receipt time (UTC) |
 | Request metadata | Method, URL, headers/body hash as needed for audit |
@@ -572,6 +572,13 @@ and env gates are enabled. Offline tests and `--dry-run` keep fixtures.
 | Gemini Doc Retrieval | Asymmetric **search result**: `task: search result \| query: {keyword}` vs `title: {title\|none} \| text: {body}` → `gemini_doc_retrieval` |
 | Gemini Semantic Similarity | Symmetric **sentence similarity**: `task: sentence similarity \| query: {text}` on keyword and page → `gemini_semantic_similarity` |
 | Vectors | Cosine on API embeddings; optional `output_dimensionality`; truncation handled by Gemini |
+
+Every successful Gemini query and page embedding response is serialized from
+`EmbedContentResponse.to_json_dict()` into
+`raw_responses/endpoint=gemini_embeddings`. Query responses are keyed by
+keyword; page responses are keyed by canonical URL plus exact prepared-input
+hash, role, model, and dimensionality so live and stored runs reuse matching
+page vectors across keywords without reusing keyword-specific scores.
 
 ### BGE (local cross-encoder)
 

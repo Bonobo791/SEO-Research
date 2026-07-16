@@ -98,3 +98,4 @@ matebiz.com  # keyword="seo company in columbus" reason=page_text-crawl-status-p
 webfx.com  # keyword="columbus seo company" reason=page_text-crawl-status-page-content-is-empty
 digitalpiloto.com  # keyword="columbus seo company" reason=page_text-crawl-status-page-content-is-empty
 yelp.com  # keyword="seo companies columbus ohio" reason=onpage_instant_pages-http-403
+columbuswebseo.com  # keyword="columbus seo" reason=page_text-50402

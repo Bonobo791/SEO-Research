@@ -21,6 +21,7 @@ from seo_rank.dataforseo import fixture_serp_response
 from seo_rank.dataforseo import extract_response_url
 from seo_rank.dataforseo import onpage_instant_pages_response_is_usable
 from seo_rank.domain_blocklist import DomainBlocklist
+from seo_rank.gemini_embeddings import GeminiEmbeddingRequest
 from seo_rank.cli import RAW_RESPONSE_SCHEMA
 from seo_rank.cli import build_raw_response_record
 from seo_rank.cli import build_live_payload
@@ -6715,17 +6716,25 @@ def test_run_live_gemini_uses_live_gemini_page_scores(
         pages: list[dict[str, str]],
         *,
         api_key: str,
-        embed_content=None,
         on_page_progress=None,
+        stored_responses=None,
+        on_embedding_response=None,
     ) -> list[dict[str, object]]:
         gemini_calls.append(
             {
                 "keyword": keyword,
                 "pages": pages,
                 "api_key": api_key,
-                "embed_content": embed_content,
             }
         )
+        request = GeminiEmbeddingRequest(
+            role="retrieval_query",
+            content="prepared query",
+            target_keyword=keyword,
+        )
+        response = {"embeddings": [{"values": [1.0, 0.0]}]}
+        stored_responses[request.identity()] = response
+        on_embedding_response(request, response)
         return [
             {
                 "url": "https://example.com/live",
@@ -6769,12 +6778,11 @@ def test_run_live_gemini_uses_live_gemini_page_scores(
             "pages": [
                 {
                     "url": "https://example.com/live",
-                    "title": "SERP Result",
+                    "title": "Parsed Page",
                     "text": "Technical SEO helps crawlers find pages.",
                 }
             ],
             "api_key": "gemini-secret",
-            "embed_content": None,
         }
     ]
 

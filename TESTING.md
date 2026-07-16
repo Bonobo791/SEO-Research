@@ -87,6 +87,7 @@ placeholders only.
 | `test_env.py` | `.env` discovery, parsing, and override of shell exports |
 | `test_bge_reranker.py` | Live BGE GPU gate, pinned model loading, tokenizer compatibility shim, and batched score shaping |
 | `test_gemini_embeddings.py` | Live Gemini prompt formatting, model args, and score shaping with injected embeddings |
+| `test_gemini_raw_responses.py` | Gemini SDK-response persistence in authoritative raw Parquet, exact-input identities, fresh cross-keyword page-vector reuse, stored-run reuse, and catalog refresh |
 | `test_passage_normalization.py` | Passage split, short-text filter |
 | `test_similarity_features.py` | Fixture passage aggregation plus BGE, Gemini Doc Retrieval, and Gemini Semantic Similarity page scoring |
 | `test_analysis_gemini_nwh_similarity.py` | Analysis script block scoring with BGE, Gemini document relevance, Gemini semantic similarity, extended TextRazor summaries, and provider error handling |
