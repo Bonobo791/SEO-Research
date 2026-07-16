@@ -176,6 +176,16 @@ def test_execute_dataforseo_request_logs_response_metadata(
     assert "task_status_codes=[40205]" in caplog.text
     assert "Duplicate task limit exceeded." in caplog.text
     assert "result_counts=[0]" in caplog.text
+    assert "response={'status_code': 20000" not in caplog.text
+
+    caplog.clear()
+    with caplog.at_level(logging.DEBUG, logger="seo_rank.dataforseo"):
+        execute_dataforseo_request(
+            build_page_text_request("https://example.com/technical-seo/1"),
+            credentials=DataForSeoCredentials(login="user", password="pass"),
+            transport=lambda **_: response,
+        )
+
     assert "response={'status_code': 20000" in caplog.text
 
 

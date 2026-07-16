@@ -175,8 +175,8 @@ def test_fetch_textrazor_entities_for_pages_dedupes_requests_and_preserves_raw_s
 
 
 def test_fetch_textrazor_entities_for_pages_skips_blocklisted_domains(tmp_path) -> None:
-    blocklist_path = tmp_path / "domain_blocklist.txt"
-    blocklist_path.write_text("blocked.example\n", encoding="utf-8")
+    blocklist_path = tmp_path / "blocklist.txt"
+    blocklist_path.write_text("example.com\n", encoding="utf-8")
     requested_texts: list[str] = []
 
     def transport(*, body: bytes, **_: object) -> dict[str, object]:
@@ -187,12 +187,12 @@ def test_fetch_textrazor_entities_for_pages_skips_blocklisted_domains(tmp_path) 
         [
             {
                 "target_keyword": "Technical SEO",
-                "url": "https://blocked.example/a",
+                "url": "https://example.com/a",
                 "text": "Blocked",
             },
             {
                 "target_keyword": "Technical SEO",
-                "url": "https://sub.blocked.example/b",
+                "url": "https://sub.example.com/b",
                 "text": "Also blocked",
             },
             {

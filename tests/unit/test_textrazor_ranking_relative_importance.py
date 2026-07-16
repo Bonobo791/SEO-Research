@@ -77,11 +77,11 @@ def test_ranking_importance_factor_columns_maps_registry_groups() -> None:
     groups = ranking_importance_factor_columns(spec)
 
     assert tuple(groups) == RANKING_IMPORTANCE_GROUP_ORDER
-    assert "bge_normalized_score" in groups["similarity"]
-    assert "textrazor_entity_confidence_score" in groups["textrazor"]
-    assert "backlinks_count" in groups["backlinks"]
+    assert "bge_normalized_score" in groups["relevance"]
+    assert "textrazor_entity_confidence_score" in groups["relevance"]
+    assert "backlinks_count" in groups["authority"]
     assert "onpage_score" in groups["content"]
-    assert groups["metadata_lengths"] == ("title_length", "description_length")
+    assert groups["metadata_presentation"][:2] == ("title_length", "description_length")
     assert "time_to_first_byte_ms" not in groups["performance"]
     assert "title_too_long" not in groups["content"]
 
@@ -92,53 +92,91 @@ def test_ranking_importance_factor_columns_can_skip_backlinks() -> None:
         include_backlinks=False,
     )
 
-    assert groups["backlinks"] == ()
+    assert groups["authority"] == ()
 
 
-def test_ranking_importance_factor_columns_decomposes_onpage_signals() -> None:
+def test_ranking_importance_factor_columns_uses_seo_concept_groups() -> None:
     groups = ranking_importance_factor_columns(load_analysis_spec())
 
     assert RANKING_IMPORTANCE_GROUP_ORDER == (
-        "similarity",
-        "textrazor",
-        "backlinks",
-        "metadata_lengths",
-        "performance",
-        "crawl_architecture",
-        "structured_markup",
-        "document_structure",
-        "quality_flags",
-        "resource_footprint",
-        "presentation_metadata",
-        "delivery_configuration",
-        "legacy_embedding",
+        "relevance",
         "content",
+        "authority",
+        "technical",
+        "performance",
+        "resources",
+        "metadata_presentation",
     )
-    assert groups["crawl_architecture"] == (
-        "is_redirect",
-        "follow",
-        "inbound_links_count",
-        "click_depth",
-        "seo_friendly_url",
+    assert groups["relevance"] == (
+        "bge_normalized_score",
+        "gemini_doc_retrieval_normalized_score",
+        "gemini_semantic_similarity_normalized_score",
+        "textrazor_entity_confidence_score",
+        "textrazor_entity_relevance_score",
+        "textrazor_topic_score",
+        "textrazor_category_score",
+        "textrazor_classifier_score",
+        "textrazor_entailment_score",
+        "textrazor_entailment_prior",
+        "textrazor_entailment_context",
     )
-    assert groups["structured_markup"] == (
-        "has_valid_structured_data",
-        "has_micromarkup",
-        "has_micromarkup_errors",
-    )
-    assert groups["document_structure"] == (
+    assert groups["content"] == (
+        "textrazor_word_count",
+        "textrazor_grammar_count",
+        "textrazor_sense_count",
+        "textrazor_spelling_count",
+        "textrazor_relation_count",
+        "textrazor_property_count",
+        "textrazor_noun_phrase_count",
+        "onpage_score",
+        "plain_text_word_count",
+        "plain_text_rate",
+        "flesch_kincaid_readability_index",
+        "coleman_liau_readability_index",
+        "smog_readability_index",
+        "dale_chall_readability_index",
+        "description_to_content_consistency",
+        "title_to_content_consistency",
+        "meta_keywords_to_content_consistency",
         "h1_count",
         "h2_count",
         "h3_count",
         "high_content_rate",
         "high_character_count",
-    )
-    assert groups["quality_flags"] == (
         "duplicate_meta_tags_count",
         "duplicate_content",
         "lorem_ipsum",
     )
-    assert groups["resource_footprint"] == (
+    assert groups["authority"] == (
+        "backlinks_count",
+        "referring_domains_count",
+        "dofollow_backlinks_count",
+    )
+    assert groups["technical"] == (
+        "is_redirect",
+        "follow",
+        "inbound_links_count",
+        "click_depth",
+        "seo_friendly_url",
+        "has_valid_structured_data",
+        "has_micromarkup",
+        "has_micromarkup_errors",
+        "flash",
+        "frame",
+    )
+    assert groups["performance"] == (
+        "connection_time_ms",
+        "time_to_secure_connection_ms",
+        "request_sent_time_ms",
+        "download_time_ms",
+        "duration_time_ms",
+        "fetch_end_ms",
+        "dom_complete_ms",
+        "time_to_interactive_ms",
+        "cache_control_cachable",
+        "cache_control_ttl",
+    )
+    assert groups["resources"] == (
         "images_count",
         "images_size",
         "scripts_count",
@@ -147,17 +185,16 @@ def test_ranking_importance_factor_columns_decomposes_onpage_signals() -> None:
         "small_page_size",
         "resource_warnings_count",
     )
-    assert groups["presentation_metadata"] == (
+    assert groups["metadata_presentation"] == (
+        "title_length",
+        "description_length",
         "has_og_tags",
         "has_twitter_tags",
         "no_favicon",
         "no_image_title",
     )
-    assert groups["delivery_configuration"] == (
-        "cache_control_cachable",
-        "cache_control_ttl",
-    )
-    assert groups["legacy_embedding"] == ("flash", "frame")
+    assigned = [column for columns in groups.values() for column in columns]
+    assert len(assigned) == len(set(assigned))
 
 
 def test_summarize_ranking_relative_importance_computes_group_and_metric_rows() -> None:
@@ -166,6 +203,7 @@ def test_summarize_ranking_relative_importance_computes_group_and_metric_rows() 
     summary = summarize_ranking_relative_importance(
         panel,
         spec=spec,
+        include_individual_signals=True,
         cv_folds=3,
         cv_repeats=2,
         bootstraps=5,
@@ -271,7 +309,7 @@ def test_relative_importance_measures_each_signal_with_group_parity(monkeypatch)
     monkeypatch.setattr(module, "_domain_holdout_oof_importance", oos)
     monkeypatch.setattr(module, "_bootstrap_oos_delta_ci", bootstrap)
 
-    summary = module.summarize_ranking_relative_importance(
+    group_only = module.summarize_ranking_relative_importance(
         _ranking_importance_panel_frame(),
         spec=load_analysis_spec(),
         cv_folds=3,
@@ -281,11 +319,26 @@ def test_relative_importance_measures_each_signal_with_group_parity(monkeypatch)
         domain_cv_repeats=2,
         random_state=0,
     )
+    assert group_only["individual_signals_included"] is False
+    assert all(not group["metrics"] for group in group_only["groups"])
+
+    summary = module.summarize_ranking_relative_importance(
+        _ranking_importance_panel_frame(),
+        spec=load_analysis_spec(),
+        include_individual_signals=True,
+        cv_folds=3,
+        cv_repeats=2,
+        bootstraps=3,
+        shapley_permutations=4,
+        domain_cv_repeats=2,
+        random_state=0,
+    )
+    assert summary["individual_signals_included"] is True
 
     signal = next(
         metric
         for group in summary["groups"]
-        if group["factor"] == "similarity"
+        if group["factor"] == "relevance"
         for metric in group["metrics"]
         if metric["column"] == "bge_normalized_score"
     )
@@ -857,33 +910,21 @@ def test_parse_args_accepts_positive_resampling_counts(monkeypatch) -> None:
     assert args.bootstraps == 1
 
 
-def test_parse_args_uses_fast_defaults_and_exhaustive_preset(monkeypatch) -> None:
+def test_parse_args_defaults_to_precise_group_analysis(monkeypatch) -> None:
     from analysis.textrazor_ranking_r2 import _parse_args
 
     monkeypatch.setattr(
         "sys.argv", ["textrazor_ranking_r2.py", "--run", "runs/example"]
     )
-    fast = _parse_args()
+    defaults = _parse_args()
     assert (
-        fast.cv_folds,
-        fast.cv_repeats,
-        fast.bootstraps,
-        fast.shapley_permutations,
-        fast.domain_cv_repeats,
-    ) == (3, 2, 100, 200, 2)
-
-    monkeypatch.setattr(
-        "sys.argv",
-        ["textrazor_ranking_r2.py", "--run", "runs/example", "--exhaustive"],
-    )
-    exhaustive = _parse_args()
-    assert (
-        exhaustive.cv_folds,
-        exhaustive.cv_repeats,
-        exhaustive.bootstraps,
-        exhaustive.shapley_permutations,
-        exhaustive.domain_cv_repeats,
-    ) == (5, 5, 500, 2000, 10)
+        defaults.cv_folds,
+        defaults.cv_repeats,
+        defaults.bootstraps,
+        defaults.shapley_permutations,
+        defaults.domain_cv_repeats,
+    ) == (5, 10, 500, 2000, 10)
+    assert defaults.individual_signals is False
 
     monkeypatch.setattr(
         "sys.argv",
@@ -891,14 +932,22 @@ def test_parse_args_uses_fast_defaults_and_exhaustive_preset(monkeypatch) -> Non
             "textrazor_ranking_r2.py",
             "--run",
             "runs/example",
-            "--exhaustive",
+            "--individual-signals",
             "--shapley-permutations",
             "7",
         ],
     )
     overridden = _parse_args()
+    assert overridden.individual_signals is True
     assert overridden.shapley_permutations == 7
     assert overridden.bootstraps == 500
+
+    monkeypatch.setattr(
+        "sys.argv",
+        ["textrazor_ranking_r2.py", "--run", "runs/example", "--exhaustive"],
+    )
+    with pytest.raises(SystemExit):
+        _parse_args()
 
 
 def test_relative_importance_renderer_separates_explanatory_and_oos_tables() -> None:

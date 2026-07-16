@@ -75,10 +75,24 @@ forefrontweb.com  # keyword="columbus local seo" reason=page_text-crawl-status-p
 forsalebyowner.com  # keyword="houses for sale in cypress texas" reason=page_text-crawl-status-page-content-is-empty
 angi.com  # keyword="best realtor in cypress tx" reason=page_text-crawl-status-page-content-is-empty
 blairrg.com  # keyword="top real estate agents in cypress tx" reason=page_text-crawl-status-page-content-is-empty
-example.com  # keyword="technical seo" reason=page_text-crawl-status-page-content-is-empty
 taylormorrison.com  # keyword="bridge creek cypress homes for sale" reason=page_text-crawl-status-page-content-is-empty
 instagram.com  # keyword="blair realty group cypress tx" reason=page_text-crawl-status-page-content-is-empty
 linkedin.com  # keyword="blair realty group cypress tx" reason=page_text-crawl-status-page-content-is-empty
 voyagehouston.com  # keyword="blair realty group cypress tx" reason=page_text-crawl-status-page-content-is-empty
 kw.com  # keyword="keller williams cypress tx" reason=page_text-crawl-status-page-content-is-empty
-lakehomes.com  # keyword="spring cypress homes for sale" reason=page_text-crawl-status-page-content-is-empty
+lakehomes.com  # keyword="spring cypress homes for sale" reason=page_text-crawl-status-page-content-is-emptyexample.com  # keyword="technical seo" reason=page_text-crawl-status-page-content-is-emptyexample.com  # keyword="technical seo" reason=page_text-crawl-status-page-content-is-empty
+moonfruit.com  # keyword="seo company columbus" reason=page_text-crawl-status-page-content-is-empty
+mobileappdaily.com  # keyword="seo company columbus" reason=page_text-crawl-status-page-content-is-empty
+archmorebusinessweb.com  # keyword="seo company in columbus" reason=onpage_instant_pages-http-403
+themanifest.com  # keyword="seo company in columbus" reason=onpage_instant_pages-http-403
+10seos.com  # keyword="seo company in columbus" reason=onpage_instant_pages-http-429
+localmighty.com  # keyword="columbus seo" reason=onpage_instant_pages-http-403
+sixthcitymarketing.com  # keyword="columbus seo" reason=page_text-crawl-status-page-content-is-empty
+fixseo.com  # keyword="columbus seo company" reason=page_text-crawl-status-page-content-is-empty
+onfolio.com  # keyword="seo company in columbus ohio" reason=page_text-crawl-status-page-content-is-empty
+sistrunktech.com  # keyword="seo company in columbus ohio" reason=page_text-crawl-status-page-content-is-empty
+columbusmarketingexperts.com  # keyword="best columbus seo company" reason=page_text-crawl-status-page-content-is-empty
+upwarddigitalmarketing.com  # keyword="columbus local seo" reason=page_text-crawl-status-page-content-is-empty
+transformeddesign.com  # keyword="columbus local seo" reason=page_text-crawl-status-page-content-is-empty
+jetrank.com  # keyword="seo company columbus" reason=page_text-crawl-status-page-content-is-empty
+example.com  # keyword="technical seo" reason=page_text-crawl-status-page-content-is-empty

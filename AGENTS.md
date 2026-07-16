@@ -5,6 +5,8 @@
 - Always use rtk filtering - don't use rtk proxy
 - Always fail loudly - all errors should be caught immediately, never silently
 - Always create logging for all files except tests
+- Do not run the full test suite until all given tasks are complete
+- Tests should NEVER export or output to domain_blocklist.txt - it should go to blocklist.txt
 
 ## What this is
 

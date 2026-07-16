@@ -36,6 +36,7 @@ from seo_rank.dataforseo import (
     DataForSeoParseError,
     DataForSeoCredentials,
     DEFAULT_KEYWORD_LIMIT,
+    DEFAULT_SERP_DEPTH,
     backlinks_detail_response_is_usable,
     BACKLINKS_QUERY_DOFOLLOW,
     BACKLINKS_QUERY_SUMMARY,
@@ -163,6 +164,7 @@ class RunConfig:
     live_gemini: bool = False
     live_textrazor: bool = False
     domain_blocklist_path: Path | None = None
+    debug: bool = False
 
 
 class LiveProviderGateError(ValueError):
@@ -171,6 +173,22 @@ class LiveProviderGateError(ValueError):
 
 class CliCommandError(ValueError):
     """Raised when a CLI storage command cannot complete cleanly."""
+
+
+def validate_keyword_expansion_completeness(
+    keywords: Sequence[str],
+    *,
+    seed: str,
+    keyword_limit: int,
+) -> None:
+    """Warn when keyword expansion cannot satisfy its requested limit."""
+
+    keyword_count = len(dedupe_keywords([seed, *keywords]))
+    if keyword_count < keyword_limit:
+        logging.getLogger("seo_rank.cli").warning(
+            f"Requested {keyword_limit} keywords, but DataForSEO returned "
+            f"{keyword_count} unique keywords; continuing with available keywords"
+        )
 
 
 STORAGE_COMMAND_EXCEPTIONS = (
@@ -188,14 +206,15 @@ class LiveProviderCredentials:
     dataforseo: DataForSeoCredentials
 
 
-def configure_provider_logging() -> None:
+def configure_provider_logging(*, debug: bool = False) -> None:
     """Enable stderr logging for live-provider diagnostics."""
 
     level_name = os.environ.get(TEXTRAZOR_LOG_LEVEL_ENV_FLAG, "INFO").upper()
-    level = getattr(logging, level_name, logging.INFO)
+    configured_level = getattr(logging, level_name, logging.INFO)
+    level = logging.DEBUG if debug else max(configured_level, logging.INFO)
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(logging.Formatter("[seo-rank] %(message)s"))
-    for logger_name in ("seo_rank.textrazor", "seo_rank.dataforseo"):
+    for logger_name in ("seo_rank.cli", "seo_rank.textrazor", "seo_rank.dataforseo"):
         provider_logger = logging.getLogger(logger_name)
         provider_logger.handlers.clear()
         provider_logger.addHandler(handler)
@@ -218,7 +237,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Run the command-line interface."""
 
     ensure_project_env_loaded()
-    configure_provider_logging()
     parser = build_parser()
     try:
         args = parser.parse_args(argv)
@@ -227,13 +245,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(error, file=sys.stderr)
         return 2
 
+    configure_provider_logging(debug=bool(config and config.debug))
+
     if args.command == "run":
         assert config is not None
         progress = RunProgress()
         progress.log(f"run: output directory {config.output_dir}")
         try:
             if args.stored_run is not None:
-                replay_stored_run(Path(args.stored_run), config, progress=progress)
+                replay_stored_run(
+                    Path(args.stored_run),
+                    config,
+                    scope_overrides=explicit_run_scope_overrides(argv),
+                    progress=progress,
+                )
             elif config.live_textrazor_only:
                 write_textrazor_only_artifacts(
                     config,
@@ -313,6 +338,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
+def explicit_run_scope_overrides(argv: Sequence[str] | None) -> frozenset[str]:
+    """Return run scope fields explicitly supplied on the command line."""
+
+    arguments = tuple(sys.argv[1:] if argv is None else argv)
+    options = {
+        "--location": "location",
+        "--language": "language",
+        "--device": "device",
+        "--depth": "depth",
+        "--keyword-limit": "keyword_limit",
+        "--debug": "debug",
+    }
+    return frozenset(
+        field
+        for option, field in options.items()
+        if any(argument == option or argument.startswith(f"{option}=") for argument in arguments)
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="seo-rank")
     subparsers = parser.add_subparsers(dest="command")
@@ -330,6 +374,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--output-dir", type=Path)
     run.add_argument("--model-name", default="fixture-similarity-v1")
     run.add_argument("--dry-run", action="store_true")
+    run.add_argument("--debug", type=int, choices=(0, 1), default=0)
     run.add_argument("--skip-textrazor", action="store_true")
     run.add_argument("--live-textrazor-only", action="store_true")
     run.add_argument("--refresh-textrazor", action="store_true")
@@ -444,6 +489,7 @@ def config_from_args(args: argparse.Namespace) -> RunConfig:
         live_gemini=args.live_gemini,
         live_textrazor=args.live_textrazor and not args.skip_textrazor,
         domain_blocklist_path=args.domain_blocklist,
+        debug=bool(args.debug),
     )
 
 
@@ -484,6 +530,8 @@ def serialized_run_config_from_args(args: argparse.Namespace) -> dict[str, objec
     serialized["live_bge"] = args.live_bge
     serialized["live_gemini"] = args.live_gemini
     serialized["live_textrazor"] = args.live_textrazor and not args.skip_textrazor
+    if args.debug:
+        serialized["debug"] = True
     return serialized
 
 
@@ -604,6 +652,7 @@ def replay_stored_run(
     stored_run: Path,
     config: RunConfig,
     *,
+    scope_overrides: frozenset[str] = frozenset(),
     progress: RunProgress | None = None,
 ) -> None:
     stored_payload = load_run_payload(stored_run)
@@ -613,8 +662,6 @@ def replay_stored_run(
     deduped_keywords = dedupe_keywords(
         [keyword for keyword in stored_keywords if isinstance(keyword, str)]
     )
-    if deduped_keywords and config.keyword_limit < len(deduped_keywords):
-        config = replace(config, keyword_limit=len(deduped_keywords))
     if progress is not None and config.keyword_limit > len(deduped_keywords):
         progress.log(
             f"replay: expanding stored run from {len(deduped_keywords)} "
@@ -636,6 +683,7 @@ def replay_stored_run(
         stored_payload,
         cli_config=config,
         requested_keyword_limit=config.keyword_limit,
+        scope_overrides=scope_overrides,
         progress=progress,
     )
 
@@ -723,6 +771,7 @@ def expand_stored_run(
     *,
     cli_config: RunConfig,
     requested_keyword_limit: int,
+    scope_overrides: frozenset[str] = frozenset(),
     progress: RunProgress | None = None,
 ) -> None:
     stored_config = stored_payload.get("config", {})
@@ -730,45 +779,16 @@ def expand_stored_run(
         raise CliCommandError("Stored run payload is missing config")
 
     run_id = str(stored_payload.get("run_id") or stored_run.name)
+    stored_run_config = run_config_from_payload(
+        stored_config,
+        output_dir=stored_run,
+        keyword_limit=int(stored_config.get("keyword_limit", DEFAULT_KEYWORD_LIMIT)),
+    )
     base_config = merge_stored_run_cli_overlay(
-        run_config_from_payload(
-            stored_config,
-            output_dir=stored_run,
-            keyword_limit=requested_keyword_limit,
-        ),
+        stored_run_config,
         cli_config,
+        scope_overrides=scope_overrides,
     )
-    current_keywords = dedupe_keywords(
-        [keyword for keyword in stored_payload.get("keywords", []) if isinstance(keyword, str)]
-    )
-    target_keywords = current_keywords
-    if requested_keyword_limit > len(current_keywords):
-        keyword_expansion = load_stored_keyword_expansion_response(stored_run)
-        target_keywords = normalize_keyword_expansion(
-            keyword_expansion,
-            seed=base_config.seed,
-            limit=requested_keyword_limit,
-        )
-
-    stored_serp_statuses = load_stored_serp_statuses(stored_run)
-    stored_keyword_results = load_stored_keyword_results_by_keyword(stored_payload)
-    raw_response_records = load_raw_response_records(stored_run)
-    stored_entities_present = any(
-        record.get("endpoint") == "entities" for record in raw_response_records
-    )
-    raw_response_index = group_raw_response_records_by_keyword(raw_response_records)
-    network_calls = list(
-        stored_payload.get("network_calls", [])
-        if isinstance(stored_payload.get("network_calls", []), list)
-        else []
-    )
-
-    keywords_to_refresh = [
-        keyword
-        for keyword in target_keywords
-        if not stored_serp_statuses.get(keyword.casefold(), False)
-    ]
-
     live_context: Mapping[str, object] | None = None
     if base_config.live_providers:
         live_context = prepare_live_run_context(
@@ -776,6 +796,73 @@ def expand_stored_run(
             env=os.environ,
             progress=progress,
         )
+
+    keyword_expansion = load_stored_keyword_expansion_response(stored_run)
+    requested_keyword_limit = base_config.keyword_limit
+    target_keywords = normalize_keyword_expansion(
+        keyword_expansion,
+        seed=base_config.seed,
+        limit=requested_keyword_limit,
+    )
+    network_calls = list(
+        stored_payload.get("network_calls", [])
+        if isinstance(stored_payload.get("network_calls", []), list)
+        else []
+    )
+    refreshed_keyword_expansion = False
+    should_refresh_keyword_expansion = (
+        "keyword_limit" in scope_overrides
+        and requested_keyword_limit > len(target_keywords)
+        and live_context is not None
+    )
+    if should_refresh_keyword_expansion:
+        keyword_request = build_keyword_expansion_request(
+            base_config.seed,
+            location_code=int(live_context["location_code"]),
+            language_code=base_config.language,
+        )
+        keyword_expansion = execute_validated_dataforseo_request(
+            "keyword_expansion",
+            keyword_request,
+            credentials=live_context["credentials"].dataforseo,
+            transport=DEFAULT_DATAFORSEO_TRANSPORT,
+        )
+        network_calls.append("dataforseo.keyword_expansion")
+        refreshed_keyword_expansion = True
+        target_keywords = normalize_keyword_expansion(
+            keyword_expansion,
+            seed=base_config.seed,
+            limit=requested_keyword_limit,
+        )
+    validate_keyword_expansion_completeness(
+        target_keywords,
+        seed=base_config.seed,
+        keyword_limit=requested_keyword_limit,
+    )
+
+    stored_serp_statuses = load_stored_serp_statuses(
+        stored_run,
+        depth=base_config.depth,
+        blocklist=DomainBlocklist.load(base_config.domain_blocklist_path),
+    )
+    stored_keyword_results = load_stored_keyword_results_by_keyword(stored_payload)
+    raw_response_records = load_raw_response_records(stored_run)
+    stored_entities_present = any(
+        record.get("endpoint") == "entities" for record in raw_response_records
+    )
+    raw_response_index = group_raw_response_records_by_keyword(raw_response_records)
+    keywords_to_refresh = [
+        keyword
+        for keyword in target_keywords
+        if (
+            any(
+                getattr(base_config, field) != getattr(stored_run_config, field)
+                for field in ("location", "language", "device", "depth")
+            )
+            or not stored_serp_statuses.get(keyword.casefold(), False)
+        )
+    ]
+
     resolved_keyword_results: list[dict[str, object]] = []
     for index, keyword in enumerate(target_keywords, start=1):
         keyword_key = keyword.casefold()
@@ -797,6 +884,8 @@ def expand_stored_run(
                     textrazor_transport=DEFAULT_TEXTRAZOR_TRANSPORT,
                     network_calls=network_calls,
                     progress=progress,
+                    raw_keyword_records=raw_keyword_records,
+                    minimum_organic_results=base_config.depth,
                 )
             else:
                 keyword_result = build_offline_keyword_result(
@@ -835,9 +924,7 @@ def expand_stored_run(
     merged_dataforseo = merged_raw_provider_data.get("dataforseo", {})
     if not isinstance(merged_dataforseo, dict):
         merged_dataforseo = {}
-    merged_dataforseo["keyword_expansion"] = load_stored_keyword_expansion_response(
-        stored_run
-    )
+    merged_dataforseo["keyword_expansion"] = keyword_expansion
     merged_keyword_results = [
         keyword_result
         for keyword_result in merged_payload.get("keyword_results", [])
@@ -853,7 +940,12 @@ def expand_stored_run(
     )
     merged_raw_provider_data["dataforseo"] = merged_dataforseo
     merged_payload["raw_provider_data"] = merged_raw_provider_data
-    raw_response_records = build_raw_response_records(run_id, merged_payload)
+    rebuilt_raw_response_records = build_raw_response_records(run_id, merged_payload)
+    raw_response_records = merge_replayed_raw_response_records(
+        raw_response_records,
+        rebuilt_raw_response_records,
+        refresh_keyword_expansion=refreshed_keyword_expansion,
+    )
     if progress is not None:
         progress.log(
             f"replay: writing expanded raw responses ({len(raw_response_records)} records)"
@@ -906,10 +998,16 @@ def run_config_from_payload(
         live_bge=bool(config.get("live_bge", False)),
         live_gemini=bool(config.get("live_gemini", False)),
         live_textrazor=bool(config.get("live_textrazor", False)),
+        debug=bool(config.get("debug", False)),
     )
 
 
-def merge_stored_run_cli_overlay(stored_config: RunConfig, cli_config: RunConfig) -> RunConfig:
+def merge_stored_run_cli_overlay(
+    stored_config: RunConfig,
+    cli_config: RunConfig,
+    *,
+    scope_overrides: frozenset[str] = frozenset(),
+) -> RunConfig:
     """Apply replay overlays with sticky TextRazor skipping.
 
     Live-provider flags remain additive across the stored config and replay
@@ -920,9 +1018,14 @@ def merge_stored_run_cli_overlay(stored_config: RunConfig, cli_config: RunConfig
     live_textrazor = (
         cli_config.live_textrazor or stored_config.live_textrazor
     ) and not skip_textrazor
+    scope = {
+        field: getattr(cli_config, field)
+        for field in scope_overrides
+    }
 
     return replace(
         stored_config,
+        **scope,
         live_providers=cli_config.live_providers or stored_config.live_providers,
         live_backlinks=cli_config.live_backlinks or stored_config.live_backlinks,
         live_backlinks_detail=(
@@ -998,6 +1101,55 @@ def group_raw_response_records_by_keyword(
             dict(record)
         )
     return grouped
+
+
+def merge_replayed_raw_response_records(
+    stored_records: Sequence[Mapping[str, object]],
+    rebuilt_records: Sequence[Mapping[str, object]],
+    *,
+    refresh_keyword_expansion: bool,
+) -> list[dict[str, object]]:
+    """Keep authoritative raw rows unless replay produced a newer response."""
+
+    records = [dict(record) for record in stored_records]
+    positions = {
+        raw_response_record_identity(record): index
+        for index, record in enumerate(records)
+    }
+    for rebuilt_record in rebuilt_records:
+        if (
+            rebuilt_record.get("endpoint") == "keyword_expansion"
+            and not refresh_keyword_expansion
+        ):
+            continue
+        record = dict(rebuilt_record)
+        identity = raw_response_record_identity(record)
+        existing_index = positions.get(identity)
+        if existing_index is None:
+            positions[identity] = len(records)
+            records.append(record)
+            continue
+        if records[existing_index].get("response_body_bytes") != record.get(
+            "response_body_bytes"
+        ):
+            records[existing_index] = record
+    return records
+
+
+def raw_response_record_identity(record: Mapping[str, object]) -> tuple[str, str, str]:
+    endpoint = str(record.get("endpoint", ""))
+    target_keyword = str(record.get("target_keyword") or "").casefold()
+    if endpoint in {"keyword_expansion", "serp"}:
+        return endpoint, target_keyword, ""
+    metadata = json.loads(str(record.get("request_metadata_json", "{}")))
+    url = metadata.get("url")
+    if not isinstance(url, str):
+        response_body_bytes = record.get("response_body_bytes")
+        if isinstance(response_body_bytes, (bytes, bytearray)):
+            url = extract_response_url(
+                json.loads(bytes(response_body_bytes).decode("utf-8"))
+            )
+    return endpoint, target_keyword, str(url or record.get("response_id", ""))
 
 
 def load_stored_keyword_results_by_keyword(
@@ -1262,13 +1414,18 @@ def build_resumed_keyword_result(
     network_calls: list[str],
     progress: RunProgress | None = None,
 ) -> dict[str, object]:
+    blocklist = DomainBlocklist.load(config.domain_blocklist_path)
     serp_records = raw_keyword_records.get("serp", [])
     serp_response: Mapping[str, object] | None = None
     for record in serp_records:
         response_body_bytes = record.get("response_body_bytes")
         if isinstance(response_body_bytes, (bytes, bytearray)):
             candidate = json.loads(bytes(response_body_bytes).decode("utf-8"))
-            if stored_serp_response_is_usable(candidate):
+            if stored_serp_response_is_usable(
+                candidate,
+                depth=config.depth,
+                blocklist=blocklist,
+            ):
                 serp_response = candidate
                 break
     if serp_response is None:
@@ -1286,6 +1443,7 @@ def build_resumed_keyword_result(
                 textrazor_transport=DEFAULT_TEXTRAZOR_TRANSPORT,
                 network_calls=network_calls,
                 progress=progress,
+                minimum_organic_results=config.depth,
             )
         return build_offline_keyword_result(
             config,
@@ -1298,7 +1456,6 @@ def build_resumed_keyword_result(
         keyword=target_keyword,
         depth=config.depth,
     )
-    blocklist = DomainBlocklist.load(config.domain_blocklist_path)
     serp_results = blocklist.filter_results(
         serp_results, keyword=target_keyword, progress=progress
     )
@@ -1615,7 +1772,12 @@ def build_resumed_keyword_result(
     )
 
 
-def load_stored_serp_statuses(run_dir: Path) -> dict[str, bool]:
+def load_stored_serp_statuses(
+    run_dir: Path,
+    *,
+    depth: int = DEFAULT_SERP_DEPTH,
+    blocklist: DomainBlocklist | None = None,
+) -> dict[str, bool]:
     statuses: dict[str, bool] = {}
     rows = (
         scan_raw_responses(run_dir)
@@ -1637,11 +1799,20 @@ def load_stored_serp_statuses(run_dir: Path) -> dict[str, bool]:
             statuses.setdefault(target_keyword.casefold(), False)
             continue
         keyword_key = target_keyword.casefold()
-        statuses[keyword_key] = statuses.get(keyword_key, False) or stored_serp_response_is_usable(response)
+        statuses[keyword_key] = statuses.get(keyword_key, False) or stored_serp_response_is_usable(
+            response,
+            depth=depth,
+            blocklist=blocklist,
+        )
     return statuses
 
 
-def stored_serp_response_is_usable(response: Mapping[str, object]) -> bool:
+def stored_serp_response_is_usable(
+    response: Mapping[str, object],
+    *,
+    depth: int | None = None,
+    blocklist: DomainBlocklist | None = None,
+) -> bool:
     tasks = response.get("tasks", [])
     if not isinstance(tasks, list) or not tasks:
         return False
@@ -1652,7 +1823,14 @@ def stored_serp_response_is_usable(response: Mapping[str, object]) -> bool:
         status_code = task.get("status_code")
         if isinstance(status_code, int) and status_code != 20000:
             return False
-    return bool(normalize_serp_results(response, keyword="stored-serp"))
+    results = normalize_serp_results(
+        response,
+        keyword="stored-serp",
+        depth=depth or DEFAULT_SERP_DEPTH,
+    )
+    if blocklist is not None:
+        results = blocklist.filter_results(results)
+    return bool(results) if depth is None else len(results) >= depth
 
 
 def scan_analysis_mart(run_dir: Path) -> pl.LazyFrame:
@@ -2181,6 +2359,25 @@ def write_artifacts(
         + "\n",
         encoding="utf-8",
     )
+    config = payload.get("config", {})
+    if isinstance(config, Mapping) and config.get("debug", False):
+        if progress is not None:
+            progress.log("run: writing debug.json")
+        (output_dir / "debug.json").write_text(
+            json.dumps(
+                {
+                    **payload,
+                    "run_id": run_id,
+                    "catalog": dict(catalog),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    else:
+        (output_dir / "debug.json").unlink(missing_ok=True)
     if progress is not None:
         progress.log("run: writing report.md")
     (output_dir / "report.md").write_text(
@@ -2568,6 +2765,11 @@ def build_live_payload(
         seed=config.seed,
         limit=config.keyword_limit,
     )
+    validate_keyword_expansion_completeness(
+        keywords,
+        seed=config.seed,
+        keyword_limit=config.keyword_limit,
+    )
     if progress is not None:
         progress.log(f"run: expanded {len(keywords)} keywords")
     keyword_results = []
@@ -2651,6 +2853,8 @@ def build_live_keyword_result(
     textrazor_transport,
     network_calls: list[str],
     progress: RunProgress | None = None,
+    raw_keyword_records: Mapping[str, Sequence[Mapping[str, object]]] | None = None,
+    minimum_organic_results: int | None = None,
 ) -> dict[str, object]:
     blocklist = DomainBlocklist.load(config.domain_blocklist_path)
     if progress is not None:
@@ -2678,9 +2882,17 @@ def build_live_keyword_result(
         keyword=target_keyword,
         depth=config.depth,
     )
+    provider_organic_count = len(serp_results)
     serp_results = blocklist.filter_results(
         serp_results, keyword=target_keyword, progress=progress
     )
+    if minimum_organic_results is not None and len(serp_results) < minimum_organic_results:
+        logging.getLogger("seo_rank.cli").warning(
+            f"{target_keyword}: requested {minimum_organic_results} organic SERP "
+            f"results; DataForSEO returned {provider_organic_count}, but "
+            f"{len(serp_results)} remained after domain blocklist filtering; "
+            "continuing with available results"
+        )
     serp_titles_by_url = {
         str(result["url"]): str(result["title"]) for result in serp_results
     }
@@ -2717,22 +2929,43 @@ def build_live_keyword_result(
                     )
 
     serp_urls = list(dict.fromkeys(str(result["url"]) for result in serp_results))
+    existing_onpage_by_url = (
+        _usable_onpage_by_url_from_records(raw_keyword_records) if raw_keyword_records else {}
+    )
+    missing_onpage_urls = _missing_serp_urls(serp_results, existing_onpage_by_url)
+    fetched_onpage_by_url: dict[str, dict[str, object]] = {}
     if progress is not None:
         progress.keyword_log(
             target_keyword,
-            f"dataforseo {ONPAGE_INSTANT_PAGES_ENDPOINT} ({len(serp_urls)} urls)",
+            f"dataforseo {ONPAGE_INSTANT_PAGES_ENDPOINT} ({len(missing_onpage_urls)} urls)",
         )
-    onpage_responses = fetch_onpage_signals_for_urls(
-        target_keyword,
-        serp_urls,
-        credentials=credentials.dataforseo,
-        transport=dataforseo_transport,
-        progress=None,
-        run_dir=config.output_dir,
-        blocklist=blocklist,
-    )
-    if onpage_responses:
-        network_calls.append(f"dataforseo.{ONPAGE_INSTANT_PAGES_ENDPOINT}")
+    if missing_onpage_urls:
+        fetched_onpage_responses = fetch_onpage_signals_for_urls(
+            target_keyword,
+            missing_onpage_urls,
+            credentials=credentials.dataforseo,
+            transport=dataforseo_transport,
+            progress=None,
+            run_dir=config.output_dir,
+            blocklist=blocklist,
+        )
+        if fetched_onpage_responses:
+            network_calls.append(f"dataforseo.{ONPAGE_INSTANT_PAGES_ENDPOINT}")
+        for response in fetched_onpage_responses:
+            url = extract_response_url(response)
+            if not isinstance(url, str):
+                continue
+            fetched_onpage_by_url[url] = response
+            _register_usable_onpage_response(
+                existing_onpage_by_url,
+                response=response,
+                url=url,
+            )
+    onpage_responses = [
+        existing_onpage_by_url[url] if url in existing_onpage_by_url else fetched_onpage_by_url[url]
+        for url in serp_urls
+        if url in existing_onpage_by_url or url in fetched_onpage_by_url
+    ]
 
     if progress is not None:
         progress.keyword_log(
@@ -4300,6 +4533,9 @@ def write_raw_response_dataset(
                 str(row["response_id"]),
             ),
         )
+        if file_path.exists() and pq.ParquetFile(file_path).read().to_pylist() == sorted_records:
+            files.append(file_path.relative_to(output_dir).as_posix())
+            continue
         pq.write_table(
             pa.Table.from_pylist(sorted_records, schema=RAW_RESPONSE_SCHEMA),
             file_path,

@@ -446,7 +446,7 @@ def execute_dataforseo_request(
     *,
     credentials: DataForSeoCredentials,
     transport=None,
-    timeout: float = 60.0,
+    timeout: float = 180.0,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     attempt_start: int = 1,
     sleep: Callable[[float], None] = time.sleep,
@@ -526,8 +526,7 @@ def execute_dataforseo_request(
     ]
     logger.info(
         "DataForSEO response endpoint=%s target=%s status_code=%s "
-        "task_ids=%s task_status_codes=%s task_status_messages=%s result_counts=%s "
-        "response=%s",
+        "task_ids=%s task_status_codes=%s task_status_messages=%s result_counts=%s",
         request.path,
         request_target,
         response.get("status_code"),
@@ -535,6 +534,11 @@ def execute_dataforseo_request(
         task_status_codes,
         task_status_messages,
         result_counts,
+    )
+    logger.debug(
+        "DataForSEO response payload endpoint=%s target=%s response=%s",
+        request.path,
+        request_target,
         response,
     )
     return response

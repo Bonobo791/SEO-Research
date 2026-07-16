@@ -105,7 +105,7 @@ def test_materialization_drops_blocklisted_domain_rows_and_replaces_stale_parts(
         == 0
     )
 
-    blocklist_path = tmp_path / "domain_blocklist.txt"
+    blocklist_path = tmp_path / "blocklist.txt"
     blocklist_path.write_text("example.com\n", encoding="utf-8")
     monkeypatch.setattr(domain_blocklist, "_resolve_default_path", lambda: blocklist_path)
 

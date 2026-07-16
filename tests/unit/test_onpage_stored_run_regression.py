@@ -10,11 +10,14 @@ import pyarrow.dataset as ds
 import pyarrow.parquet as pq
 
 from seo_rank.cli import main
+from seo_rank.cli import RAW_RESPONSE_SCHEMA
+from seo_rank.cli import build_raw_response_record
 from seo_rank.dataforseo import fixture_backlinks_response_for_request_body
 from seo_rank.dataforseo import fixture_keyword_expansion_response
 from seo_rank.dataforseo import fixture_onpage_instant_pages_response
 from seo_rank.dataforseo import fixture_page_text_response
 from seo_rank.dataforseo import fixture_serp_response
+from seo_rank.domain_blocklist import DomainBlocklist
 from tests.fixtures.onpage_pipeline import assert_onpage_row_matches_fixture
 from tests.fixtures.onpage_pipeline import assert_onpage_stats_families
 from tests.fixtures.onpage_pipeline import vary_onpage_fixture_response
@@ -42,6 +45,8 @@ def _dataforseo_transport_factory(
             return fixture_keyword_expansion_response("technical seo")
         if url.endswith("/serp/google/organic/live/advanced"):
             return fixture_serp_response("technical seo")
+        if url.endswith("/backlinks/summary/live") or url.endswith("/backlinks/backlinks/live"):
+            return fixture_backlinks_response_for_request_body(request_body)
         if url.endswith("/on_page/content_parsing/live"):
             return fixture_page_text_response(request_body[0]["url"], "technical seo")
         if url.endswith("/on_page/instant_pages"):
@@ -156,6 +161,130 @@ def test_stored_run_onpage_backfill_materializes_full_pipeline_without_touching_
     )
     report = (output_dir / "stats" / "stats_report.md").read_text(encoding="utf-8")
     assert_onpage_stats_families(summary, report)
+
+
+def test_stored_run_depth_refresh_reuses_existing_usable_onpage_rows(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
+
+    assert (
+        main(
+            [
+                "run",
+                "--seed",
+                "technical seo",
+                "--output-dir",
+                str(output_dir),
+                "--dry-run",
+                "--keyword-limit",
+                "1",
+                "--depth",
+                "2",
+                "--skip-textrazor",
+            ]
+        )
+        == 0
+    )
+
+    kept_url = "https://example.com/technical-seo/1"
+    existing_url = "https://example.com/technical-seo/2"
+    new_url = "https://example.com/technical-seo/3"
+    onpage_partition_path = (
+        output_dir / "parquet" / "raw_responses" / "endpoint=onpage_instant_pages" / "part-0.parquet"
+    )
+    onpage_partition_path.parent.mkdir(parents=True, exist_ok=True)
+    seed_rows = [
+        build_raw_response_record(
+            output_dir.name,
+            endpoint="onpage_instant_pages",
+            provider="dataforseo",
+            response=vary_onpage_fixture_response(
+                kept_url,
+                fixture_onpage_instant_pages_response(kept_url),
+            ),
+            target_keyword="technical seo",
+            request_metadata={
+                "target_keyword": "technical seo",
+                "url": kept_url,
+            },
+            recorded_at="2026-07-05T12:00:00+00:00",
+        ),
+        build_raw_response_record(
+            output_dir.name,
+            endpoint="onpage_instant_pages",
+            provider="dataforseo",
+            response=vary_onpage_fixture_response(
+                existing_url,
+                fixture_onpage_instant_pages_response(existing_url),
+            ),
+            target_keyword="technical seo",
+            request_metadata={
+                "target_keyword": "technical seo",
+                "url": existing_url,
+            },
+            recorded_at="2026-07-05T12:00:00+00:00",
+        ),
+    ]
+    pq.write_table(pa.Table.from_pylist(seed_rows, schema=RAW_RESPONSE_SCHEMA), onpage_partition_path)
+
+    live_onpage_targets: list[str] = []
+
+    def dataforseo_transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        del method, headers, timeout
+        request_body = json.loads(body.decode("utf-8"))
+        if url.endswith("/keywords_data/google_ads/keywords_for_keywords/live"):
+            return fixture_keyword_expansion_response("technical seo")
+        if url.endswith("/serp/google/organic/live/advanced"):
+            return fixture_serp_response("technical seo")
+        if url.endswith("/backlinks/summary/live") or url.endswith("/backlinks/backlinks/live"):
+            return fixture_backlinks_response_for_request_body(request_body)
+        if url.endswith("/on_page/content_parsing/live"):
+            return fixture_page_text_response(request_body[0]["url"], "technical seo")
+        if url.endswith("/on_page/instant_pages"):
+            target_url = request_body[0]["url"]
+            live_onpage_targets.append(target_url)
+            return fixture_onpage_instant_pages_response(target_url)
+        raise AssertionError(f"unexpected DataForSEO URL: {url}")
+
+    monkeypatch.setenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", "1")
+    monkeypatch.setenv("DATAFORSEO_LOGIN", "analyst@example.com")
+    monkeypatch.setenv("DATAFORSEO_PASSWORD", "dataforseo-secret")
+    monkeypatch.setattr(
+        "seo_rank.cli.DomainBlocklist.load",
+        lambda *_args, **_kwargs: DomainBlocklist(output_dir / "blocklist.txt", set()),
+    )
+    monkeypatch.setattr("seo_rank.cli.DEFAULT_DATAFORSEO_TRANSPORT", dataforseo_transport)
+
+    assert (
+        main(
+            [
+                "run",
+                "--seed",
+                "technical seo",
+                "--stored-run",
+                str(output_dir),
+                "--live-providers",
+                "--live-backlinks",
+                "--keyword-limit",
+                "1",
+                "--depth",
+                "3",
+            ]
+        )
+        == 0
+    )
+
+    assert live_onpage_targets == [new_url]
 
 
 def test_stored_run_partial_onpage_backfill_preserves_existing_row_and_materializes_downstream(

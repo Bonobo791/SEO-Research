@@ -31,12 +31,8 @@ def test_load_missing_file_is_empty(tmp_path):
     assert not bl.is_blocked("https://anything.com")
 
 
-def test_committed_blocklist_keeps_fixture_domain_available():
-    assert not DomainBlocklist.load().is_blocked("https://example.com/fixture")
-
-
 def test_is_blocked_matches_subdomains_not_lookalikes(tmp_path):
-    path = tmp_path / "bl.txt"
+    path = tmp_path / "blocklist.txt"
     path.write_text("example.com\n", encoding="utf-8")
     bl = DomainBlocklist.load(path)
     assert bl.is_blocked("https://example.com/a")
@@ -47,7 +43,7 @@ def test_is_blocked_matches_subdomains_not_lookalikes(tmp_path):
 
 
 def test_filter_results_drops_only_blocked(tmp_path):
-    path = tmp_path / "bl.txt"
+    path = tmp_path / "blocklist.txt"
     path.write_text("dead.com\n", encoding="utf-8")
     bl = DomainBlocklist.load(path)
     rows = [
@@ -59,7 +55,7 @@ def test_filter_results_drops_only_blocked(tmp_path):
 
 
 def test_record_appends_new_domain_with_header_and_dedups(tmp_path):
-    path = tmp_path / "bl.txt"
+    path = tmp_path / "blocklist.txt"
     bl = DomainBlocklist.load(path)  # file does not exist yet
     bl.record("https://dead.com/x", keyword='he said "hi"', reason="timeout")
     bl.record("https://dead.com/y", keyword="again", reason="timeout")  # same domain

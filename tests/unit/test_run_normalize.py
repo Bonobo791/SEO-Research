@@ -1590,13 +1590,17 @@ def test_write_curated_lazyframe_dataset_includes_dataset_name_on_validation_fai
 
 def test_normalize_run_preserves_run_json_page_similarity_scores(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
     source_run_dir = ROOT / "runs" / "northwest-houston-realtor-b0a0813b1789"
     run_dir = tmp_path / "northwest-houston-realtor-b0a0813b1789"
     shutil.copytree(source_run_dir, run_dir)
 
     run_payload = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
-    blocklist = DomainBlocklist.load()
+    blocklist_path = tmp_path / "blocklist.txt"
+    blocklist_path.write_text("example.com\n", encoding="utf-8")
+    blocklist = DomainBlocklist.load(blocklist_path)
+    monkeypatch.setattr("seo_rank.data.normalize.DomainBlocklist.load", lambda: blocklist)
     report_row = next(
         row
         for row in run_payload["page_similarity"]

@@ -34,6 +34,7 @@ from seo_rank.cli import prepare_textrazor_only_context
 from seo_rank.cli import render_markdown_report
 from seo_rank.cli import rewrite_backlink_endpoint_partition
 from seo_rank.cli import rewrite_endpoint_partition
+from seo_rank.cli import merge_stored_run_cli_overlay
 from seo_rank.cli import stored_serp_response_is_usable
 from seo_rank.textrazor import fixture_entity_response
 from seo_rank.textrazor import TextRazorCredentials
@@ -209,7 +210,7 @@ def test_fetch_page_text_for_urls_blocklists_terminal_timeout_at_the_baseline(
             }
         ]
     }
-    blocklist = DomainBlocklist.load(tmp_path / "domain_blocklist.txt")
+    blocklist = DomainBlocklist.load(tmp_path / "blocklist.txt")
 
     def transport(*, body: bytes, **_: object) -> dict[str, object]:
         request_bodies.append(json.loads(body.decode("utf-8"))[0])
@@ -236,7 +237,7 @@ def test_fetch_page_text_for_urls_blocklists_final_empty_content(
     tmp_path: Path,
 ) -> None:
     url = "https://empty.example/technical-seo"
-    blocklist = DomainBlocklist.load(tmp_path / "domain_blocklist.txt")
+    blocklist = DomainBlocklist.load(tmp_path / "blocklist.txt")
     responses = iter(
         [
             {
@@ -279,7 +280,7 @@ def test_fetch_page_text_for_urls_does_not_blocklist_empty_content_recovered_by_
     tmp_path: Path,
 ) -> None:
     url = "https://recovered.example/technical-seo"
-    blocklist = DomainBlocklist.load(tmp_path / "domain_blocklist.txt")
+    blocklist = DomainBlocklist.load(tmp_path / "blocklist.txt")
     responses = iter(
         [
             {
@@ -342,7 +343,7 @@ def test_fetch_page_text_for_urls_retries_task_timeout_before_success(
         request_bodies.append(json.loads(body.decode("utf-8"))[0])
         return next(responses)
 
-    blocklist = DomainBlocklist.load(tmp_path / "domain_blocklist.txt")
+    blocklist = DomainBlocklist.load(tmp_path / "blocklist.txt")
 
     assert fetch_page_text_for_urls(
         "technical seo",
@@ -364,7 +365,7 @@ def test_fetch_page_text_for_urls_does_not_blocklist_transport_error(
     tmp_path: Path,
 ) -> None:
     url = "https://example.com/unavailable"
-    blocklist = DomainBlocklist.load(tmp_path / "domain_blocklist.txt")
+    blocklist = DomainBlocklist.load(tmp_path / "blocklist.txt")
 
     def transport(**_: object) -> dict[str, object]:
         raise OSError("connection failed")
@@ -501,7 +502,7 @@ def test_fetch_page_text_for_urls_switches_pool_after_nested_http_failure(
 
 def test_fetch_page_text_for_urls_blocklists_terminal_nested_4xx(tmp_path: Path) -> None:
     url = "https://example.com/blocked"
-    blocklist = DomainBlocklist.load(tmp_path / "domain_blocklist.txt")
+    blocklist = DomainBlocklist.load(tmp_path / "blocklist.txt")
     failed_response = {
         "tasks": [
             {
@@ -700,11 +701,13 @@ def test_run_writes_offline_json_and_markdown_artifacts(
         "live_gemini": False,
         "live_textrazor": False,
             "refresh_textrazor": False,
-            "domain_blocklist_path": None,
-        }
+        "domain_blocklist_path": None,
+        "debug": False,
+    }
     assert payload["keywords"] == ["technical seo"]
     assert payload["run_id"] == "artifacts"
     assert "raw_provider_data" not in payload
+    assert not (output_dir / "debug.json").exists()
     assert payload["catalog"]["datasets"]["raw_responses"]["row_count"] == 5
     assert len(payload["keyword_results"]) == 1
     assert payload["keyword_results"][0]["target_keyword"] == "technical seo"
@@ -794,6 +797,89 @@ def test_run_writes_offline_json_and_markdown_artifacts(
     assert "BGE: 0.98 (normalized 0.98)" in report
     assert "Gemini Doc Retrieval:" in report
     assert "Gemini Semantic Similarity:" in report
+
+
+def test_run_debug_writes_full_intermediate_payload(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "debug-artifacts"
+    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
+
+    assert main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--depth",
+            "1",
+            "--output-dir",
+            str(output_dir),
+            "--dry-run",
+            "--skip-textrazor",
+            "--debug",
+            "1",
+        ]
+    ) == 0
+
+    debug_payload = json.loads(
+        (output_dir / "debug.json").read_text(encoding="utf-8")
+    )
+    assert debug_payload["config"]["debug"] is True
+    assert "raw_provider_data" in debug_payload
+    assert debug_payload["raw_provider_data"]["dataforseo"]["serp"]
+
+    assert main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--depth",
+            "1",
+            "--output-dir",
+            str(output_dir),
+            "--dry-run",
+            "--skip-textrazor",
+            "--debug",
+            "0",
+        ]
+    ) == 0
+    assert not (output_dir / "debug.json").exists()
+
+
+def test_stored_run_debug_flag_is_an_explicit_overlay(tmp_path: Path) -> None:
+    stored_config = RunConfig(
+        seed="technical seo",
+        location="United States",
+        language="en",
+        device="desktop",
+        depth=20,
+        output_dir=tmp_path,
+        model_name="fixture-similarity-v1",
+        dry_run=False,
+        skip_textrazor=False,
+        debug=True,
+    )
+    cli_config = RunConfig(
+        seed="technical seo",
+        location="United States",
+        language="en",
+        device="desktop",
+        depth=20,
+        output_dir=tmp_path,
+        model_name="fixture-similarity-v1",
+        dry_run=False,
+        skip_textrazor=False,
+        debug=False,
+    )
+
+    merged = merge_stored_run_cli_overlay(
+        stored_config,
+        cli_config,
+        scope_overrides=frozenset({"debug"}),
+    )
+
+    assert merged.debug is False
 
 
 def test_render_markdown_report_includes_textrazor_entity_metrics() -> None:
@@ -1842,7 +1928,7 @@ def test_fetch_onpage_signals_for_urls_blocklists_final_empty_content(
     tmp_path: Path,
 ) -> None:
     url = "https://empty.example/technical-seo/1"
-    blocklist = DomainBlocklist.load(tmp_path / "domain_blocklist.txt")
+    blocklist = DomainBlocklist.load(tmp_path / "blocklist.txt")
     empty_response = fixture_onpage_instant_pages_response(url)
     empty_result = empty_response["tasks"][0]["result"][0]
     empty_result["crawl_status"] = "Page content is empty"
@@ -1869,7 +1955,7 @@ def test_fetch_onpage_signals_for_urls_does_not_blocklist_empty_content_recovere
     tmp_path: Path,
 ) -> None:
     url = "https://recovered.example/technical-seo/1"
-    blocklist = DomainBlocklist.load(tmp_path / "domain_blocklist.txt")
+    blocklist = DomainBlocklist.load(tmp_path / "blocklist.txt")
     first_response = fixture_onpage_instant_pages_response(url)
     first_result = first_response["tasks"][0]["result"][0]
     first_result["crawl_status"] = "Page content is empty"
@@ -1932,7 +2018,7 @@ def test_fetch_onpage_signals_for_urls_blocklists_only_after_second_pool_switch(
     tmp_path: Path,
 ) -> None:
     url = "https://example.com/technical-seo/1"
-    blocklist = DomainBlocklist.load(tmp_path / "domain_blocklist.txt")
+    blocklist = DomainBlocklist.load(tmp_path / "blocklist.txt")
     failed_response = {
         "status_code": 20000,
         "tasks": [
@@ -1972,7 +2058,7 @@ def test_fetch_onpage_signals_for_urls_blocklists_terminal_timeout(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     run_dir = tmp_path / "artifacts"
-    blocklist_path = tmp_path / "domain_blocklist.txt"
+    blocklist_path = tmp_path / "blocklist.txt"
     blocklist = DomainBlocklist.load(blocklist_path)
     url = "https://example.com/technical-seo/1"
     sleeps: list[float] = []
@@ -2137,6 +2223,109 @@ def test_build_live_payload_includes_backlinks_in_raw_provider_data(
     assert len(onpage_responses) == 1
     assert onpage_responses[0]["url"] == "https://example.com/technical-seo/1"
     assert "dataforseo.onpage_instant_pages" in payload["network_calls"]
+
+
+def test_run_live_warns_and_continues_after_short_keyword_expansion(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", "1")
+    monkeypatch.setenv("DATAFORSEO_LOGIN", "analyst@example.com")
+    monkeypatch.setenv("DATAFORSEO_PASSWORD", "dataforseo-secret")
+    requested_urls: list[str] = []
+
+    def dataforseo_transport(*, url: str, **_: object) -> dict[str, object]:
+        requested_urls.append(url)
+        if url.endswith("/keywords_data/google_ads/keywords_for_keywords/live"):
+            response = fixture_keyword_expansion_response("technical seo")
+            response["tasks"][0]["result"] = response["tasks"][0]["result"][:25]
+            return response
+        raise AssertionError(f"unexpected DataForSEO request: {url}")
+
+    monkeypatch.setattr("seo_rank.cli.DEFAULT_DATAFORSEO_TRANSPORT", dataforseo_transport)
+    def build_live_keyword_result(config: RunConfig, *, target_keyword: str, **_: object):
+        from seo_rank.cli import build_offline_keyword_result
+
+        return build_offline_keyword_result(config, target_keyword=target_keyword)
+
+    monkeypatch.setattr("seo_rank.cli.build_live_keyword_result", build_live_keyword_result)
+
+    assert (
+        main(
+            [
+                "run",
+                "--seed",
+                "technical seo",
+                "--output-dir",
+                str(tmp_path / "artifacts"),
+                "--keyword-limit",
+                "50",
+                "--live-providers",
+                "--skip-textrazor",
+            ]
+        )
+        == 0
+    )
+    assert "Requested 50 keywords, but DataForSEO returned 24 unique keywords; continuing" in capsys.readouterr().err
+    assert len(requested_urls) == 1
+
+
+def test_build_live_payload_uses_requested_keyword_limit_when_available(
+    monkeypatch,
+) -> None:
+    def fake_prepare_live_run_context(*args, **kwargs):  # noqa: ANN001, ANN003
+        del args, kwargs
+        return {
+            "credentials": type(
+                "LiveCredentials",
+                (),
+                {"dataforseo": DataForSeoCredentials("login", "password")},
+            )(),
+            "live_bge_enabled": False,
+            "bge_reranker": None,
+            "gemini_api_key": None,
+            "textrazor_credentials": None,
+            "location_code": 123,
+        }
+
+    def dataforseo_transport(*, url: str, **_: object) -> dict[str, object]:
+        assert url.endswith("/keywords_data/google_ads/keywords_for_keywords/live")
+        response = fixture_keyword_expansion_response("technical seo")
+        response["tasks"][0]["result"].extend(
+            {"keyword": f"technical seo extra {index}"} for index in range(1, 18)
+        )
+        return response
+
+    def build_live_keyword_result(config: RunConfig, *, target_keyword: str, **_: object):
+        from seo_rank.cli import build_offline_keyword_result
+
+        return build_offline_keyword_result(config, target_keyword=target_keyword)
+
+    monkeypatch.setattr("seo_rank.cli.prepare_live_run_context", fake_prepare_live_run_context)
+    monkeypatch.setattr("seo_rank.cli.build_live_keyword_result", build_live_keyword_result)
+
+    payload = build_live_payload(
+        RunConfig(
+            seed="technical seo",
+            location="United States",
+            language="en",
+            device="desktop",
+            depth=1,
+            keyword_limit=50,
+            output_dir=Path("/tmp/artifacts"),
+            model_name="fixture-similarity-v1",
+            dry_run=False,
+            skip_textrazor=True,
+            live_providers=True,
+        ),
+        env={},
+        dataforseo_transport=dataforseo_transport,
+        textrazor_transport=lambda **kwargs: None,
+    )
+
+    assert len(payload["keywords"]) == 50
+    assert len(payload["keyword_results"]) == 50
 
 
 def test_run_stored_run_cli_live_providers_fetches_onpage_when_missing(
@@ -2871,6 +3060,305 @@ def test_run_stored_run_expands_existing_tree_in_place(
     assert payload["catalog"]["datasets"]["keyword_serp"]["row_count"] == 3
     assert payload["catalog"]["datasets"]["analysis_mart"]["row_count"] == 3
     assert (output_dir / "stats" / "stats_summary.json").exists()
+
+
+def test_run_stored_run_applies_explicit_scope_and_refetches_shallow_serps(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.setenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", "1")
+    monkeypatch.setenv("DATAFORSEO_LOGIN", "analyst@example.com")
+    monkeypatch.setenv("DATAFORSEO_PASSWORD", "dataforseo-secret")
+
+    assert (
+        main(
+            [
+                "run",
+                "--seed",
+                "technical seo",
+                "--output-dir",
+                str(output_dir),
+                "--dry-run",
+                "--keyword-limit",
+                "1",
+                "--depth",
+                "1",
+                "--skip-textrazor",
+            ]
+        )
+        == 0
+    )
+
+    live_configs: list[RunConfig] = []
+
+    def build_live_keyword_result(config: RunConfig, *, target_keyword: str, **_: object):
+        from seo_rank.cli import build_offline_keyword_result
+
+        live_configs.append(config)
+        return build_offline_keyword_result(config, target_keyword=target_keyword)
+
+    monkeypatch.setattr(
+        "seo_rank.cli.build_live_keyword_result",
+        build_live_keyword_result,
+    )
+
+    assert (
+        main(
+            [
+                "run",
+                "--seed",
+                "technical seo",
+                "--stored-run",
+                str(output_dir),
+                "--keyword-limit",
+                "1",
+                "--depth",
+                "2",
+                "--device",
+                "mobile",
+                "--live-providers",
+                "--skip-textrazor",
+            ]
+        )
+        == 0
+    )
+
+    assert [(config.depth, config.device) for config in live_configs] == [(2, "mobile")]
+    payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
+    assert payload["config"]["depth"] == 2
+    assert payload["config"]["device"] == "mobile"
+    assert len(payload["keyword_results"][0]["serp_results"]) == 2
+
+
+def test_run_stored_run_warns_and_continues_after_shallow_live_serp(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.setenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", "1")
+    monkeypatch.setenv("DATAFORSEO_LOGIN", "analyst@example.com")
+    monkeypatch.setenv("DATAFORSEO_PASSWORD", "dataforseo-secret")
+
+    assert (
+        main(
+            [
+                "run",
+                "--seed",
+                "technical seo",
+                "--output-dir",
+                str(output_dir),
+                "--dry-run",
+                "--keyword-limit",
+                "1",
+                "--depth",
+                "20",
+                "--skip-textrazor",
+            ]
+        )
+        == 0
+    )
+
+    requests: list[tuple[str, dict[str, object]]] = []
+
+    def dataforseo_transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        del method, headers, timeout
+        request_body = json.loads(body.decode("utf-8"))[0]
+        requests.append((url, request_body))
+        if url.endswith("/serp/google/organic/live/advanced"):
+            return {
+                "tasks": [
+                    {
+                        "status_code": 20000,
+                        "result": [
+                            {
+                                "items": [
+                                    {
+                                        "type": "organic",
+                                        "rank_group": rank,
+                                        "url": f"https://example.com/result-{rank}",
+                                        "title": f"Result {rank}",
+                                    }
+                                    for rank in range(1, 50)
+                                ]
+                            }
+                        ],
+                    }
+                ]
+            }
+        raise AssertionError(f"unexpected downstream DataForSEO request: {url}")
+
+    monkeypatch.setattr("seo_rank.cli.DEFAULT_DATAFORSEO_TRANSPORT", dataforseo_transport)
+    monkeypatch.setattr("seo_rank.cli.materialize_run_tree", lambda *args, **kwargs: None)
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--stored-run",
+            str(output_dir),
+            "--keyword-limit",
+            "1",
+            "--depth",
+            "50",
+            "--device",
+            "mobile",
+            "--live-providers",
+            "--skip-textrazor",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert (
+        "technical seo: requested 50 organic SERP results; DataForSEO returned 49, "
+        "but 0 remained after domain blocklist filtering; continuing with available results"
+    ) in captured.err
+    assert len(requests) == 1
+    assert requests[0][1]["depth"] == 50
+    assert requests[0][1]["device"] == "mobile"
+
+
+def test_run_stored_run_warns_and_continues_after_short_refreshed_keyword_expansion(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.setenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", "1")
+    monkeypatch.setenv("DATAFORSEO_LOGIN", "analyst@example.com")
+    monkeypatch.setenv("DATAFORSEO_PASSWORD", "dataforseo-secret")
+
+    assert (
+        main(
+            [
+                "run",
+                "--seed",
+                "technical seo",
+                "--output-dir",
+                str(output_dir),
+                "--dry-run",
+                "--keyword-limit",
+                "1",
+                "--skip-textrazor",
+            ]
+        )
+        == 0
+    )
+
+    requested_urls: list[str] = []
+
+    def dataforseo_transport(
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: bytes,
+        timeout: float,
+    ) -> dict[str, object]:
+        del method, headers, body, timeout
+        requested_urls.append(url)
+        if url.endswith("/keywords_data/google_ads/keywords_for_keywords/live"):
+            response = fixture_keyword_expansion_response("technical seo")
+            response["tasks"][0]["result"] = response["tasks"][0]["result"][:25]
+            return response
+        raise AssertionError(f"unexpected DataForSEO request: {url}")
+
+    monkeypatch.setattr("seo_rank.cli.DEFAULT_DATAFORSEO_TRANSPORT", dataforseo_transport)
+    def build_live_keyword_result(config: RunConfig, *, target_keyword: str, **_: object):
+        from seo_rank.cli import build_offline_keyword_result
+
+        return build_offline_keyword_result(config, target_keyword=target_keyword)
+
+    monkeypatch.setattr("seo_rank.cli.build_live_keyword_result", build_live_keyword_result)
+
+    exit_code = main(
+        [
+            "run",
+            "--seed",
+            "technical seo",
+            "--stored-run",
+            str(output_dir),
+            "--keyword-limit",
+            "50",
+            "--live-providers",
+            "--skip-textrazor",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "Requested 50 keywords, but DataForSEO returned 24 unique keywords; continuing" in captured.err
+    assert len(requested_urls) == 1
+
+
+def test_run_stored_run_uses_persisted_keyword_limit_when_omitted(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+
+    assert (
+        main(
+            [
+                "run",
+                "--seed",
+                "technical seo",
+                "--output-dir",
+                str(output_dir),
+                "--dry-run",
+                "--keyword-limit=50",
+                "--depth",
+                "1",
+                "--skip-textrazor",
+            ]
+        )
+        == 0
+    )
+
+    assert (
+        main(
+            [
+                "run",
+                "--seed",
+                "technical seo",
+                "--stored-run",
+                str(output_dir),
+                "--skip-textrazor",
+            ]
+        )
+        == 0
+    )
+    assert "Requested 50 keywords, but DataForSEO returned 33 unique keywords; continuing" in capsys.readouterr().err
+
+
+def test_keyword_limit_cli_forms_are_equivalent() -> None:
+    from seo_rank.cli import build_parser
+
+    parser = build_parser()
+    equals = parser.parse_args(["run", "--seed", "technical seo", "--keyword-limit=50"])
+    separate = parser.parse_args(["run", "--seed", "technical seo", "--keyword-limit", "50"])
+
+    assert equals.keyword_limit == separate.keyword_limit == 50
+
+
+@pytest.mark.parametrize("value", ["0", "-1"])
+def test_keyword_limit_rejects_non_positive_values(value: str) -> None:
+    from seo_rank.cli import build_parser
+
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(
+            ["run", "--seed", "technical seo", "--keyword-limit", value]
+        )
 
 
 def test_run_stored_run_live_providers_refetches_nonusable_page_text_in_place(
@@ -4624,7 +5112,7 @@ def test_run_stored_run_refreshes_only_stale_serps_in_place(
                                         {
                                             "type": "organic",
                                             "rank_group": 1,
-                                            "url": "https://example.com/live/technical-seo/1",
+                                            "url": "https://fixture.test/live/technical-seo/1",
                                             "title": "Live Result",
                                             "description": "Live provider result.",
                                         }
@@ -4644,7 +5132,7 @@ def test_run_stored_run_refreshes_only_stale_serps_in_place(
                                         {
                                             "type": "organic",
                                             "rank_group": 1,
-                                            "url": "https://example.com/live/technical-seo-audit/1",
+                                            "url": "https://fixture.test/live/technical-seo-audit/1",
                                             "title": "Audit Result",
                                             "description": "Live provider result.",
                                         }
@@ -4693,6 +5181,8 @@ def test_run_stored_run_refreshes_only_stale_serps_in_place(
             "--live-backlinks",
             "--keyword-limit",
             "2",
+            "--depth",
+            "1",
             "--skip-textrazor",
             ]
         )
@@ -4747,7 +5237,7 @@ def test_run_stored_run_refreshes_only_stale_serps_in_place(
 
     assert exit_code == 0
     assert serp_keywords == ["technical seo audit"]
-    assert page_text_urls == ["https://example.com/live/technical-seo-audit/1"]
+    assert page_text_urls == ["https://fixture.test/live/technical-seo-audit/1"]
 
     payload = json.loads((output_dir / "run.json").read_text(encoding="utf-8"))
     assert payload["keywords"] == ["technical seo", "technical seo audit"]
@@ -4785,6 +5275,60 @@ def test_stored_serp_response_is_usable_rejects_empty_organic_items() -> None:
             ]
         }
     )
+
+
+def test_stored_serp_response_is_usable_honors_depth_above_default_cap() -> None:
+    response = {
+        "tasks": [
+            {
+                "status_code": 20000,
+                "result": [
+                    {
+                        "items": [
+                            {
+                                "type": "organic",
+                                "rank_group": rank,
+                                "url": f"https://example.com/{rank}",
+                                "title": f"Result {rank}",
+                            }
+                            for rank in range(1, 51)
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+
+    assert stored_serp_response_is_usable(response, depth=50)
+    assert not stored_serp_response_is_usable(response, depth=51)
+
+
+def test_stored_serp_response_is_usable_requires_retained_rows_at_requested_depth(
+    tmp_path: Path,
+) -> None:
+    response = {
+        "tasks": [
+            {
+                "status_code": 20000,
+                "result": [
+                    {
+                        "items": [
+                            {
+                                "type": "organic",
+                                "rank_group": rank,
+                                "url": f"https://example.com/{rank}",
+                                "title": f"Result {rank}",
+                            }
+                            for rank in range(1, 51)
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+    blocklist = DomainBlocklist(tmp_path / "blocklist.txt", {"example.com"})
+
+    assert not stored_serp_response_is_usable(response, depth=50, blocklist=blocklist)
 
 
 def test_run_writes_raw_response_parquet_and_catalog_metadata(

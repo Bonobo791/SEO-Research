@@ -2,6 +2,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import polars as pl
+import pytest
 
 from seo_rank.cli import build_parser, main
 from seo_rank.data.features import ensure_feature_marts_for_analysis
@@ -28,6 +29,16 @@ def test_build_parser_exposes_phase_45_commands() -> None:
         ]
     )
     assert parsed.stored_run == Path("/tmp/run-1")
+
+    assert parser.parse_args(
+        ["run", "--seed", "technical seo", "--debug", "1"]
+    ).debug == 1
+    assert parser.parse_args(
+        ["run", "--seed", "technical seo", "--debug=0"]
+    ).debug == 0
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["run", "--seed", "technical seo", "--debug", "2"])
 
     analyzed = parser.parse_args(
         [

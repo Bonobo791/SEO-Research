@@ -22,21 +22,6 @@ from seo_rank.stats.textrazor_explainability import (
 
 logger = logging.getLogger(__name__)
 
-FAST_RESAMPLING_DEFAULTS = {
-    "cv_folds": 3,
-    "cv_repeats": 2,
-    "bootstraps": 100,
-    "shapley_permutations": 200,
-    "domain_cv_repeats": 2,
-}
-EXHAUSTIVE_RESAMPLING_DEFAULTS = {
-    "cv_folds": 5,
-    "cv_repeats": 5,
-    "bootstraps": 500,
-    "shapley_permutations": 2000,
-    "domain_cv_repeats": 10,
-}
-
 
 def _positive_int(value: str) -> int:
     parsed = int(value)
@@ -78,50 +63,41 @@ def _parse_args() -> argparse.Namespace:
         help="Skip the interactive plot window (still writes PNG when matplotlib is available)",
     )
     parser.add_argument(
-        "--exhaustive",
+        "--individual-signals",
         action="store_true",
-        help="Use the legacy exhaustive resampling defaults; explicit values still override",
+        help="Also calculate full Shapley/CV/bootstrap measurements for each signal",
     )
     parser.add_argument(
         "--cv-folds",
         type=_cv_folds,
-        default=None,
-        help="Keyword-grouped CV folds for out-of-sample delta R² (fast: 3, exhaustive: 5)",
+        default=5,
+        help="Keyword-grouped CV folds for out-of-sample delta R² (default: 5)",
     )
     parser.add_argument(
         "--cv-repeats",
         type=_positive_int,
-        default=None,
-        help="Repeated keyword GroupKFold repeats for OOF R² (fast: 2, exhaustive: 5)",
+        default=10,
+        help="Repeated keyword GroupKFold repeats for OOF R² (default: 10)",
     )
     parser.add_argument(
         "--bootstraps",
         type=_positive_int,
-        default=None,
-        help="Keyword-bootstrap draws for OOS delta R² CIs (fast: 100, exhaustive: 500)",
+        default=500,
+        help="Keyword-bootstrap draws for OOS delta R² CIs (default: 500)",
     )
     parser.add_argument(
         "--shapley-permutations",
         type=_positive_int,
-        default=None,
-        help="Permutation-Shapley draws (fast: 200, exhaustive: 2000)",
+        default=2000,
+        help="Permutation-Shapley draws (default: 2000)",
     )
     parser.add_argument(
         "--domain-cv-repeats",
         type=_positive_int,
-        default=None,
-        help="Domain-held-out CV repeats (fast: 2, exhaustive: 10)",
+        default=10,
+        help="Domain-held-out CV repeats (default: 10)",
     )
-    args = parser.parse_args()
-    defaults = (
-        EXHAUSTIVE_RESAMPLING_DEFAULTS
-        if args.exhaustive
-        else FAST_RESAMPLING_DEFAULTS
-    )
-    for name, value in defaults.items():
-        if getattr(args, name) is None:
-            setattr(args, name, value)
-    return args
+    return parser.parse_args()
 
 
 def _require_run_artifacts(run_dir: Path) -> None:
@@ -470,13 +446,13 @@ def main() -> None:
     args = _parse_args()
     logger.info(
         "Relative importance budget folds=%d repeats=%d bootstraps=%d "
-        "shapley_permutations=%d domain_repeats=%d exhaustive=%s",
+        "shapley_permutations=%d domain_repeats=%d individual_signals=%s",
         args.cv_folds,
         args.cv_repeats,
         args.bootstraps,
         args.shapley_permutations,
         args.domain_cv_repeats,
-        args.exhaustive,
+        args.individual_signals,
     )
     run_dir = args.run.resolve()
     if not run_dir.is_dir():
@@ -520,6 +496,7 @@ def main() -> None:
     relative_importance = summarize_ranking_relative_importance(
         importance_panel,
         spec=spec,
+        include_individual_signals=args.individual_signals,
         cv_folds=args.cv_folds,
         cv_repeats=args.cv_repeats,
         bootstraps=args.bootstraps,

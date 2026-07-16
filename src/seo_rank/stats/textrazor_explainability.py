@@ -523,20 +523,13 @@ def _multivariate_feature_formula(
 
 
 RANKING_IMPORTANCE_GROUP_ORDER: tuple[str, ...] = (
-    "similarity",
-    "textrazor",
-    "backlinks",
-    "metadata_lengths",
-    "performance",
-    "crawl_architecture",
-    "structured_markup",
-    "document_structure",
-    "quality_flags",
-    "resource_footprint",
-    "presentation_metadata",
-    "delivery_configuration",
-    "legacy_embedding",
+    "relevance",
     "content",
+    "authority",
+    "technical",
+    "performance",
+    "resources",
+    "metadata_presentation",
 )
 
 CURATED_IMPORTANCE_COLUMNS: tuple[str, ...] = (
@@ -558,39 +551,52 @@ OOS_MIN_VARYING_GROUPS = 2
 OOS_MIN_BINARY_PREVALENCE = 0.10
 
 _RANKING_IMPORTANCE_FAMILY_KEYS: dict[str, tuple[str, ...]] = {
-    "similarity": (),
-    "textrazor": (),
-    "backlinks": ("backlinks_counts",),
+    "relevance": (
+        "bge",
+        "gemini_doc_retrieval",
+        "gemini_semantic_similarity",
+        "textrazor_entity_confidence_relevance",
+        "textrazor_topic_score",
+        "textrazor_category_classifier_score",
+        "textrazor_entailment_score_prior_context",
+    ),
+    "content": (
+        "textrazor_word_grammar_sense_spelling",
+        "textrazor_relation_property_noun_phrase",
+        "onpage_content_quality",
+    ),
+    "authority": ("backlinks_counts",),
     "performance": ("onpage_core_web_vitals",),
-    "content": ("onpage_content_quality",),
 }
 
-_ONPAGE_IMPORTANCE_GROUP_COLUMNS: dict[str, tuple[str, ...]] = {
-    "crawl_architecture": (
+_RANKING_IMPORTANCE_STATIC_COLUMNS: dict[str, tuple[str, ...]] = {
+    "technical": (
         "is_redirect",
         "follow",
         "inbound_links_count",
         "click_depth",
         "seo_friendly_url",
-    ),
-    "structured_markup": (
         "has_valid_structured_data",
         "has_micromarkup",
         "has_micromarkup_errors",
+        "flash",
+        "frame",
     ),
-    "document_structure": (
+    "content": (
         "h1_count",
         "h2_count",
         "h3_count",
         "high_content_rate",
         "high_character_count",
-    ),
-    "quality_flags": (
         "duplicate_meta_tags_count",
         "duplicate_content",
         "lorem_ipsum",
     ),
-    "resource_footprint": (
+    "performance": (
+        "cache_control_cachable",
+        "cache_control_ttl",
+    ),
+    "resources": (
         "images_count",
         "images_size",
         "scripts_count",
@@ -599,17 +605,14 @@ _ONPAGE_IMPORTANCE_GROUP_COLUMNS: dict[str, tuple[str, ...]] = {
         "small_page_size",
         "resource_warnings_count",
     ),
-    "presentation_metadata": (
+    "metadata_presentation": (
+        "title_length",
+        "description_length",
         "has_og_tags",
         "has_twitter_tags",
         "no_favicon",
         "no_image_title",
     ),
-    "delivery_configuration": (
-        "cache_control_cachable",
-        "cache_control_ttl",
-    ),
-    "legacy_embedding": ("flash", "frame"),
 }
 
 _RANKING_IMPORTANCE_JOIN_KEYS: tuple[str, ...] = (
@@ -629,21 +632,10 @@ def ranking_importance_factor_columns(
 
     groups: dict[str, tuple[str, ...]] = {}
     for group in RANKING_IMPORTANCE_GROUP_ORDER:
-        if group == "backlinks" and not include_backlinks:
+        if group == "authority" and not include_backlinks:
             groups[group] = ()
             continue
-        if group in _ONPAGE_IMPORTANCE_GROUP_COLUMNS:
-            groups[group] = _ONPAGE_IMPORTANCE_GROUP_COLUMNS[group]
-            continue
-        if group == "similarity":
-            family_keys = spec.signal_families.similarity_keys
-        elif group == "textrazor":
-            family_keys = spec.signal_families.textrazor_keys
-        elif group == "metadata_lengths":
-            groups[group] = ("title_length", "description_length")
-            continue
-        else:
-            family_keys = _RANKING_IMPORTANCE_FAMILY_KEYS[group]
+        family_keys = _RANKING_IMPORTANCE_FAMILY_KEYS.get(group, ())
 
         columns: list[str] = []
         for family_key in family_keys:
@@ -657,7 +649,9 @@ def ranking_importance_factor_columns(
                 continue
             seen.add(column)
             deduped.append(column)
-        groups[group] = tuple(deduped)
+        groups[group] = tuple(
+            [*deduped, *_RANKING_IMPORTANCE_STATIC_COLUMNS.get(group, ())]
+        )
     return groups
 
 
@@ -692,8 +686,9 @@ def summarize_ranking_relative_importance(
     panel: pl.DataFrame,
     *,
     spec: AnalysisSpec | None = None,
+    include_individual_signals: bool = False,
     cv_folds: int = 5,
-    cv_repeats: int = 5,
+    cv_repeats: int = 10,
     bootstraps: int = 500,
     shapley_permutations: int = 2000,
     domain_cv_repeats: int = 10,
@@ -712,6 +707,7 @@ def summarize_ranking_relative_importance(
     if prepared is None:
         return {
             "status": "skipped",
+            "individual_signals_included": include_individual_signals,
             "skipped_reason": "no_usable_rows",
             "row_count": panel.height,
             "keyword_count": int(panel["target_keyword_id"].n_unique()) if not panel.is_empty() else 0,
@@ -724,6 +720,7 @@ def summarize_ranking_relative_importance(
     if prepared.get("status") == "skipped":
         return {
             "status": "skipped",
+            "individual_signals_included": include_individual_signals,
             "skipped_reason": prepared["skipped_reason"],
             "row_count": prepared["row_count"],
             "keyword_count": prepared.get("keyword_count", 0),
@@ -750,6 +747,7 @@ def summarize_ranking_relative_importance(
     if full_r2 is None:
         return {
             "status": "skipped",
+            "individual_signals_included": include_individual_signals,
             "skipped_reason": "full_model_not_fitted",
             "row_count": prepared["row_count"],
             "keyword_count": keyword_count,
@@ -774,25 +772,33 @@ def summarize_ranking_relative_importance(
     shapley_total = sum(
         value for value in shapley_values.values() if value is not None
     )
-    signal_factor_columns = {
-        column: (column,)
-        for columns in factor_columns.values()
-        for column in columns
-    }
-    signal_shapley_statistics = _permutation_shapley_statistics(
-        model_data,
-        signal_factor_columns,
-        selected_columns=selected_columns,
-        keyword_count=keyword_count,
-        control_columns=control_columns,
-        permutations=shapley_permutations,
-        random_state=random_state,
-        progress_label="signal Shapley",
+    signal_factor_columns = (
+        {
+            column: (column,)
+            for columns in factor_columns.values()
+            for column in columns
+        }
+        if include_individual_signals
+        else {}
     )
-    signal_shapley_values = signal_shapley_statistics["values"]
-    signal_shapley_total = sum(
-        value for value in signal_shapley_values.values() if value is not None
-    )
+    if include_individual_signals:
+        signal_shapley_statistics = _permutation_shapley_statistics(
+            model_data,
+            signal_factor_columns,
+            selected_columns=selected_columns,
+            keyword_count=keyword_count,
+            control_columns=control_columns,
+            permutations=shapley_permutations,
+            random_state=random_state,
+            progress_label="signal Shapley",
+        )
+        signal_shapley_values = signal_shapley_statistics["values"]
+        signal_shapley_total = sum(
+            value for value in signal_shapley_values.values() if value is not None
+        )
+    else:
+        signal_shapley_values = {}
+        signal_shapley_total = 0.0
 
     oos_panel = _prepare_oos_importance_frame(panel, factor_columns)
     all_importance_factors = {**factor_columns, **signal_factor_columns}
@@ -860,20 +866,24 @@ def summarize_ranking_relative_importance(
             and shapley_values[group] is not None
             else None
         )
-        metric_rows = _metric_relative_importance_rows(
-            model_data,
-            group=group,
-            group_columns=factor_columns[group],
-            selected_columns=selected_columns,
-            keyword_count=keyword_count,
-            control_columns=control_columns,
-            full_r2=full_r2,
-            shapley_values=signal_shapley_values,
-            shapley_total=signal_shapley_total,
-            oos_result=oos_result,
-            oos_bootstrap=oos_bootstrap,
-            domain_holdout=domain_holdout,
-            domain_bootstrap=domain_bootstrap,
+        metric_rows = (
+            _metric_relative_importance_rows(
+                model_data,
+                group=group,
+                group_columns=factor_columns[group],
+                selected_columns=selected_columns,
+                keyword_count=keyword_count,
+                control_columns=control_columns,
+                full_r2=full_r2,
+                shapley_values=signal_shapley_values,
+                shapley_total=signal_shapley_total,
+                oos_result=oos_result,
+                oos_bootstrap=oos_bootstrap,
+                domain_holdout=domain_holdout,
+                domain_bootstrap=domain_bootstrap,
+            )
+            if include_individual_signals
+            else []
         )
         oos_group = (oos_result or {}).get("groups", {}).get(group, {})
         oos_ci = (oos_bootstrap or {}).get(group, {})
@@ -972,6 +982,7 @@ def summarize_ranking_relative_importance(
 
     return {
         "status": "computed",
+        "individual_signals_included": include_individual_signals,
         "row_count": prepared["row_count"],
         "keyword_count": keyword_count,
         "oos_row_count": None if oos_panel is None else int(len(oos_panel)),
@@ -1167,8 +1178,7 @@ def _prepare_ranking_importance_context(
     candidate_columns = tuple(
         dict.fromkeys(
             [
-                *factor_columns["similarity"],
-                *factor_columns["textrazor"],
+                *requested_columns,
                 *CURATED_IMPORTANCE_COLUMNS,
             ]
         )
@@ -2469,7 +2479,7 @@ def _metadata_only_oof_importance(
         return None
     columns = tuple(
         column
-        for column in (*factor_columns["metadata_lengths"], *REGRESSION_CONTROL_COLUMNS)
+        for column in (*factor_columns["metadata_presentation"], *REGRESSION_CONTROL_COLUMNS)
         if column in model_data.columns
     )
     if not columns:
@@ -2477,7 +2487,7 @@ def _metadata_only_oof_importance(
     metadata_data = model_data.copy()
     metadata_data.attrs["predictor_columns"] = columns
     empty_groups = {group: () for group in RANKING_IMPORTANCE_GROUP_ORDER}
-    empty_groups["metadata_lengths"] = factor_columns["metadata_lengths"]
+    empty_groups["metadata_presentation"] = factor_columns["metadata_presentation"]
     return _compute_grouped_oof_importance(
         metadata_data,
         empty_groups,

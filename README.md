@@ -41,7 +41,7 @@ seo-rank run --seed "technical seo" --dry-run --keyword-limit 25 --depth 3 --ski
 | Flag | Role |
 |------|------|
 | `--dry-run` | Fixture/offline run; skips Phase 5 stats |
-| `--keyword-limit` | Max cluster keywords (default `1`) |
+| `--keyword-limit` | Requested cluster maximum (default `1`); live runs warn and continue if DataForSEO returns fewer unique keywords |
 | `--depth` | Max organic SERP rows (default `20`) |
 | `--skip-textrazor` | Skip TextRazor entities |
 | `--output-dir` | Run root (default `runs/{run_id}`) |
@@ -56,8 +56,9 @@ seo-rank run --seed "technical seo" --stored-run runs/RUN_ID
 ```
 
 Use `--stored-run` to resume stored runs in place. It reuses existing raw responses
-and completed measurements. If the stored run has more keywords than the current
-`--keyword-limit`, the CLI expands the limit to match.
+and completed measurements. Without an explicit `--keyword-limit`, replay uses the
+persisted limit. A requested limit is not guaranteed: the single-seed Google Ads
+expansion may return fewer unique keywords, in which case the CLI warns and continues.
 
 **Expand existing run** (raise the keyword cap on the same tree):
 
@@ -68,7 +69,7 @@ seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --keyword-limit 25
 | Flag | Role |
 |------|------|
 | `--stored-run` | Resume/expand in place |
-| `--keyword-limit` | Raise to grow the cluster |
+| `--keyword-limit` | Requested cluster maximum; DataForSEO availability can yield a smaller cluster |
 | `--skip-textrazor` | Sticky on replay: suppresses TextRazor even if the saved run had it on |
 
 ### Live DataForSEO
@@ -311,10 +312,11 @@ Each depth reports `keyword_count` and `inference_mode` (`confirmatory` /
 | `--language` | `en` | Expansion/SERP language |
 | `--device` | `desktop` | `desktop` or `mobile` |
 | `--depth` | `20` | Max organic SERP rows |
-| `--keyword-limit` | `1` | Max cluster keywords |
+| `--keyword-limit` | `1` | Requested cluster maximum; live/replay runs warn when fewer unique keywords are available |
 | `--output-dir` | `runs/{run_id}` | Run root |
 | `--model-name` | `fixture-similarity-v1` | Recorded in `run.json` |
 | `--dry-run` | off | Fixture/offline; skip Phase 5 stats |
+| `--debug` | `0` | With `1`, write full intermediate payloads including raw provider data to `debug.json` |
 | `--skip-textrazor` | off | Skip TextRazor; sticky on stored-run replay |
 | `--stored-run` | — | Resume/expand; with `--live-providers`, re-fetch non-usable `page_text` |
 | `--live-providers` | off | Live DataForSEO + staged page text; on stored-run, also re-pulls non-usable `page_text` |
@@ -361,12 +363,13 @@ run (`parquet/analysis_mart` + `parquet/textrazor_page_metrics`):
 python analysis/textrazor_ranking_r2.py --run runs/RUN_ID
 python analysis/textrazor_ranking_r2.py --run runs/RUN_ID --depth top_10
 python analysis/textrazor_ranking_r2.py --run runs/RUN_ID --no-show
-python analysis/textrazor_ranking_r2.py --run runs/RUN_ID --exhaustive
+python analysis/textrazor_ranking_r2.py --run runs/RUN_ID --individual-signals
 ```
 
-Routine runs use reduced resampling budgets and log stage progress to stderr.
-`--exhaustive` restores the legacy 5-fold/5-repeat/500-bootstrap/2,000-Shapley/
-10-domain-repeat defaults; explicit resampling arguments override either preset.
+The default runs high-precision grouped importance with 5 folds, 10 keyword-CV
+repeats, 500 bootstraps, 2,000 Shapley permutations, and 10 domain-CV repeats.
+`--individual-signals` applies the same measurements to each signal. Long-running
+stage progress is logged to stderr; explicit resampling arguments override defaults.
 
 Writes `stats/ranking_r2.json`, `stats/ranking_r2_curated_model.png`, and
 `stats/ranking_r2_entity_relevance.png`.
