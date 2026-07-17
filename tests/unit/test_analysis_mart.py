@@ -77,7 +77,7 @@ def test_build_analysis_mart_validates_the_analysis_frame_before_sinking(
         calls.append(("validate", tuple(kwargs["required_columns"])))
         return frame
 
-    def fake_write_feature_dataset(run_dir: Path, *, name: str, frame: pl.LazyFrame):
+    def fake_write_feature_dataset(run_dir: Path, *, name: str, frame: pl.LazyFrame, **kwargs):
         calls.append(("write", name))
         return {
             "schema_version": "analysis_mart.v1",

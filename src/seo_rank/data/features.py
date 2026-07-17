@@ -15,8 +15,10 @@ from seo_rank.data.validate import (
     align_lazyframe_schema,
     validate_frame_contract,
     validate_materialized_frame_contract,
+    with_serp_depth_bounds,
 )
 from seo_rank.domain_blocklist import DomainBlocklist
+from seo_rank.dataforseo import DEFAULT_SERP_DEPTH
 
 FEATURE_SCHEMA_VERSION = "feature_marts.v3"
 SITE_SCALE_COLUMNS = (
@@ -1106,6 +1108,7 @@ def build_feature_marts(run_dir: Path) -> dict[str, object]:
     run_dir = Path(run_dir)
     run_json_path = run_dir / "run.json"
     run_payload = json.loads(run_json_path.read_text(encoding="utf-8"))
+    depth = _run_serp_depth(run_payload)
     catalog: dict[str, object] = run_payload.get("catalog", {})
     if not isinstance(catalog, dict):
         catalog = {}
@@ -1137,18 +1140,23 @@ def build_feature_marts(run_dir: Path) -> dict[str, object]:
 
     for name, frame in feature_frames.items():
         validation = FEATURE_VALIDATION_RULES[name]
+        bounded_columns = with_serp_depth_bounds(
+            validation.get("bounded_columns"),
+            depth=depth,
+        )
         frame = validate_frame_contract(
             frame,
             required_columns=FEATURE_REQUIRED_COLUMNS[name],
             expected_schema=validation.get("expected_schema"),
             unique_columns=validation.get("unique_columns", ()),
             non_null_columns=validation.get("non_null_columns", ()),
-            bounded_columns=validation.get("bounded_columns"),
+            bounded_columns=bounded_columns,
         )
         dataset_catalog[name] = write_feature_dataset(
             run_dir,
             name=name,
             frame=frame,
+            bounded_columns=bounded_columns,
         )
 
     run_payload["catalog"] = catalog
@@ -1165,6 +1173,7 @@ def build_analysis_mart(run_dir: Path) -> dict[str, object]:
     run_dir = Path(run_dir)
     run_json_path = run_dir / "run.json"
     run_payload = json.loads(run_json_path.read_text(encoding="utf-8"))
+    depth = _run_serp_depth(run_payload)
     catalog: dict[str, object] = run_payload.get("catalog", {})
     if not isinstance(catalog, dict):
         catalog = {}
@@ -1184,12 +1193,19 @@ def build_analysis_mart(run_dir: Path) -> dict[str, object]:
         expected_schema=FEATURE_VALIDATION_RULES["analysis_mart"]["expected_schema"],
         unique_columns=FEATURE_VALIDATION_RULES["analysis_mart"]["unique_columns"],
         non_null_columns=FEATURE_VALIDATION_RULES["analysis_mart"]["non_null_columns"],
-        bounded_columns=FEATURE_VALIDATION_RULES["analysis_mart"]["bounded_columns"],
+        bounded_columns=with_serp_depth_bounds(
+            FEATURE_VALIDATION_RULES["analysis_mart"]["bounded_columns"],
+            depth=depth,
+        ),
     )
     dataset_catalog["analysis_mart"] = write_feature_dataset(
         run_dir,
         name="analysis_mart",
         frame=analysis_frame,
+        bounded_columns=with_serp_depth_bounds(
+            FEATURE_VALIDATION_RULES["analysis_mart"]["bounded_columns"],
+            depth=depth,
+        ),
     )
 
     run_payload["catalog"] = catalog
@@ -1205,6 +1221,9 @@ def write_feature_dataset(
     *,
     name: str,
     frame: pl.LazyFrame,
+    bounded_columns: Mapping[
+        str, tuple[float | int | None, float | int | None]
+    ] | None = None,
 ) -> dict[str, object]:
     dataset_dir = run_dir / "parquet" / name
     dataset_dir.mkdir(parents=True, exist_ok=True)
@@ -1213,6 +1232,11 @@ def write_feature_dataset(
     if temp_path.exists():
         temp_path.unlink()
     validation = FEATURE_VALIDATION_RULES[name]
+    bounds = (
+        validation.get("bounded_columns")
+        if bounded_columns is None
+        else bounded_columns
+    )
     try:
         # ponytail: sink to temp then replace so a failed rewrite cannot leave
         # an empty dataset dir that breaks later scan_curated_table calls.
@@ -1221,7 +1245,7 @@ def write_feature_dataset(
             pl.from_arrow(pq.read_table(temp_path)),
             unique_columns=validation.get("unique_columns", ()),
             non_null_columns=validation.get("non_null_columns", ()),
-            bounded_columns=validation.get("bounded_columns"),
+            bounded_columns=bounds,
         )
     except ValueError as error:
         if temp_path.exists():
@@ -1243,6 +1267,16 @@ def write_feature_dataset(
             file_path.relative_to(run_dir).as_posix(): file_sha256(file_path)
         },
     }
+
+
+def _run_serp_depth(run_payload: Mapping[str, object]) -> int:
+    config = run_payload.get("config")
+    if not isinstance(config, Mapping):
+        return DEFAULT_SERP_DEPTH
+    depth = config.get("depth", DEFAULT_SERP_DEPTH)
+    if isinstance(depth, bool) or not isinstance(depth, int) or depth < 1:
+        raise ValueError("run config depth must be a positive integer")
+    return depth
 
 
 def stable_id(*parts: object) -> str:

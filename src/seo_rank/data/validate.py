@@ -4,6 +4,32 @@ from collections.abc import Iterable, Mapping
 
 import polars as pl
 
+SERP_DEPTH_BOUND_COLUMNS = frozenset(
+    {
+        "serp_rank",
+        "best_serp_rank",
+        "worst_serp_rank",
+        "bge_rank",
+        "gemini_doc_retrieval_rank",
+        "gemini_semantic_similarity_rank",
+    }
+)
+
+
+def with_serp_depth_bounds(
+    bounded_columns: Mapping[str, tuple[float | int | None, float | int | None]] | None,
+    *,
+    depth: int,
+) -> dict[str, tuple[float | int | None, float | int | None]]:
+    """Set persisted SERP-derived rank bounds to a run's requested depth."""
+
+    if depth < 1:
+        raise ValueError("SERP depth must be greater than 0")
+    return {
+        column: (minimum, depth if column in SERP_DEPTH_BOUND_COLUMNS else maximum)
+        for column, (minimum, maximum) in (bounded_columns or {}).items()
+    }
+
 
 def align_lazyframe_schema(
     frame: pl.LazyFrame,

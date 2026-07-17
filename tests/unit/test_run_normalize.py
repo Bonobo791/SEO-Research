@@ -128,6 +128,62 @@ def test_normalize_run_materializes_curated_tables_from_raw_responses(
     assert run_json["catalog"]["datasets"]["similarity_scores"]["row_count"] == 1
 
 
+def test_run_materializes_requested_depth_above_top_twenty(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    blocklist_path = tmp_path / "blocklist.txt"
+    monkeypatch.delenv("SEO_RANK_ENABLE_LIVE_PROVIDERS", raising=False)
+    monkeypatch.setattr(
+        "seo_rank.domain_blocklist._resolve_default_path",
+        lambda: blocklist_path,
+    )
+
+    def fixture_with_fifty_organic_results(keyword: str) -> dict[str, object]:
+        response = fixture_serp_response(keyword)
+        items = response["tasks"][0]["result"][0]["items"]
+        assert isinstance(items, list)
+        items.extend(
+            {
+                "type": "organic",
+                "rank_group": rank,
+                "url": f"https://example.com/{keyword.replace(' ', '-')}/{rank}",
+                "title": f"{keyword.title()} Organic Result {rank}",
+                "description": f"Fixture organic result {rank} for {keyword}.",
+            }
+            for rank in range(26, 51)
+        )
+        return response
+
+    monkeypatch.setattr(
+        "seo_rank.cli.fixture_serp_response",
+        fixture_with_fifty_organic_results,
+    )
+
+    assert (
+        main(
+            [
+                "run",
+                "--seed",
+                "technical seo",
+                "--depth",
+                "50",
+                "--output-dir",
+                str(output_dir),
+                "--dry-run",
+            ]
+        )
+        == 0
+    )
+
+    serp_items = ds.dataset(
+        output_dir / "parquet" / "serp_items",
+        format="parquet",
+    ).to_table().to_pylist()
+    assert sorted(row["serp_rank"] for row in serp_items) == list(range(1, 51))
+
+
 def test_normalize_run_materializes_backlinks_table_from_summary_only_with_null_dofollow(
     tmp_path: Path,
     monkeypatch,
@@ -3173,7 +3229,7 @@ def test_write_curated_dataset_uses_lazy_sink_parquet_with_statistics(
         schema=CURATED_SCHEMAS["keywords"],
     )
 
-    assert captured["path"] == run_dir / "parquet" / "keywords" / "part-0.parquet"
+    assert captured["path"] == run_dir / "parquet" / "keywords" / "part-0.parquet.tmp"
     assert captured["kwargs"] == {"compression": "zstd", "statistics": True}
     assert [row["target_keyword_id"] for row in captured["rows"]] == ["kw-1", "kw-2"]
     assert catalog["row_count"] == 2

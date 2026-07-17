@@ -11,6 +11,7 @@ from seo_rank.cli import main
 from seo_rank.cli import RAW_RESPONSE_SCHEMA
 from seo_rank.cli import build_raw_response_record
 from seo_rank.data.features import BACKLINKS_ANALYSIS_REQUIRED_COLUMNS
+from seo_rank.data.features import FEATURE_VALIDATION_RULES
 from seo_rank.data.features import ONPAGE_FEATURES_BOUNDED_COLUMNS
 from seo_rank.data.features import ONPAGE_FEATURES_EXTRA_COLUMNS
 from seo_rank.data.features import ONPAGE_FEATURES_REQUIRED_COLUMNS
@@ -21,6 +22,7 @@ from seo_rank.data.features import (
 )
 from seo_rank.data.normalize import CURATED_VALIDATION_RULES
 from seo_rank.data.normalize import normalize_run
+from seo_rank.data.validate import with_serp_depth_bounds
 from seo_rank.dataforseo import BACKLINKS_QUERY_SUMMARY
 from seo_rank.dataforseo import fixture_backlinks_response
 from seo_rank.dataforseo import fixture_onpage_instant_pages_response
@@ -82,6 +84,18 @@ LEGACY_ONPAGE_META_COLUMNS = (
     "time_to_interactive_ms",
     "first_input_delay_ms",
 )
+
+
+def test_feature_rank_bounds_follow_the_requested_serp_depth() -> None:
+    bounds = with_serp_depth_bounds(
+        FEATURE_VALIDATION_RULES["analysis_mart"]["bounded_columns"],
+        depth=50,
+    )
+
+    assert bounds["serp_rank"] == (1, 50)
+    assert bounds["bge_rank"] == (1, 50)
+    assert bounds["gemini_doc_retrieval_rank"] == (1, 50)
+    assert bounds["gemini_semantic_similarity_rank"] == (1, 50)
 
 
 def test_materialization_drops_blocklisted_domain_rows_and_replaces_stale_parts(
@@ -490,7 +504,7 @@ def test_build_feature_marts_validates_each_feature_frame_before_sinking(
         calls.append(("validate", tuple(kwargs["required_columns"])))
         return frame
 
-    def fake_write_feature_dataset(run_dir: Path, *, name: str, frame: pl.LazyFrame):
+    def fake_write_feature_dataset(run_dir: Path, *, name: str, frame: pl.LazyFrame, **kwargs):
         calls.append(("write", name))
         return {
             "schema_version": "feature_marts.v1",

@@ -12,6 +12,7 @@ from seo_rank.data.scans import scan_raw_responses
 from seo_rank.data.validate import (
     validate_frame_contract,
     validate_materialized_frame_contract,
+    with_serp_depth_bounds,
 )
 from seo_rank.domain_blocklist import DomainBlocklist
 from seo_rank.dataforseo import (
@@ -1002,6 +1003,10 @@ def normalize_run(run_dir: Path) -> dict[str, object]:
             name=name,
             frame=frame,
             schema=CURATED_SCHEMAS[name],
+            bounded_columns=with_serp_depth_bounds(
+                CURATED_VALIDATION_RULES[name].get("bounded_columns"),
+                depth=depth,
+            ),
         )
 
     run_payload["catalog"] = catalog
@@ -2321,8 +2326,16 @@ def write_curated_lazyframe_dataset(
     name: str,
     frame: pl.LazyFrame,
     schema: pa.Schema,
+    bounded_columns: Mapping[
+        str, tuple[float | int | None, float | int | None]
+    ] | None = None,
 ) -> dict[str, object]:
     validation = CURATED_VALIDATION_RULES[name]
+    bounds = (
+        validation.get("bounded_columns")
+        if bounded_columns is None
+        else bounded_columns
+    )
     try:
         frame = validate_frame_contract(
             frame,
@@ -2330,14 +2343,14 @@ def write_curated_lazyframe_dataset(
             expected_schema=validation.get("expected_schema"),
             unique_columns=validation.get("unique_columns", ()),
             non_null_columns=validation.get("non_null_columns", ()),
-            bounded_columns=validation.get("bounded_columns"),
+            bounded_columns=bounds,
         )
         materialized_frame = frame.collect(engine="streaming")
         validate_materialized_frame_contract(
             materialized_frame,
             unique_columns=validation.get("unique_columns", ()),
             non_null_columns=validation.get("non_null_columns", ()),
-            bounded_columns=validation.get("bounded_columns"),
+            bounded_columns=bounds,
         )
     except ValueError as error:
         raise ValueError(f"{name} validation failed: {error}") from error
