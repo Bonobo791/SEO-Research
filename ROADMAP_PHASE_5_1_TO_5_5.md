@@ -1,4 +1,6 @@
-# Phase 5.1 — Live provider failure handling
+<!-- Part of the split roadmap. Index: ROADMAP.md -->
+
+### Phase 5.1 — Live provider failure handling
 
 DataForSEO top-level and task-level failures are logged as warnings and the live
 run continues. The failed response is retained in `parquet/raw_responses`; its
@@ -80,9 +82,7 @@ S6-10, and S6-12.
 | CLI `--live-*` flags override stored config on replay | 4 | Open |
 | Stale failed SERP rows not retained after successful refresh | 5 | Open |
 
----
-
-# Phase 5.2 — Live Gemini/BGE fail-fast on empty scoring work
+### Phase 5.2 — Live Gemini/BGE fail-fast on empty scoring work
 
 Stop multi-keyword live runs when a keyword produces **no scorable panel rows**
 after upstream fetches, instead of logging `gemini embeddings` / `bge scoring`,
@@ -195,9 +195,7 @@ empty-output guards run against the intended live/offline config.
 | Run-start Gemini billing note + optional embed preflight | 5 | Open |
 | Progress distinguishes fixture vs live vs skipped | 6 | Open |
 
----
-
-# Phase 5.4 — Exploratory extensions (deferred)
+### Phase 5.4 — Exploratory extensions (deferred)
 
 - Rank-decile segments (ranks 1–3 vs 4–10 vs 11–20).
 - Keyword heterogeneity deep-dives (decision C): per-keyword slopes as
@@ -205,9 +203,7 @@ empty-output guards run against the intended live/offline config.
 - Random 20% keyword holdout for confirmatory pass — **Phase 5.6** (slice 5).
 - LOWESS / CCPR diagnostic plots as optional artifacts.
 
----
-
-# Phase 5.5 - Analysis Expansion
+### Phase 5.5 - Analysis Expansion
 
 - Per keyword: top-20 SERP; passage and domain URL scoring vs target
   keyword; domain URL cap 1000; skip domains over 1000 URLs
