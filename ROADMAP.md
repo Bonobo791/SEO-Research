@@ -991,6 +991,12 @@ text so similarity features better mirror hybrid search-engine retrieval
   optional combined rank for observational analysis against observed Google
   positions.
 
+> **Update (Phase 10):** the bi-encoder retrieval stage (Slice 2 below) is
+> promoted into Phase 10 Slice 3 as the live dual-encoder write path for the
+> `embeddings` mart — its vectors become the forward-looking source for
+> centroid/radius/focus computation. This phase remains the scoring-pipeline
+> context; Phase 10 owns vector persistence.
+
 #### Dev slices
 
 1. **[ ] Slice 1 — Lexical / sparse feature**
@@ -2056,6 +2062,413 @@ redirected URL.
 | Handoff rows are deduplicated by exact `url × target_keyword` and do not alter non-blocklisted retrieval | 9.3 | Open |
 | Stored-run rebuild and schema/key validation are covered by tests | 9.4 | Open |
 
+### Phase 10 — Embedding Store (keystone)
+
+Persist the dense vectors that BGE and Gemini already compute and throw away,
+so centroid/radius/focus math and the universe layer have something to compute
+on. Today `bge_reranker.py` is a cross-encoder that returns a scalar logit per
+(keyword, page) pair (no vector exists to store), and `gemini_embeddings.py`
+writes the full `EmbedContentResponse` (with the 3072-d vector) into
+`raw_responses/endpoint=gemini_embeddings` but nothing parses it into a usable
+form. This phase adds a curated embeddings mart and a self-owned dual-encoder
+path going forward.
+
+**Primary decision (v1):** two write paths. (1) **Normalize-from-raw:** a
+curated `embeddings` table materialized from the existing
+`endpoint=gemini_embeddings` raw payloads (no re-fetch), unit-normalized, keyed
+`(run_id, target_keyword_id, canonical_url_hash, role)` where
+`role ∈ {query, page, passage}`. (2) **Live dual-encoder:** the deferred Phase
+5.75 BGE-m3 bi-encoder becomes the forward-looking source of self-owned vectors
+(query and page encoded separately → dot-product = retrieval score), persisted
+to the same mart. Model name/version is pinned in `run.json` `config` and in
+every `embeddings` row — scores are only comparable within one model.
+
+**Mart columns (v1):** `run_id`, `target_keyword_id`, `canonical_url_hash`
+(null for `role=query`), `role`, `model`, `dim`, `vector` (fixed-size list of
+float32, L2-normalized), `source` (`gemini_embeddings_raw` | `bge_m3_live`).
+
+**Guardrails:** a row whose `model` differs from the run's pinned model is
+excluded from any pooled computation (never silently mix spaces); `dim` must
+match the model registry entry; passage rows require a non-null
+`page_id`/`passage_id` join key to `passages`.
+
+**Out of scope for 10:** centroid/radius/focus computation (Phase 11), any
+stats wiring (Phase 11 registers these as families), passage MaxSim scoring
+(Phase 11.5).
+
+#### Dev slices
+
+**Progress:** 0 of 6 shipped.
+
+1. **[ ] Slice 1 — Gemini raw → curated embeddings**
+   - `build_embeddings_frame()` in `data/normalize.py`: parse
+     `endpoint=gemini_embeddings` payloads, extract the float vector per
+     (role, keyword, URL), L2-normalize, emit the mart schema above.
+   - Null/excluded when payload missing, malformed, or model mismatch.
+   - Tests: `test_run_normalize.py` with real-shaped `EmbedContentResponse`
+     fixtures; unit-norm assertion; dedupe on latest `timestamp`.
+
+2. **[ ] Slice 2 — Embeddings feature mart + validation**
+   - `data/features.py` entry; fixed-size-list validation (`dim` consistent
+     per model); `vector` excluded from `ANALYSIS_REQUIRED_COLUMNS` (it is a
+     store, not a predictor column).
+   - Tests: `test_feature_marts.py` schema + bounds.
+
+3. **[ ] Slice 3 — BGE-m3 dual-encoder live path (promote Phase 5.75 Slice 2)**
+   - Query and page encoded separately with `BAAI/bge-m3`; dot-product
+     retrieval score; vectors persisted to the same mart with
+     `source=bge_m3_live`.
+   - `--live-bge` wiring; defer model load until first scorable keyword
+     (consistent with Phase 5.2 Slice 3).
+   - Tests: score shaping; dot-product == persisted retrieval score.
+
+4. **[ ] Slice 4 — Query + passage embeddings**
+   - Extend both write paths to `role=query` (keyword text) and
+     `role=passage` (from `passages`); passage rows carry join keys.
+   - Tests: passage grain round-trip; query rows have null URL hash.
+
+5. **[ ] Slice 5 — Model registry + pinning**
+   - `EMBEDDING_MODEL_REGISTRY` (name → dim, normalize rule); `run.json`
+     records the pinned model; cross-model exclusion guard.
+   - Tests: mixed-model panel → foreign-model rows dropped with a logged reason.
+
+6. **[ ] Slice 6 — Golden fixture + stored-run regression**
+   - Synthetic `endpoint=gemini_embeddings` payloads with known vectors;
+     assert the curated mart reproduces them (values, norms, keys) without
+     re-fetching.
+   - Stored-run: re-normalize an old run materializes `embeddings` from raw
+     with zero live calls.
+
+#### Phase 10 acceptance criteria
+
+| Acceptance item | Slice(s) | Status |
+| --------------- | -------- | ------ |
+| `embeddings` mart materialized from Gemini raw payloads, no re-fetch | 1, 6 | Open |
+| Unit-normalized fixed-size vectors with model pinned per row | 1, 2, 5 | Open |
+| BGE-m3 dual-encoder path writes self-owned query/page vectors | 3 | Open |
+| Query and passage roles populated with correct join keys | 4 | Open |
+| Cross-model rows excluded from pooled computation | 5 | Open |
+| Golden fixture + stored-run regression green | 6 | Open |
+
+### Phase 11 — Site/Topic Layer (centroids, radii, focus)
+
+Compute the site-level topical metrics — domain centroid (`siteEmbedding`
+analog), per-page radius (`siteRadius` analog), site focus (`siteFocusScore`
+analog), and domain↔query topic fit — and register them as **new signal
+families** so the entire existing Phase 5 engine (Spearman + BH, pooled OLS,
+diagnostics, Plackett-Luce at all four rank depths) runs on them for free via
+`stats/families.py`. This is the first direct test of "does the centroid
+distance even matter" at the associational level, using machinery already
+built and tested.
+
+**Primary decision (v1):** centroid = **robust** (component-wise median
+direction, then L2-normalized) over a domain's page vectors, not the mean —
+a single off-topic page must not drag the core. Radius = `1 − cos(page_vec,
+centroid)`. Focus = `1 − mean(radius over the domain's pages)`. Topic fit =
+`cos(centroid, query_vec)`. All computed per `run_id` from the Phase 10
+`embeddings` mart, joined back to the `analysis_mart` panel grain via the
+derived `domain` column (same derivation as `domain_features`).
+
+**Family registration:** new kind `site_topic` mapped to a
+`site_topic_features` mart in `SOURCE_MART_BY_KIND`; families appended (never
+reordered) to `analysis_spec.v1.yaml`: `site_topic_fit`
+(`domain_query_cosine`), `site_focus` (`site_focus_score`), `page_radius`
+(`page_site_radius`, sign-flipped so higher = more central). No
+`analysis_mart` schema bump — mirrors the Phase 6.2/7.x pattern.
+
+**Guardrails:** a domain with < 3 embedded pages yields `null` centroid/focus
+(not a fabricated value); if the run's `embeddings` mart is empty or the
+model is unpinned, the family registers as `skipped` with a reason rather than
+hard-failing the whole stats run (consistent with family hard-fail semantics
+in Slice 30).
+
+**Out of scope for 11:** temporal change tracking (Phase 12), using these as
+model features for prediction (Phase 13), passage MaxSim (Phase 11.5).
+
+#### Dev slices
+
+**Progress:** 0 of 7 shipped.
+
+1. **[ ] Slice 1 — Centroid/radius/focus computation**
+   - `data/site_topic.py`: group `embeddings` by domain → robust centroid;
+     per-page radius; per-domain focus. Pure functions on the mart.
+   - Tests: synthetic domain with a planted off-topic page → median centroid
+     isolates it, mean does not (known-answer fixture).
+
+2. **[ ] Slice 2 — `site_topic_features` mart + domain join**
+   - Join page radius + domain focus onto the panel grain via derived
+     `domain`; `domain_query_cosine` via query vectors.
+   - Bounded validation: radius/focus/fit ∈ [−1, 1] (fit) / [0, 2] (radius).
+   - Tests: `test_feature_marts.py`.
+
+3. **[ ] Slice 3 — Family registry + spec**
+   - `site_topic` kind in `VALID_SIGNAL_FAMILY_KINDS` +
+     `SOURCE_MART_BY_KIND`; three families appended to `analysis_spec.v1.yaml`.
+   - Tests: `test_stats_families.py`, `test_stats_spec.py`.
+
+4. **[ ] Slice 4 — Stats wiring**
+   - Family-aware Spearman/OLS/diagnostics/PL consume `site_topic_features`;
+     `#### Family: site_topic_*` blocks in `stats_*`.
+   - Tests: `test_stats_family_artifacts.py` with a synthetic panel where
+     topic fit has a known rank relationship.
+
+5. **[ ] Slice 5 — Small-domain null semantics**
+   - Domains under the page threshold → nulls; completeness flag
+     `site_topic_complete`.
+   - Tests: under-threshold domain rows null, over-threshold rows populated.
+
+6. **[ ] Slice 6 — Golden fixtures**
+   - Known-focus synthetic sites; assert focus ordering and that the stats
+     engine recovers a planted topic-fit ↔ rank association.
+   - Complements Phase 5 Slice 31 (unblocks its similarity+TextRazor fixture
+     pattern for site-topic families).
+
+7. **[ ] Slice 7 — Docs**
+   - `ARCHITECTURE.md` (mart + family), `TESTING.md`, limitations text:
+     centroid metrics are associational, model-dependent, and not Google's
+     literal `siteFocusScore`.
+
+#### Phase 11 acceptance criteria
+
+| Acceptance item | Slice(s) | Status |
+| --------------- | -------- | ------ |
+| Robust domain centroids resist planted off-topic pages | 1 | Open |
+| Radius/focus/fit join onto panel grain with bounds validation | 2 | Open |
+| `site_topic` families registered without `analysis_mart` schema bump | 3 | Open |
+| Full Phase 5 stats run on site-topic families at all rank depths | 4 | Open |
+| Under-threshold domains yield nulls, not fabricated values | 5 | Open |
+| Golden fixtures prove known focus/fit relationships | 6 | Open |
+
+### Phase 11.5 — Passage MaxSim scoring
+
+Add passage-level relevance: split pages into passages (already have
+`passages` / `passage_features`), embed them (Phase 10 Slice 4), and score a
+page's relevance to a query as `max over passages cos(query, passage)` — the
+ColBERT late-interaction pattern and the closest analog to Google's passage
+ranking. Registers as a similarity-adjacent signal family.
+
+**Primary decision (v1):** `page_maxsim_score = max_p cos(query_vec,
+passage_vec)` per (keyword, page); also persist `best_passage_id` for
+explainability. Family `passage_maxsim` (kind `site_topic` reused or a new
+`passage_sim` kind) at the panel grain.
+
+#### Dev slices
+
+**Progress:** 0 of 3 shipped.
+
+1. **[ ] Slice 1 — MaxSim computation + mart columns**
+   - `data/site_topic.py` (or `similarity.py`): join passage embeddings to
+     query vectors, reduce to per-page max; persist `page_maxsim_score`,
+     `best_passage_id`.
+   - Tests: multi-passage page where one passage matches the query → max
+     selects it.
+
+2. **[ ] Slice 2 — Family registration + stats wiring**
+   - Append `passage_maxsim` family; family-aware stats consume it.
+   - Tests: `test_stats_family_artifacts.py`.
+
+3. **[ ] Slice 3 — Golden fixture**
+   - Synthetic page with a planted best-matching passage; assert MaxSim
+     outranks a page whose relevance is diffuse.
+
+### Phase 12 — Temporal Panel (the bottleneck: a clock, not code)
+
+Runs today are isolated snapshots; nothing connects the same
+`(keyword, URL)` across time. This phase turns repeated runs into a
+longitudinal panel and adds the lead-lag and difference-in-differences
+machinery that separates a *live* signal from a static artifact. **Start the
+recurring collection immediately** — the validation timeline is bounded by
+data accumulation (content updates take ~1 month to show rank effects, new
+pages 3–5 months), not by engineering.
+
+**Primary decision (v1):** a `panel` mart keyed `(target_keyword_id,
+canonical_url_hash, snapshot_date)`, materialized by joining across run trees
+on overlapping keywords. Each row carries the full Phase 5 feature set plus
+the Phase 10–11 vector-derived metrics, versioned by `snapshot_date`. The
+`--stored-run` replay machinery already makes re-collection idempotent; a
+scheduler (cron / CI schedule) triggers a fresh run on a fixed keyword set on
+a fixed cadence (weekly SERP + embeddings; monthly full re-embed).
+
+**Lead-lag:** `panel_leadlag` table pairs `Δmetric(t → t+1)` with
+`Δrank(t+1 → t+2)` per page-keyword, with lag windows matched to the
+documented effect latencies (4–6 weeks for refreshes, 12+ weeks for new
+pages). **DiD:** a `treatment_log` (you record your own content changes:
+publish / refresh / consolidate / prune, with date and target pages) drives a
+difference-in-differences estimate — treated pages' rank change minus matched
+unchanged pages' change over the same window — expressible in the existing
+pooled-OLS-with-FE machinery.
+
+**Guardrails:** metrics are only comparable within a pinned embedding model —
+a model upgrade forces a full re-embed of the archive and a `model_version`
+break in the panel (never bridge across it silently); SERP rows are
+geo-pinned and de-personalized so Δrank reflects the algorithm, not
+measurement noise.
+
+**Out of scope for 12:** predictive modeling on the panel (Phase 13),
+behavioral/GSC feed (deferred — account-gated).
+
+#### Dev slices
+
+**Progress:** 0 of 8 shipped.
+
+1. **[ ] Slice 1 — Panel schema + cross-run join**
+   - `data/panel.py`: scan multiple run trees, join on
+     `(target_keyword_id, canonical_url_hash)`, emit `snapshot_date` rows.
+   - Tests: two synthetic runs with overlapping keywords → one panel row per
+     page per date.
+
+2. **[ ] Slice 2 — Recurring-run scheduler contract**
+   - Fixed keyword set config; idempotent re-collection via `--stored-run`;
+     `run.json` records `schedule_id` and `snapshot_date`.
+   - Tests: replay of a scheduled run produces the same panel keys.
+
+3. **[ ] Slice 3 — Δmetric / Δrank computation**
+   - Per page-keyword, diff consecutive snapshots for every registered
+     feature + vector metric.
+   - Tests: planted metric change appears with correct sign and timing.
+
+4. **[ ] Slice 4 — Lead-lag tables**
+   - `panel_leadlag` with configurable lag windows (default 4–6 / 12+ weeks).
+   - Tests: lag-window assignment correctness.
+
+5. **[ ] Slice 5 — Treatment log data model**
+   - `treatment_log` schema (date, action, target pages/keywords, optional
+     predicted delta); manual-entry interface (CLI or YAML).
+   - Tests: schema validation; join to panel.
+
+6. **[ ] Slice 6 — Difference-in-differences estimation**
+   - Treated vs matched-control rank change; OLS-with-FE implementation;
+     clustered SEs.
+   - Tests: synthetic treated group with a known effect recovers it.
+
+7. **[ ] Slice 7 — Model-version break guard**
+   - `model_version` on the panel; cross-version bridging raises/splits.
+   - Tests: mixed-model panel refuses pooled Δ computation.
+
+8. **[ ] Slice 8 — Golden fixture + regression**
+   - A 3-snapshot synthetic panel with a planted treatment effect; assert
+     lead-lag and DiD recover it.
+
+#### Phase 12 acceptance criteria
+
+| Acceptance item | Slice(s) | Status |
+| --------------- | -------- | ------ |
+| `panel` mart joins the same page-keyword across run trees | 1 | Open |
+| Recurring runs are idempotent and produce stable panel keys | 2 | Open |
+| Δmetric/Δrank computed per page-keyword across snapshots | 3 | Open |
+| Lead-lag tables respect effect-latency windows | 4 | Open |
+| Treatment log validated and joined to the panel | 5 | Open |
+| DiD recovers a planted treatment effect | 6, 8 | Open |
+| Model-version breaks prevent silent cross-model comparison | 7 | Open |
+
+### Phase 13 — Predictive & Universe Layer
+
+Turn the (now temporal) feature set into a validated predictor and a
+controllable simulation. Two halves: **(13a) the bake-off** that answers
+"what's the correct model" under out-of-time validation with formal ablation,
+and **(13b) the universe** — a shared embedding space of queries, pages, and
+site centroids that you perturb to simulate ranking changes. 13a is the
+validation gate; 13b is only trustworthy once 13a passes.
+
+**Primary decision (13a):** candidate models evaluated on **out-of-time
+NDCG@10** — train on earlier snapshots, score held-out *future* SERPs, per
+query, averaged (the production LTR evaluation standard; your Phase 5.6
+time-split slice is the seed). Candidates, in increasing complexity: (a) a
+**linear force model** (`w_sem·cos(q,p) + w_auth·authority + w_site·site_fit
++ w_beh·ctr_delta`, weights fitted); (b) a **gradient-boosted classifier**
+(top-10 probability, HistGradientBoosting/LightGBM); (c) **LambdaMART**
+(lambdarank objective — statistically adjacent to your Plackett-Luce work);
+(d) a **feature-free cosine baseline** (raw query·page cosine only) as the
+null every other model must beat. **Ablation:** retrain the winner minus
+`site_fit`, minus `radius`; the NDCG cost (paired bootstrap over queries) is
+the definitive answer to "do the centroid terms even matter." Selection rule:
+adopt the simplest model that beats the baseline out-of-time, passes ablation
+for the features you intend to intervene on, and is calibrated (predicted
+top-10 probabilities match realized frequencies in deciles).
+
+**Primary decision (13b):** a `universe` module — nodes
+(query/page/site-centroid) in one shared space; typed forces (semantic,
+site-membership, link authority via PageRank, behavioral proxy); a SERP as a
+computed readout `sorted(score(q,p))`; and `simulate(query, intervention)`
+that runs a SERP, applies a change (publish / refresh / consolidate / add a
+link), re-runs, and returns rank diffs. Force weights come from the 13a
+winner. **Honest ceiling (documented in limitations):** the behavioral term
+for competitors defaults to zero (you can only observe your own CTR), so the
+universe predicts *direction and relative magnitude* for the topical/authority
+components — never exact positions.
+
+**Guardrails:** rolling-forward validation only (never random splits — they
+leak query-level patterns); a model whose out-of-time NDCG collapses in the
+fold after a core update flags a regime change and is not trusted for
+prediction until refit; every universe prediction is logged with its
+assumptions and date so it can be scored against realized outcomes.
+
+**Out of scope for 13:** real-time serving, the behavioral/GSC feed
+(deferred — account-gated; when added it becomes the `w_beh` term for your
+own pages), any claim of exact-position prediction.
+
+#### Dev slices
+
+**Progress:** 0 of 10 shipped.
+
+1. **[ ] Slice 1 — Out-of-time evaluation harness**
+   - `stats/evaluate.py`: rolling-forward splits on the Phase 12 panel;
+     NDCG@k per query; top-10 AUC; paired keyword bootstrap CIs.
+   - Tests: synthetic panel with known ordering → correct NDCG; bootstrap CI
+     coverage.
+
+2. **[ ] Slice 2 — Feature-free cosine baseline**
+   - The null model every candidate must beat.
+   - Tests: baseline NDCG computed and recorded.
+
+3. **[ ] Slice 3 — Linear force model**
+   - Fit `w_sem…w_beh` by regression on the panel.
+   - Tests: weights recovered from a synthetic panel with known ground truth.
+
+4. **[ ] Slice 4 — Gradient-boosted classifier**
+   - Top-10 probability; same features + controls.
+   - Tests: out-of-time AUC reported per fold.
+
+5. **[ ] Slice 5 — LambdaMART ranker**
+   - Lambdarank objective; per-query grouping.
+   - Tests: NDCG@10 on held-out queries.
+
+6. **[ ] Slice 6 — Ablation studies**
+   - Retrain the winner minus `site_fit`, minus `radius`; paired bootstrap on
+     the NDCG difference.
+   - Tests: ablation cost with CI; `adds_value` verdict.
+
+7. **[ ] Slice 7 — Calibration + model selection**
+   - Decile calibration of predicted probabilities; selection rule applied;
+     chosen model persisted with its feature list and weights.
+   - Tests: calibration table; selection respects the rule.
+
+8. **[ ] Slice 8 — Universe module**
+   - `universe/`: nodes, typed forces, PageRank authority, `simulate()`.
+   - Tests: golden synthetic universe — planted off-topic page ranks last;
+     in-topic draft strengthens focus; refresh flips a near-tied pair.
+
+9. **[ ] Slice 9 — Prediction logging + prospective scoring**
+   - Every intervention prediction logged with date/assumptions; scored
+     against realized SERPs after the effect window.
+   - Tests: log schema; prospective accuracy computed.
+
+10. **[ ] Slice 10 — Golden fixtures + docs**
+    - End-to-end synthetic universe with known interventions; limitations
+      text (mechanism model, behavioral ceiling, not Google's literal scores).
+
+#### Phase 13 acceptance criteria
+
+| Acceptance item | Slice(s) | Status |
+| --------------- | -------- | ------ |
+| Rolling-forward NDCG@10 harness with keyword bootstrap CIs | 1 | Open |
+| Feature-free baseline recorded as the null to beat | 2 | Open |
+| All four candidates evaluated out-of-time on the panel | 3–5 | Open |
+| Ablation proves (or disproves) centroid-feature value with NDCG cost | 6 | Open |
+| Model selected by the simplest-calibrated rule and persisted | 7 | Open |
+| Universe reproduces known interventions in a golden fixture | 8, 10 | Open |
+| Predictions logged and scored prospectively | 9 | Open |
+
 ## Deferred
 
 - Entity-derived features beyond Phase 5.6 density bundle (keyword–entity overlap,
@@ -2068,7 +2481,8 @@ redirected URL.
   cut from Phase 7/8 scope)
 - Majestic, Ahrefs, Moz, Similarweb, Google Search Console, Google Natural
   Language API — paid/account-gated third-party signals (considered and cut
-  from Phase 8 scope in favor of free-tier sources)
+  from Phase 8 scope in favor of free-tier sources). GSC resurfaces in
+  Phases 12–13 as the optional behavioral (`w_beh`) feed for your own pages.
 
 ## History
 
@@ -2341,3 +2755,12 @@ redirected URL.
 - **Phase 4.76 Slice 5 shipped:** unit tests and stored-run re-normalize smoke
   now cover multi-field content parsing fixtures, HTML retention, aggregate text
   parity, and structured-only round-trip payloads.
+- **Vision phases planned (2026-07-19):** Phases 10–13 added — embedding store
+  (keystone: curated `embeddings` mart from Gemini raw payloads + BGE-m3
+  dual-encoder live path), site/topic layer (robust domain centroids, page
+  radius, site focus, topic fit as registered signal families), passage MaxSim,
+  temporal panel (cross-run joins, lead-lag, difference-in-differences with a
+  treatment log), and the predictive/universe layer (out-of-time NDCG@10
+  bake-off across four candidate models, centroid-feature ablation, calibrated
+  model selection, intervention simulation with prospective prediction
+  logging).
