@@ -3,6 +3,34 @@
 This file tracks backlog and history. When `GOALS.md` exists, it is the active
 scope contract; keep deferred and historical items here.
 
+**The roadmap is split across phase files** so each document stays reviewable.
+This file keeps the active Phase 5 backlog inline; the remaining phases,
+deferred items, and shipped history live in sibling files:
+
+| File | Contents |
+| ---- | -------- |
+| `ROADMAP.md` (this file) | Phase 5 — Statistical analysis (active backlog) |
+| `ROADMAP_PHASE_5_1_TO_5_5.md` | Phases 5.1, 5.2, 5.4, 5.5 |
+| `ROADMAP_PHASE_5_6_TO_5_7.md` | Phases 5.6, 5.7 |
+| `ROADMAP_PHASE_5_75_TO_5_91.md` | Phases 5.75, 5.9, 5.91 |
+| `ROADMAP_PHASE_6_TO_6_2.md` | Phases 6, 6.1, 6.2 |
+| `ROADMAP_PHASE_7_1.md` | Phase 7 intro + 7.1 OnPage page signals |
+| `ROADMAP_PHASE_7_2_TO_7_6.md` | Phases 7.2–7.6 |
+| `ROADMAP_PHASE_8_TO_9.md` | Phases 8, 9 |
+| `ROADMAP_PHASE_10_11.md` | **Vision:** Phases 10, 11, 11.5 — embedding store, site/topic layer, passage MaxSim |
+| `ROADMAP_PHASE_12_13.md` | **Vision:** Phases 12, 13 — temporal panel, predictive & universe layer |
+| `ROADMAP_DEFERRED_HISTORY.md` | Deferred items + shipped history |
+
+**Vision track (Phases 10–13):** persist the embeddings the pipeline already
+computes, derive site-level topical metrics (robust centroid, page radius,
+site focus, topic fit) as registered signal families, accumulate a temporal
+panel with lead-lag and difference-in-differences estimation, and finish with
+an out-of-time model bake-off plus a controllable vector-universe simulation.
+Phases 10–13 depend on the existing Phase 5 stats engine and the Phase 4.5
+lake; they add marts and families, never an `analysis_mart` schema bump.
+Phase 12's recurring collection should start early — the validation timeline
+is bounded by data accumulation, not engineering.
+
 ## Current Backlog
 
 Active scope contract: `GOALS.md` (Phase 5).
