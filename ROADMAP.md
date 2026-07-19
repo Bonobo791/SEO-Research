@@ -17,19 +17,20 @@ deferred items, and shipped history live in sibling files:
 | `ROADMAP_PHASE_7_1.md` | Phase 7 intro + 7.1 OnPage page signals |
 | `ROADMAP_PHASE_7_2_TO_7_6.md` | Phases 7.2–7.6 |
 | `ROADMAP_PHASE_8_TO_9.md` | Phases 8, 9 |
-| `ROADMAP_PHASE_10_11.md` | **Vision:** Phases 10, 11, 11.5 — embedding store, site/topic layer, passage MaxSim |
+| `ROADMAP_PHASE_10_11.md` | **Vision:** Phases 10, 11, 11.5, 11.75 — embedding store, site/topic layer, passage MaxSim, vector-space visualization |
 | `ROADMAP_PHASE_12_13.md` | **Vision:** Phases 12, 13 — temporal panel, predictive & universe layer |
 | `ROADMAP_DEFERRED_HISTORY.md` | Deferred items + shipped history |
 
 **Vision track (Phases 10–13):** persist the embeddings the pipeline already
 computes, derive site-level topical metrics (robust centroid, page radius,
-site focus, topic fit) as registered signal families, accumulate a temporal
-panel with lead-lag and difference-in-differences estimation, and finish with
-an out-of-time model bake-off plus a controllable vector-universe simulation.
-Phases 10–13 depend on the existing Phase 5 stats engine and the Phase 4.5
-lake; they add marts and families, never an `analysis_mart` schema bump.
-Phase 12's recurring collection should start early — the validation timeline
-is bounded by data accumulation, not engineering.
+site focus, topic fit) as registered signal families, render the space as a
+deterministic UMAP artifact (display-only; never a stats feature), accumulate
+a temporal panel with lead-lag and difference-in-differences estimation, and
+finish with an out-of-time model bake-off plus a controllable vector-universe
+simulation. Phases 10–13 depend on the existing Phase 5 stats engine and the
+Phase 4.5 lake; they add marts and families, never an `analysis_mart` schema
+bump. Phase 12's recurring collection should start early — the validation
+timeline is bounded by data accumulation, not engineering.
 
 ## Current Backlog
 
