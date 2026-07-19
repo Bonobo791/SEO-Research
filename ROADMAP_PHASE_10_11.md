@@ -1,3 +1,5 @@
+<!-- Part of the split roadmap. Index: ROADMAP.md -->
+
 # Phase 10 — Embedding Store (keystone)
 
 Persist the dense vectors that BGE and Gemini already compute and throw away,
@@ -210,3 +212,113 @@ explainability. Family `passage_maxsim` (kind `site_topic` reused or a new
 3. **[ ] Slice 3 — Golden fixture**
    - Synthetic page with a planted best-matching passage; assert MaxSim
      outranks a page whose relevance is diffuse.
+
+---
+
+# Phase 11.75 — Vector-Space Visualization (UMAP projection)
+
+Render the embedding space so queries, pages, site centroids, and their
+similarity relationships are inspectable as a picture — the 3D-universe
+intuition made concrete as a per-run artifact. Vocabulary, fixed: **nodes**
+are the embedded entities (`role ∈ {query, page, site_centroid}`), **edges**
+are similarity relationships from a k-nearest-neighbor graph weighted by
+cosine, and centroids render as first-class nodes with their mean page
+radius drawn as a halo (the `siteRadius` analog made visible). Depends on
+Phase 10 (embeddings mart) and Phase 11 (centroids/radii/focus); becomes the
+visual front-end for the Phase 13 universe.
+
+**Primary decision (v1):** two outputs. (1) **Static report artifact** —
+`runs/{run_id}/viz/vector_space.png` (+ `.svg`) linked from `report.md`:
+UMAP projection (`umap-learn`, `metric="cosine"`, pinned `random_state`)
+with t-SNE (`sklearn`) as a diagnostics-only comparison render.
+(2) **Interactive HTML explorer** (optional slice) — one self-contained
+Plotly file (no server, no build step) with hover tooltips: URL, role,
+radius, focus, per-backend similarity scores. Edges come from a **kNN graph**
+(default k = 10) — never the full N² pairwise matrix, which is unreadable at
+SERP scale; page→centroid membership edges are a distinct edge type from
+similarity edges.
+
+**Visual encoding:** node shape by role (query = diamond, page = circle,
+centroid = star); centroid node size ∝ site focus; centroid halo disc radius
+= mean page radius; edge width/alpha ∝ cosine weight; a planted off-topic
+page must appear visibly separated from its own site's centroid.
+
+**Guardrails**
+
+- **Projection is display-only.** UMAP/t-SNE distort distances; every metric
+  (radius, focus, fit, MaxSim) is computed in full dimensionality and only
+  *plotted* in 2D. Projection coordinates are never registered as features,
+  never join a mart, never enter stats.
+- **Determinism:** pinned `random_state`; identical input → identical
+  coordinates (test).
+- **Cross-run comparability (Phase 12 hook):** fit UMAP on the union of
+  snapshots, or fit once and `transform()` new points, so the same entity
+  keeps stable coordinates across time; independent per-snapshot refits
+  produce incomparable maps and are valid for single-run inspection only.
+- **Model purity:** same cross-model exclusion as Phase 10 — one embedding
+  space per plot.
+- **Degenerate panels:** fewer than ~15 embedded entities → skip projection
+  with a logged reason (`n_neighbors` clamped to point count; below that
+  scale the picture is meaningless anyway).
+
+**Out of scope for 11.75:** 3D rendering or served webapp (the interactive
+slice ships one static HTML file); animation (Phase 12 adds cross-snapshot
+frames); using the plot to select model features; real-time updates.
+
+#### Dev slices
+
+**Progress:** 0 of 6 shipped.
+
+1. **[ ] Slice 1 — kNN similarity graph builder**
+   - `viz/graph.py`: read the `embeddings` mart → nodes frame (id, role,
+     vector) + edge frame (src, dst, weight, `edge_type ∈ {similarity,
+     membership}`). Cosine kNN (k configurable, default 10); membership
+     edges page→centroid from Phase 11.
+   - Tests: synthetic space with known neighbors → correct edges/weights;
+     thresholding; cross-model rows excluded.
+
+2. **[ ] Slice 2 — UMAP projection module**
+   - `viz/project.py`: UMAP on full-dim vectors (`metric="cosine"`, pinned
+     seed, `n_neighbors` clamped); t-SNE comparison render behind a flag.
+   - Determinism test: identical input → identical coordinates.
+   - Optional dependency extra (`umap-learn`); graceful skip with a logged
+     reason when not installed (consistent with the optional `matplotlib`
+     handling in `ranking_explainability_viz.py`).
+
+3. **[ ] Slice 3 — Static per-run artifact + report wiring**
+   - Render `runs/{run_id}/viz/vector_space.png` (+ `.svg`) with the visual
+     encoding above; link from `report.md`.
+   - Tests: artifact exists after analyze; roles/edge types present in the
+     render data; off-topic fixture page separated from its centroid.
+
+4. **[ ] Slice 4 — Interactive HTML explorer (optional)**
+   - Self-contained Plotly HTML (`runs/{run_id}/viz/vector_space.html`);
+     hover shows URL, role, radius, focus, per-backend similarity.
+   - Tests: HTML payload contains all node ids; snapshot the data payload,
+     not the rendering.
+
+5. **[ ] Slice 5 — Cross-snapshot alignment (Phase 12 hook)**
+   - Fit-once-then-transform (or union-fit) mode so the same entity keeps
+     stable coordinates across snapshots; emits per-snapshot frames for
+     future animation.
+   - Tests: same page across two synthetic snapshots keeps nearby
+     coordinates under transform mode.
+
+6. **[ ] Slice 6 — Golden fixture + docs**
+   - Synthetic universe: two focused sites + one planted off-topic page →
+     assertions on the full-dim data behind the plot (off-topic page's
+     distance-to-own-centroid > every core page's) and on the 2D render
+     (cluster separation above a silhouette threshold).
+   - `ARCHITECTURE.md` + `TESTING.md`; limitations text: 2D projection is
+     illustrative, distances are distorted, never evidence in stats.
+
+#### Phase 11.75 acceptance criteria
+
+| Acceptance item | Slice(s) | Status |
+| --------------- | -------- | ------ |
+| kNN graph + membership edges built from the embeddings mart | 1 | Open |
+| Deterministic UMAP projection with cosine metric | 2 | Open |
+| Static PNG/SVG per run linked from `report.md` | 3 | Open |
+| Optional self-contained interactive HTML explorer | 4 | Open |
+| Cross-snapshot coordinate stability mode | 5 | Open |
+| Golden fixture: off-topic page separable; projection never used as a feature | 6 | Open |

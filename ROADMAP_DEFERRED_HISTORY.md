@@ -292,3 +292,10 @@
   focus as signal families), passage MaxSim, temporal panel (lead-lag + DiD),
   and the predictive/universe layer (out-of-time NDCG bake-off, ablation,
   simulation). Original sections preserved verbatim from `main`.
+- **Phase 11.75 planned (2026-07-20):** vector-space visualization — kNN
+  similarity graph with cosine-weighted edges over the Phase 10 embeddings
+  mart, deterministic UMAP projection (t-SNE comparison render), static
+  per-run PNG/SVG linked from `report.md`, optional self-contained
+  interactive HTML explorer, and a cross-snapshot coordinate-alignment hook
+  for Phase 12. Guardrailed as display-only: all metrics stay computed in
+  full dimensionality; projection coordinates never become features.
