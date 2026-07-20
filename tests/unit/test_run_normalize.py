@@ -20,6 +20,7 @@ from seo_rank.dataforseo import (
     fixture_backlinks_response,
     fixture_keyword_expansion_response,
     fixture_onpage_instant_pages_response,
+    fixture_page_text_response,
     fixture_serp_response,
 )
 from seo_rank.data.normalize import (
@@ -69,6 +70,118 @@ def _page_similarity_entry(
             },
         },
     }
+
+
+def test_normalize_run_scopes_similarity_scores_to_unblocked_serp_urls(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_dir = tmp_path / "artifacts"
+    raw_responses_dir = output_dir / "parquet" / "raw_responses"
+    for endpoint in ("keyword_expansion", "serp", "page_text"):
+        (raw_responses_dir / f"endpoint={endpoint}").mkdir(parents=True)
+
+    target_keyword = "technical seo"
+    current_url = "https://allowed.example.com/current"
+    blocked_url = "https://blocked.example.com/current"
+    stale_url = "https://stale.example.com/old"
+    blocklist_path = tmp_path / "blocklist.txt"
+    blocklist_path.write_text("blocked.example.com\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "seo_rank.domain_blocklist._resolve_default_path",
+        lambda: blocklist_path,
+    )
+
+    serp_response = fixture_serp_response(target_keyword)
+    items = serp_response["tasks"][0]["result"][0]["items"]
+    assert isinstance(items, list)
+    items[:] = [
+        {
+            "type": "organic",
+            "rank_group": 1,
+            "url": current_url,
+            "title": "Current result",
+            "description": "Current fixture result.",
+        },
+        {
+            "type": "organic",
+            "rank_group": 2,
+            "url": blocked_url,
+            "title": "Blocked result",
+            "description": "Blocked fixture result.",
+        },
+    ]
+    records = [
+        build_raw_response_record(
+            "artifacts",
+            endpoint="keyword_expansion",
+            provider="dataforseo",
+            response=fixture_keyword_expansion_response(target_keyword),
+            target_keyword=None,
+            request_metadata={"seed": target_keyword},
+            recorded_at="2026-07-20T00:00:00+00:00",
+        ),
+        build_raw_response_record(
+            "artifacts",
+            endpoint="serp",
+            provider="dataforseo",
+            response=serp_response,
+            target_keyword=target_keyword,
+            request_metadata={"target_keyword": target_keyword},
+            recorded_at="2026-07-20T00:00:00+00:00",
+        ),
+        *[
+            build_raw_response_record(
+                "artifacts",
+                endpoint="page_text",
+                provider="dataforseo",
+                response=fixture_page_text_response(url, target_keyword),
+                target_keyword=target_keyword,
+                request_metadata={"target_keyword": target_keyword, "url": url},
+                recorded_at="2026-07-20T00:00:00+00:00",
+            )
+            for url in (current_url, blocked_url, stale_url)
+        ],
+    ]
+    for endpoint in ("keyword_expansion", "serp", "page_text"):
+        pl.DataFrame(
+            [record for record in records if record["endpoint"] == endpoint],
+            schema_overrides={"target_keyword": pl.String},
+        ).write_parquet(raw_responses_dir / f"endpoint={endpoint}" / "part-0.parquet")
+
+    (output_dir / "run.json").write_text(
+        json.dumps(
+            {
+                "run_id": "artifacts",
+                "config": {"seed": target_keyword, "depth": 2},
+                "catalog": {},
+                "page_similarity": [
+                    _page_similarity_entry(
+                        target_keyword=target_keyword,
+                        url=current_url,
+                    )
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    catalog = normalize_run(output_dir)
+
+    assert catalog["datasets"]["serp_items"]["row_count"] == 1
+    for dataset_name in ("pages", "passages"):
+        rows = ds.dataset(
+            output_dir / "parquet" / dataset_name,
+            format="parquet",
+        ).to_table().to_pylist()
+        assert rows
+        assert {row["url"] for row in rows} == {current_url, stale_url}
+
+    score_rows = ds.dataset(
+        output_dir / "parquet" / "similarity_scores",
+        format="parquet",
+    ).to_table().to_pylist()
+    assert {row["url"] for row in score_rows} == {current_url}
 
 
 def test_normalize_run_materializes_curated_tables_from_raw_responses(

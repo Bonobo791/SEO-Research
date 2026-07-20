@@ -7,6 +7,7 @@ import polars as pl
 import pyarrow.dataset as ds
 
 from seo_rank.cli import main
+from seo_rank.data.marts import ANALYSIS_SCHEMA_VERSION
 from tests.fixtures.onpage_pipeline import assert_onpage_row_matches_fixture
 from tests.fixtures.onpage_pipeline import assert_onpage_stats_families
 from tests.fixtures.onpage_pipeline import write_backlinks_summary_raw_row
@@ -121,7 +122,7 @@ def test_cli_round_trip_materializes_real_artifacts_without_network(
     assert row["run_id"] == output_dir.name
     assert row["target_keyword"] == "technical seo"
     assert row["serp_rank"] == 1
-    assert row["schema_version"] == "analysis_mart.v7"
+    assert row["schema_version"] == ANALYSIS_SCHEMA_VERSION
     assert row["page_text_length"] > 0
     assert row["bge_raw_score"] == 0.98
     assert row["gemini_doc_retrieval_normalized_score"] == 1.0

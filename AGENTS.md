@@ -219,6 +219,14 @@ Rules: in command chains, prefix each segment
 (`rtk git add . && rtk git commit -m "msg"`); for debugging, use the raw
 command without the rtk prefix.
 
+## Things You Would Miss
+
+- The active pre-registered spec is `analysis_spec.v1.2.yaml` (adds the
+  `authority_proxy` control alongside `site_scale`). Older stored runs whose
+  `analysis_mart`/`domain_features` predate the control will report
+  control-error status until `seo-rank build-features --run runs/RUN_ID`
+  re-materializes `domain_features`.
+
 ## Documentation map
 
 - `README.md` — user-facing commands, flag reference, storage layout

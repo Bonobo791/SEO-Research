@@ -21,6 +21,7 @@ from seo_rank.stats.model_inputs import (
     SVD_DID_NOT_CONVERGE,
     SkippedModelFit,
     control_error_summary,
+    drop_incomplete_control_rows,
     validate_control_columns,
 )
 
@@ -867,7 +868,8 @@ def _prepare_plackett_luce_frame(
     *,
     max_rank: int = DEFAULT_MAX_SERP_RANK,
 ) -> pl.DataFrame:
-    return analysis_mart.filter(
+    frame = drop_incomplete_control_rows(analysis_mart, PL_CONTROL_COLUMNS)
+    return frame.filter(
         pl.col("serp_rank").is_between(
             1,
             max_rank,

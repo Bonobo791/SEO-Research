@@ -988,6 +988,7 @@ def normalize_run(run_dir: Path) -> dict[str, object]:
         depth=depth,
         keyword_limit=keyword_limit,
         page_similarity_scores=page_similarity_scores,
+        blocklist=blocklist,
     )
     curated_lazyframes = {
         name: (
@@ -1090,6 +1091,7 @@ def build_curated_lazyframes_from_raw_responses(
     depth: int,
     keyword_limit: int,
     page_similarity_scores: Mapping[str, Mapping[str, Mapping[str, object]]],
+    blocklist: DomainBlocklist,
 ) -> dict[str, pl.LazyFrame]:
     keyword_responses = raw_responses.filter(
         pl.col("endpoint") == "keyword_expansion"
@@ -1141,6 +1143,13 @@ def build_curated_lazyframes_from_raw_responses(
         lambda frame: build_serp_items_frame(frame, run_id=run_id, depth=depth),
         schema=CURATED_VALIDATION_RULES["serp_items"]["expected_schema"],
     )
+    scored_serp_url_keys = filter_blocklisted_domain_rows(
+        serp_items,
+        blocklist=blocklist,
+    ).select(
+        ["target_keyword_id", "canonical_url_hash"]
+    ).unique()
+
     backlinks = backlink_responses.map_batches(
         lambda frame: build_backlinks_frame(frame, run_id=run_id),
         schema=CURATED_VALIDATION_RULES["backlinks"]["expected_schema"],
@@ -1200,7 +1209,12 @@ def build_curated_lazyframes_from_raw_responses(
         lambda frame: build_textrazor_page_metrics_frame(frame, run_id=run_id),
         schema=CURATED_VALIDATION_RULES["textrazor_page_metrics_curated"]["expected_schema"],
     )
-    similarity_scores = pages.group_by("target_keyword").map_groups(
+    scored_pages = pages.join(
+        scored_serp_url_keys,
+        on=["target_keyword_id", "canonical_url_hash"],
+        how="semi",
+    )
+    similarity_scores = scored_pages.group_by("target_keyword").map_groups(
         lambda frame: build_similarity_scores_frame(
             frame,
             run_id=run_id,

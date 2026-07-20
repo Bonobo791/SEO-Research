@@ -100,3 +100,4 @@ digitalpiloto.com  # keyword="columbus seo company" reason=page_text-crawl-statu
 yelp.com  # keyword="seo companies columbus ohio" reason=onpage_instant_pages-http-403
 columbuswebseo.com  # keyword="columbus seo" reason=page_text-50402
 zealousgrowth.com  # keyword="columbus local seo company" reason=page_text-crawl-status-page-content-is-empty
+bigframe.net  # keyword="best columbus seo company" reason=page_text-crawl-status-page-content-is-empty

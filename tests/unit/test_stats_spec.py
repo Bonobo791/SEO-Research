@@ -24,9 +24,9 @@ def test_stats_package_exports_module_surface() -> None:
 def test_load_analysis_spec_reads_repo_root_yaml() -> None:
     analysis_spec = load_analysis_spec()
 
-    assert analysis_spec.path == Path("analysis_spec.v1.1.yaml")
-    assert analysis_spec.version == "v1.1"
-    assert analysis_spec.estimand_version == "v1.1"
+    assert analysis_spec.path == Path("analysis_spec.v1.2.yaml")
+    assert analysis_spec.version == "v1.2"
+    assert analysis_spec.estimand_version == "v1.2"
     assert analysis_spec.primary_backend == "bge"
     assert analysis_spec.backend_order == (
         "bge",
@@ -66,7 +66,7 @@ def test_load_analysis_spec_includes_plackett_luce_secondary_estimand() -> None:
     plackett_luce = analysis_spec.estimand["plackett_luce"]
 
     assert plackett_luce["outcome"] == "rank_ordered_logit"
-    assert plackett_luce["formula"] == "log(observed_variable + 1) + site_scale"
+    assert plackett_luce["formula"] == "log(observed_variable + 1) + site_scale + authority_proxy"
     assert plackett_luce["clustered_se"] == "target_keyword_id"
     assert plackett_luce["choice_set_scope"] == "observed_top_20_serp_results_per_keyword"
     assert plackett_luce["iia_sensitivity"] == {
@@ -110,6 +110,8 @@ def test_load_analysis_spec_declares_missing_control_policy() -> None:
     analysis_spec = load_analysis_spec()
 
     assert analysis_spec.data["estimand"]["missing_control_policy"] == "complete_case"
+    assert "constant" in analysis_spec.data["estimand"]["missing_control_policy_note"]
+    assert "template" in analysis_spec.estimand["plackett_luce"]["formula_note"].lower()
     assert analysis_spec.backend_drop_order == (
         "gemini_semantic_similarity",
         "gemini_doc_retrieval",
@@ -141,8 +143,8 @@ def test_build_stats_output_metadata_exposes_estimand_version() -> None:
     metadata = artifacts.build_stats_output_metadata(analysis_spec)
 
     assert metadata == {
-        "analysis_spec_version": "v1.1",
-        "estimand_version": "v1.1",
+        "analysis_spec_version": "v1.2",
+        "estimand_version": "v1.2",
         "primary_backend": "bge",
         "backend_order": [
             "bge",

@@ -3,6 +3,41 @@
 This file tracks backlog and history. When `GOALS.md` exists, it is the active
 scope contract; keep deferred and historical items here.
 
+---
+
+> **Revision 2026-07-20 — feasibility-study update.** A 12-dimension research
+> program (May 2024 Content Warehouse API leak; US v. Google trial record;
+> academic and industry accuracy measurements.
+>
+> Everything marked **⌁** below is a revision driven by that study. One
+> sourcing policy now applies to the whole roadmap: **DataForSEO is the only
+> paid input** (pure pay-as-you-go, no monthly minimums since 2026-07-01); all
+> other inputs are free — MozCast/Algoroo/SERPmetrics (volatility), Google
+> Trends API alpha / Keyword Planner (brand demand), Common Crawl, CrUX,
+> Wayback, Wikidata, GSC. No Semrush-class subscription is used anywhere.
+
+## The acceptance contract — the measurable "95% system" ⌁
+
+One public accuracy claim, pre-registered in `analysis_spec` before any model
+is scored:
+
+| Component | Contract |
+| --------- | -------- |
+| Primary metric | Out-of-time NDCG@10 ≥ 0.95, per query, rolling-forward on held-out future snapshots (random splits forbidden — they leak query-level patterns) |
+| Label | Median-of-N repeat-sampled rank, N ≥ 5 geo-pinned, de-personalized scrapes per keyword-snapshot; never a single-scrape rank (Phase 15) |
+| Panel | Segmented (Phase 14), stability-filtered (Phase 15), top-20 rows per keyword |
+| Abstention | Every score carries a prediction interval and a coverage decision; accuracy quoted at declared coverage as a coverage–accuracy frontier |
+| Reporting | Per-segment AND volume-weighted, with keyword-clustered effective n beside raw rows |
+
+This is not goalpost-moving; it is the only framing under which "95%" has an
+empirical referent. The strongest published external replication recovered
+≥7/10 top-10 URLs for 78% of keywords — set membership on the simpler,
+PageRank-observable Google of 2009 — and the evidence synthesis estimates
+~60–80% exact-position accuracy on head queries, 80–90% unfiltered top-10
+membership, 85–95% stability-filtered. Because the click layer that re-orders
+Google's candidate set is externally unobservable, abstention converts
+unobservable variance into a declared coverage cost.
+
 ## Current Backlog
 
 Active scope contract: `GOALS.md` (Phase 5).
@@ -1305,9 +1340,19 @@ Complete the standardization track for pooled OLS and page-level Plackett-Luce:
 close post-ship scaling polish (FIXUPS S5-14–S5-18), finish Plackett-Luce estimand
 runtime wiring (Phase 5 Slice 15 partial), add `analysis_mart.v2` relative rank
 columns (Slices 11–12), wire robustness-only stats on rank/pct/z predictors (Slice
-13), and surface relative ranks in CLI reports (Slice 14). **Primary confirmatory
-estimand unchanged:** absolute `*_normalized_score`, keyword-level Spearman, pooled
-OLS and PL on raw scores.
+13), and surface relative ranks in CLI reports (Slice 14).
+
+> **⌁ Revision — estimand inversion (CHANGE).** The strongest published public
+> correlation with rank is a SERP-relative feature (text relevance ρ = 0.47,
+> 16,298 keywords); direct absolute embedding cosine scores ~0.07 in the same
+> study, and absolute link/authority metrics are weaker still (referring domains
+> 0.255, Domain Rating 0.131, decaying). The evidence demands the reverse of the
+> original posture: **within-keyword rank/pct/z transforms become the primary
+> confirmatory estimand**; absolute `*_normalized_score` drops to the
+> sensitivity path. This ships as `analysis_spec.v2.yaml` (v1 runs are never
+> reinterpreted); Plackett-Luce is refit on relative predictors in v2; the
+> limitation that relative ranks compare within observed top-20 rows only is
+> retained. Slice 13's `robustness_only: true` posture is inverted accordingly.
 
 **Shipped baseline (Jul 2026):** both paths share
 `within_keyword_sd_rms()` in `src/seo_rank/stats/scale.py` for post-hoc per-1-SD
@@ -1836,6 +1881,15 @@ sub-phase since both are cheap per-domain lookups feeding the same mart.
 
 #### 7.6 — SERP feature presence (normalize-only, no new API calls)
 
+> **⌁ Revision — scope expansion (CHANGE).** Position is re-priced by what
+> surrounds it: AI Overview presence cuts position-1 CTR by ~58% on
+> informational queries (effect flips positive on branded). Item-type flags
+> expand into a first-class **SERP-composition covariate family** — AI
+> Overviews, local pack, featured snippet, People Also Ask, video, pixel depth
+> where available — that Phase 14 uses to segment queries and Phase 13 uses to
+> condition position targets on composition. Still normalize-only: all signals
+> come from stored SERP payloads, no new API calls.
+
 Parses already-stored `raw_responses/endpoint=serp` payloads — no new
 endpoint, no fetch/backfill wiring for the core slices.
 
@@ -1963,6 +2017,14 @@ distinct-capture count. No auth. URL grain.
 
 #### 8.3 — Google Knowledge Graph Search API — brand entity confirmation
 
+> **⌁ Revision — framing (KEEP + ADD).** 8.3/8.4 entity-authority signals are
+> re-framed as **GATE-model inputs** (Phase 13): entity confirmation is an
+> eligibility/authority prior, not a rank-order feature. The branded-demand
+> half of this story moves to Phase 16 (free Google Trends API + Keyword
+> Planner volumes + DA:BA-style ratio) — entity presence alone was shown to be
+> the weaker half; brand *demand* is what discriminated HCU survivors (Brand
+> Authority 50–52) from losers (37).
+
 `GET https://kgsearch.googleapis.com/v1/entities:search?query=<brand>&key=<GOOGLE_API_KEY>&limit=1`.
 Domain grain; brand name derived from the registrable domain label (reuse
 whatever label extraction `domain_features` already does).
@@ -2064,6 +2126,13 @@ redirected URL.
 
 ### Phase 10 — Embedding Store (keystone)
 
+> **⌁ Revision — validated as planned (KEEP).** The May 2024 Content Warehouse
+> leak confirms Google stores versioned site and page embeddings
+> (`siteEmbeddings`, `versionId`) — this phase's model-pinning and versioned
+> store design matches the disclosed machinery. Ships as specified; leaked
+> attributes are used as feature-engineering priors revalidated against live
+> SERPs, never as ground truth on weights (the leak contains none).
+
 Persist the dense vectors that BGE and Gemini already compute and throw away,
 so centroid/radius/focus math and the universe layer have something to compute
 on. Today `bge_reranker.py` is a cross-encoder that returns a scalar logit per
@@ -2151,6 +2220,19 @@ stats wiring (Phase 11 registers these as families), passage MaxSim scoring
 | Golden fixture + stored-run regression green | 6 | Open |
 
 ### Phase 11 — Site/Topic Layer (centroids, radii, focus)
+
+> **⌁ Revision — validated as planned, two additions (KEEP + ADD).** Centroid,
+> radius, and focus are literal external analogs of the leaked `siteEmbeddings`
+> / `siteRadius` / `siteFocusScore` attributes. Two research-driven
+> refinements: **(a)** topical authority behaves as a **threshold/gate**, not a
+> linear scale — these features register as GATE-model inputs in Phase 13
+> (eligibility), and MaxSim as a RANK-model relevance feature; **(b)** your
+> geometry is computed over *your crawl*, Google's over its full indexed
+> representation of the domain (thin tag/parameter/legacy URLs included) — so
+> every domain carries an **indexation-coverage covariate**
+> (`pages_embedded / pages_indexed`), and focus/radius metrics are
+> down-weighted or abstained on low-coverage domains (self-crawled geometry
+> systematically overstates focus).
 
 Compute the site-level topical metrics — domain centroid (`siteEmbedding`
 analog), per-page radius (`siteRadius` analog), site focus (`siteFocusScore`
@@ -2270,6 +2352,66 @@ explainability. Family `passage_maxsim` (kind `site_topic` reused or a new
 3. **[ ] Slice 3 — Golden fixture**
    - Synthetic page with a planted best-matching passage; assert MaxSim
      outranks a page whose relevance is diffuse.
+
+### Phase 11.6 — Pre-Publication Delta Simulator ⌁ (new)
+
+Score a *draft* content piece against the site's vector geometry **before
+publishing**: does introducing this page move the site toward or away from a
+target topic? Three separable deltas, all computed pre-publication from the
+Phase 10 store and Phase 11 geometry:
+
+- **Δfit (centroid shift):** $\mathrm{sim}(\mu'_S, \mu_T) - \mathrm{sim}(\mu_S, \mu_T)$
+  — does the site centroid move toward the target-topic centroid when the
+  draft's vector is included? Positive = stronger topical alignment.
+- **ΔF (focus change):** change in mean page-to-centroid similarity — does the
+  draft concentrate or diffuse the site? A page can improve Δfit while
+  reducing focus (tangential to everything else); those have opposite
+  implications and must be reported separately.
+- **r_new (page radius):** $d(v_{new}, \mu_S)$ — the `siteRadius` analog; a
+  high-radius draft is a dilution-risk flag regardless of direction.
+
+**Primary decision (v1):** the **topic centroid $\mu_T$ is built from SERP
+winners**, not from abstract topic labels — embed the pages currently ranking
+top-20 for a representative query set for the target topic. The evidence is
+blunt: absolute embedding cosine correlates ~0.07 with rank while SERP-relative
+constructs reach 0.47; anchoring $\mu_T$ to realized SERPs makes the delta a
+SERP-relative measurement and auto-updates as SERPs shift. Threshold
+semantics: Δfit is interpreted as movement toward/through a qualification
+boundary (gate model), not as continuous rank payoff — once inside the
+qualified region, more focus does not linearly help.
+
+**Guardrails:** same model-pinning rules as Phase 10 (a centroid is only
+comparable within one embedding model); robust/shrunk centroids under the
+Phase 11 small-domain null threshold; indexation-coverage covariate attached
+to every delta (low coverage ⇒ delta is an upper bound); every simulated
+"publish" decision is logged into the Phase 12 `treatment_log` with its
+predicted deltas, so realized outcomes retrospectively validate the simulator
+(DiD with 1–5-month effect latency).
+
+**Out of scope for 11.6:** using deltas as direct rank predictions (they are
+gate inputs); multi-draft portfolio optimization (13b universe territory).
+
+#### Dev slices
+
+**Progress:** 0 of 4 shipped.
+
+1. **[ ] Slice 1 — Topic-centroid builder**
+   - From a query set, pull stored top-20 page vectors → robust $\mu_T$
+     per topic, versioned by snapshot date.
+   - Tests: synthetic SERP set → centroid recovers planted topic direction.
+2. **[ ] Slice 2 — Delta computation**
+   - Given a draft vector + domain: Δfit, ΔF, r_new with coverage covariate;
+     pure functions on the Phase 10/11 marts.
+   - Tests: known-answer fixtures (in-topic draft raises Δfit; off-topic
+     draft flagged by radius).
+3. **[ ] Slice 3 — CLI + report surfacing**
+   - `simulate-draft` command: input text/URL → three deltas + verdict;
+     results in `report.md`.
+   - Tests: end-to-end on the golden fixture domain.
+4. **[ ] Slice 4 — Treatment-log integration + validation harness**
+   - Publish decisions logged with predicted deltas; Phase 12 DiD scores
+     realized vs predicted after the effect window.
+   - Tests: logged prediction joins the panel; prospective accuracy computed.
 
 ### Phase 11.75 — Vector-Space Visualization (UMAP projection)
 
@@ -2415,6 +2557,19 @@ measurement noise.
 **Out of scope for 12:** predictive modeling on the panel (Phase 13),
 behavioral/GSC feed (deferred — account-gated).
 
+> **⌁ Revision — two additions (KEEP + ADD).**
+> **(a) Regime + segment labels on every snapshot:** each panel row persists
+> the Phase 14 query-segment label and the Phase 15 volatility-regime
+> covariates (free trackers: MozCast, Algoroo, SERPmetrics), so evaluation
+> windows are reproducible and update-adjacent folds can be embargoed.
+> **(b) Median-of-N labels:** the stored rank label switches from
+> single-scrape rank to median-of-N (N ≥ 5) repeat-sampled rank per
+> keyword-snapshot (geo-pinned, fixed device, minute-level timestamps), plus
+> top-10/20 membership and ±1/±3 bucket labels — trackers reproduce exact
+> positions only 71–78% of the time but 96–97% within ±3, so the label
+> schema is built to the instrument's real resolution. Labels are median
+> rank, membership, and buckets — never a single-scrape integer.
+
 #### Dev slices
 
 **Progress:** 0 of 8 shipped.
@@ -2471,12 +2626,38 @@ behavioral/GSC feed (deferred — account-gated).
 
 ### Phase 13 — Predictive & Universe Layer
 
+> **⌁ Revision — structural change (CHANGE + ADD).** The single predictor
+> splits into **two models**, mirroring Google's disclosed pipeline
+> (retrieval gates → neural re-rank → click re-order):
+>
+> - **GATE ("who can rank"):** top-10/20 membership classifier over domain
+>   authority (7.4), topical centroid fit (11), brand demand (16), and
+>   technical qualification (7.1, 8.1). Carries the high-accuracy claims —
+>   the candidate set is stable (72.9% of top-10 pages are >3 years old;
+>   only 1.74% of new pages reach top-10 within a year).
+> - **RANK ("in what order"):** orders GATE-admitted candidates using
+>   SERP-relative features (Phase 6.1 inversion), emitting predicted rank
+>   **with prediction intervals — never point ranks**; abstains when the
+>   interval exceeds the Phase 15 per-segment threshold. Expectation cap:
+>   the ~60–80% exact-order band from the evidence synthesis.
+>
+> Every 13a candidate is trained twice — as gate and as ranker. Model
+> selection runs on the acceptance contract (out-of-time NDCG@10 at declared
+> coverage, per segment); exact-position MAE survives as a diagnostic only.
+> The `w_beh` term is formalized as a pluggable **`behavioral_signal` family
+> interface**, zero-default today: GSC own-site data is the immediate opt-in
+> ingest; DOJ-remedy interaction data ingests only if the stayed sharing
+> order ever takes effect (Phase 15 Slice 5 carries the docket-monitoring
+> hook).
+
 Turn the (now temporal) feature set into a validated predictor and a
 controllable simulation. Two halves: **(13a) the bake-off** that answers
 "what's the correct model" under out-of-time validation with formal ablation,
 and **(13b) the universe** — a shared embedding space of queries, pages, and
 site centroids that you perturb to simulate ranking changes. 13a is the
-validation gate; 13b is only trustworthy once 13a passes.
+validation gate; 13b is only trustworthy once 13a passes — and 13b ships only
+after GATE/RANK passes the acceptance contract, since it would otherwise emit
+confident trajectories on exactly the queries where prediction is unreliable.
 
 **Primary decision (13a):** candidate models evaluated on **out-of-time
 NDCG@10** — train on earlier snapshots, score held-out *future* SERPs, per
@@ -2576,6 +2757,138 @@ own pages), any claim of exact-position prediction.
 | Model selected by the simplest-calibrated rule and persisted | 7 | Open |
 | Universe reproduces known interventions in a golden fixture | 8, 10 | Open |
 | Predictions logged and scored prospectively | 9 | Open |
+| GATE membership classifier evaluated per segment with calibrated probabilities ⌁ | 4 | Open |
+| RANK model emits prediction intervals; abstention at Phase 15 thresholds; accuracy quoted at declared coverage ⌁ | 4–7 | Open |
+| Acceptance contract (out-of-time NDCG@10 ≥ 0.95, segmented, stability-filtered, median-of-N labels) pre-registered before scoring ⌁ | 1 | Open |
+
+### Phase 14 — Query Segmentation ⌁ (new)
+
+Google states verbatim that "the weight applied to each factor varies
+depending on the nature of your query," and the industry abandoned universal
+factor lists a decade ago (Searchmetrics: "ranking factors that apply equally
+to all industries have ceased to exist"). One global model is not merely
+inaccurate — it is structurally inconsistent: keyword fixed effects absorb
+intercepts, not slope heterogeneity, and pooled correlations demonstrably
+reverse segment-level effects.
+
+**Primary decision (v1):** a segment classifier labels every keyword at
+collection time into five mandatory segments, each getting its own model head
+or explicit interaction structure in Phase 13:
+
+1. **Local** — separate algorithm (proximity/business-profile/review-driven);
+   a page-rank model does not apply; segment out and handle separately.
+2. **News / QDF** — freshness weight flips per class; exclude from
+   stability-filtered panels by default.
+3. **Navigational / branded** — near-deterministic; supports the strictest
+   accuracy claims but must not inflate pooled metrics.
+4. **AIO / featured-snippet-bearing informational** — rank and citation are
+   separate labels (AIO presence re-priced position-1 CTR by ~−58%);
+   position targets conditioned on Phase 7.6 composition covariates.
+5. **YMYL** — distinct authority bar; evaluate separately.
+
+**Reporting contract:** per-segment AND volume-weighted metrics only; a single
+pooled headline accuracy is an invalid claim.
+
+#### Dev slices
+
+**Progress:** 0 of 3 shipped.
+
+1. **[ ] Slice 1 — Segment classifier** — rule-based v1 from stored SERP
+   payloads (local pack present, news boxes, AIO flag, brand/entity match,
+   YMYL lexicon); upgradeable to a learned classifier later.
+2. **[ ] Slice 2 — Label persistence** — segment labels on every Phase 12
+   snapshot row; reproducible evaluation windows.
+3. **[ ] Slice 3 — Segmented reporting** — per-segment + volume-weighted
+   metrics in `report.md` and the Phase 13 evaluation harness.
+
+### Phase 15 — Volatility Regime, Measurement Protocol & Abstention ⌁ (new)
+
+The measurement layer every accuracy claim stands on. Google ships ~5,000
+changes/year with 1,000+ live experiments daily; trackers reproduce a manual
+SERP exactly only 71–78% of the time (96–97% within ±3); only 16.5% of top-10
+positions kept the same URL over two quiet weeks. All inputs in this phase
+are **free** — no paid API.
+
+**Primary decision (v1):** three components.
+
+- **Regime covariates (free):** MozCast, Algoroo, and SERPmetrics ingested
+  daily as regime labels on every snapshot; confirmed-update exclusion
+  windows (flag only when ≥3 trackers spike); regime-change flags that
+  suspend trust in post-update folds until refit.
+- **Measurement protocol:** geo-pinned coordinates (city-level geo moves
+  18–34% of local results), one fixed device class (mobile/desktop diverge
+  on ~76% of queries), median-of-N (N ≥ 5) repeat samples with minute-level
+  timestamps. Labels: median rank, top-10/20 membership, ±1/±3 buckets.
+- **Abstention layer:** per-segment confidence thresholds on the Phase 13
+  RANK model's prediction-interval width; below threshold the system declines
+  to score. Accuracy is only ever reported jointly with coverage — the
+  coverage–accuracy frontier is the deliverable.
+
+#### Dev slices
+
+**Progress:** 0 of 5 shipped.
+
+1. **[ ] Slice 1 — Free-tracker ingest** — MozCast/Algoroo/SERPmetrics daily
+   pulls; regime label per snapshot date.
+2. **[ ] Slice 2 — Update-window detection** — ≥3-tracker spike rule;
+   embargo windows around confirmed core updates (settle ≈ 4–6 weeks).
+3. **[ ] Slice 3 — Median-of-N collection mode** — repeat-sample collection
+   on a subset panel; median-rank/membership/bucket labels materialized.
+4. **[ ] Slice 4 — Abstention calibration** — interval-width thresholds per
+   segment; coverage–accuracy frontier computation and plotting.
+5. **[ ] Slice 5 — Docket-monitoring hook** — watch the DOJ data-sharing
+   remedy (stayed pending appeal); if it takes effect, activate the Phase 13
+   `behavioral_signal` seam.
+
+### Phase 16 — Brand-Demand Signals ⌁ (new)
+
+The best-validated discriminator of domain-level outcomes is brand demand,
+not links: in Moz's controlled 1.9M-keyword study of the September 2023
+Helpful Content Update, losers averaged Brand Authority 37 versus 50–52 for
+survivors (DA:BA 2:1 vs 1.4:1), and branded search volume correlates with
+rankings nearly as strongly as Domain Authority, more strongly than raw link
+counts. All inputs **free**.
+
+**Primary decision (v1):** branded-query-volume proxies from the official
+Google Trends API (v1alpha, free with a Google Cloud account; pytrends as
+unofficial fallback) and Keyword Planner volumes (free with any Google Ads
+account); a DA:BA-style authority-to-brand ratio (Phase 7.4 authority ÷
+branded volume); branded-anchor share from Phase 7.2 link data. All three
+register as GATE-model features alongside the Phase 8.3/8.4 entity-authority
+family.
+
+#### Dev slices
+
+**Progress:** 0 of 3 shipped.
+
+1. **[ ] Slice 1 — Trends ingest** — normalized branded-interest series per
+   panel domain; snapshot-versioned.
+2. **[ ] Slice 2 — Authority:brand ratio + branded-anchor share** — feature
+   computation from existing 7.2/7.4 data.
+3. **[ ] Slice 3 — GATE integration** — family registration; Phase 13 gate
+   features; ablation against Phase 8 entity authority.
+
+## Sequencing, cost, and the clock ⌁
+
+The bottleneck remains a clock, not code: panel depth bounds everything
+downstream, and documented effect latencies (~1 month for content updates,
+3–5 months for new pages) set the minimum evaluation horizon.
+
+| Window | Work |
+| ------ | ---- |
+| Months 1–2 | Start the weekly panel immediately (MVP: 10k keywords × top-20). Land the Phase 6.1 estimand inversion (`analysis_spec.v2.yaml`) and the Phase 7.6 composition expansion. |
+| Months 3–4 | Phase 15 regime covariates + label protocol; Phase 16 brand-demand features; GATE model v1 on accumulated snapshots. |
+| Months 5–8 | Phase 10 embedding store live; Phase 11 centroid/radius/focus as GATE features; Phase 11.6 delta simulator; Phase 14 segment heads; abstention calibration. |
+| Months 9–12 | Phase 13 bake-off on the acceptance contract (out-of-time NDCG@10 ≥ 0.95 at declared coverage); acceptance evaluation; prospective prediction logging; 13b universe ships only after acceptance passes. |
+
+**Cost:** DataForSEO is the only paid input (all APIs pay-as-you-go, no
+monthly minimums since 2026-07-01). MVP ≈ $60–100/month all-in — SERP pulls
+≈ $52 per 10k keywords weekly, page text ≈ $15–30, embeddings $1–8 (local
+BGE), sampled backlinks $24–60 (rotating 5–10k domain sample; exhaustive
+collection is the one prohibitive line item). A $500/month tier buys 50k
+keywords and per-niche segment models. Everything else is $0: MozCast,
+Algoroo, SERPmetrics, Google Trends API, Keyword Planner, Common Crawl, CrUX,
+Wayback, Wikidata, GSC.
 
 ## Deferred
 
@@ -2594,6 +2907,19 @@ own pages), any claim of exact-position prediction.
 
 ## History
 
+- **Feasibility-study revision (2026-07-20):** 12-dimension research program
+  (leak + DOJ trial + academic/industry accuracy measurements) applied
+  in-file. Top matter: acceptance contract (out-of-time NDCG@10 ≥ 0.95,
+  segmented, stability-filtered, median-of-N labels, abstention coverage) and
+  free/cheap sourcing policy (DataForSEO-only paid input). CHANGED: Phase 6.1
+  (SERP-relative estimand inversion), Phase 7.6 (composition family),
+  Phase 13 (GATE/RANK split, abstention, `behavioral_signal` seam).
+  ADDED: Phase 11.6 (pre-publication delta simulator), Phase 14 (query
+  segmentation), Phase 15 (regime/measurement/abstention), Phase 16
+  (brand demand). KEPT with validation notes: Phases 1–12 architecture
+  (embedding store, centroids, temporal panel confirmed by leak/trial
+  record). DELETED: nothing; exact-position prediction demoted to diagnostic.
+  Revision blocks marked ⌁ throughout.
 - **Page-text staged retrieval shipped (2026-07):** `PAGE_TEXT_RETRIEVAL_PLAN.md`
   slices 1–4 — `classify_page_text_response()`, staged
   `fetch_page_text_for_urls()` (baseline → JavaScript → browser), `50402`

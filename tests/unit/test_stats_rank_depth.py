@@ -60,6 +60,7 @@ def _depth_divergent_panel(*, keyword_count: int = 12) -> pl.DataFrame:
                     "deprecated_html_tags": serp_rank % 2 == 0,
                     "meta_keywords_to_content_consistency": 0.1 + (serp_rank * 0.05),
                     "site_scale": (keyword_index * 0.1) + (serp_rank * 0.01),
+                    "authority_proxy": ((keyword_index * 5 + serp_rank * 13) % 11) * 0.01,
                     "bge_normalized_score": similarity,
                     "gemini_doc_retrieval_normalized_score": similarity * 0.8,
                     "gemini_semantic_similarity_normalized_score": similarity * 0.6,

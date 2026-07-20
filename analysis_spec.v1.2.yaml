@@ -1,0 +1,290 @@
+version: v1.2
+name: Phase 5 statistical analysis estimand
+source_docs:
+  architecture: ARCHITECTURE.md
+  roadmap: ROADMAP.md
+  plan_review: PHASE5-STATS-PLAN-REVIEW.md
+
+decision:
+  primary: [association_exists, backend_comparison]
+  primary_backend: bge
+  backend_order:
+    - bge
+    - gemini_doc_retrieval
+    - gemini_semantic_similarity
+  versioning_note: Phase 5.75 uses analysis_spec.v2.yaml; v1.2 adds the domain-level authority_proxy control alongside site_scale.
+
+changelog:
+  - v1.2: >
+      add authority_proxy (domain-level composite of DataForSEO negative
+      ranking signals, negated so higher = more authority-like) as a second
+      required control in baseline, feature, multivariate, and Plackett-Luce
+      models. Required means present and non-null under missing_control_policy
+      complete_case; a within-sample constant control may still be omitted at
+      Plackett-Luce fit time (omitted_controls reason=constant). Component list
+      and polarity: DataForSEO-Negative-Ranking-Signals.md.
+
+rank_depths:
+  confirmatory_order:
+    - top_20
+    - top_10
+    - top_5
+    - top_3
+  limits:
+    top_20: 20
+    top_10: 10
+    top_5: 5
+    top_3: 3
+  primary: top_20
+
+limitations_by_depth:
+  top_20: top_20_truncation
+  top_10: top_10_truncation
+  top_5: top_5_truncation
+  top_3: top_3_truncation
+
+panel:
+  grain: target_keyword_id x canonical_url_hash
+  observation_scope: top_20_serp_results_per_keyword
+  score_columns:
+    - bge_normalized_score
+    - gemini_doc_retrieval_normalized_score
+    - gemini_semantic_similarity_normalized_score
+  keyword_clustered_se: target_keyword_id
+  url_two_way_cluster_sensitivity: canonical_url_hash
+
+signal_families:
+  panel_grain:
+    - target_keyword_id
+    - canonical_url_hash
+  families:
+    - key: bge
+      kind: similarity
+      signal_columns:
+        - bge_normalized_score
+    - key: gemini_doc_retrieval
+      kind: similarity
+      signal_columns:
+        - gemini_doc_retrieval_normalized_score
+    - key: gemini_semantic_similarity
+      kind: similarity
+      signal_columns:
+        - gemini_semantic_similarity_normalized_score
+    - key: textrazor_entity_confidence_relevance
+      kind: textrazor_scalar
+      signal_columns:
+        - textrazor_entity_confidence_score
+        - textrazor_entity_relevance_score
+    - key: textrazor_topic_score
+      kind: textrazor_scalar
+      signal_columns:
+        - textrazor_topic_score
+    - key: textrazor_category_classifier_score
+      kind: textrazor_scalar
+      signal_columns:
+        - textrazor_category_score
+        - textrazor_classifier_score
+    - key: textrazor_entailment_score_prior_context
+      kind: textrazor_scalar
+      signal_columns:
+        - textrazor_entailment_score
+        - textrazor_entailment_prior
+        - textrazor_entailment_context
+    - key: textrazor_word_grammar_sense_spelling
+      kind: textrazor_structural
+      signal_columns:
+        - textrazor_word_count
+        - textrazor_grammar_count
+        - textrazor_sense_count
+        - textrazor_spelling_count
+    - key: textrazor_relation_property_noun_phrase
+      kind: textrazor_structural
+      signal_columns:
+        - textrazor_relation_count
+        - textrazor_property_count
+        - textrazor_noun_phrase_count
+    - key: backlinks_counts
+      kind: backlinks_metric
+      signal_columns:
+        - backlinks_count
+        - referring_domains_count
+        - dofollow_backlinks_count
+    - key: onpage_content_quality
+      kind: onpage_metric
+      signal_columns:
+        - onpage_score
+        - plain_text_word_count
+        - plain_text_rate
+        - flesch_kincaid_readability_index
+        - coleman_liau_readability_index
+        - smog_readability_index
+        - dale_chall_readability_index
+        - description_to_content_consistency
+        - title_to_content_consistency
+        - meta_keywords_to_content_consistency
+    - key: onpage_core_web_vitals
+      kind: onpage_metric
+      signal_columns:
+        - connection_time_ms
+        - time_to_secure_connection_ms
+        - request_sent_time_ms
+        - download_time_ms
+        - duration_time_ms
+        - fetch_end_ms
+        - dom_complete_ms
+        - time_to_interactive_ms
+    - key: onpage_technical_checks
+      kind: onpage_metric
+      signal_columns:
+        - has_valid_structured_data
+        - micromarkup_items_count
+        - micromarkup_errors_count
+        - micromarkup_warnings_count
+        - is_redirect
+        - high_content_rate
+        - high_character_count
+        - small_page_size
+        - no_image_title
+        - no_favicon
+        - seo_friendly_url
+        - flash
+        - frame
+        - lorem_ipsum
+        - has_micromarkup
+        - has_micromarkup_errors
+        - description_length
+        - title_length
+        - external_links_count
+        - internal_links_count
+        - images_count
+        - images_size
+        - scripts_count
+        - stylesheets_count
+        - follow
+        - inbound_links_count
+        - duplicate_meta_tags_count
+        - h1_count
+        - h2_count
+        - h3_count
+        - has_og_tags
+        - has_twitter_tags
+        - cache_control_cachable
+        - cache_control_ttl
+        - resource_warnings_count
+        - duplicate_content
+        - click_depth
+        - encoded_size
+
+estimand:
+  site_scale:
+    source_columns:
+      - images_size
+      - scripts_size
+      - stylesheets_size
+      - total_transfer_size
+      - total_dom_size
+      - internal_links_count
+    aggregation: median_by_hostname_over_unique_canonical_pages
+    transform: zscore(log1p(domain_median))_within_run
+    composite: mean_of_six_standardized_components
+    interpretation: site_complexity_and_scale_not_authority
+  authority_proxy:
+    source: DataForSEO-Negative-Ranking-Signals.md
+    source_columns: negative_ranking_signals_excluding_site_scale_overlap_crawl_metadata_and_registered_onpage_predictors
+    excluded_columns:
+      - images_size
+      - scripts_size
+      - stylesheets_size
+      - total_transfer_size
+      - total_dom_size
+      - click_depth
+      - from_sitemap
+      - all_registered_onpage_metric_signal_columns
+    predictor_overlap_policy: >
+      Exclude every column registered as an onpage_metric predictor. This avoids
+      a part-whole control when fitting the corresponding OnPage signal.
+    aggregation: continuous_median_by_hostname_over_unique_canonical_pages_boolean_domain_rate
+    transform: zscore(asinh(domain_median))_within_run_for_continuous_zscore(domain_rate)_within_run_for_boolean
+    polarity: aligned_higher_is_worse_before_averaging
+    composite: negated_mean_of_available_finite_polarity_aligned_standardized_components
+    interpretation: fewer_negative_ranking_signals_as_authority_proxy
+  missing_control_policy: complete_case
+  missing_control_policy_note: >
+    Drop rows where any required control is null before model fit. Required
+    controls must be present as columns; constant within-sample values are not
+    treated as incomplete under this policy.
+  outcome: -log(serp_rank)
+  primary_metric: keyword_level_spearman_rho
+  baseline_model: site_scale + authority_proxy + C(target_keyword_id)
+  feature_model: normalized_similarity + site_scale + authority_proxy + C(target_keyword_id)
+  plackett_luce:
+    outcome: rank_ordered_logit
+    formula: log(observed_variable + 1) + site_scale + authority_proxy
+    formula_note: >
+      Estimand template. At fit time a required control with zero within-sample
+      range may be omitted and recorded in omitted_controls with reason=constant.
+    clustered_se: target_keyword_id
+    choice_set_scope: observed_top_20_serp_results_per_keyword
+    iia_sensitivity:
+      leave_one_out_top_rank: true
+  multivariate_model:
+    - bge_normalized_score
+    - gemini_doc_retrieval_normalized_score
+    - gemini_semantic_similarity_normalized_score
+    - site_scale
+    - authority_proxy
+    - C(target_keyword_id)
+
+inference:
+  bh_family: per_backend_keyword_tests
+  bh_q: 0.05
+  bh_when_keyword_count_gte: 10
+  bh_skipped_reason: underpowered
+  diagnostics_bh_policy: never_adjust_diagnostic_p_values
+
+entity_signals:
+  min_present_pages: 10
+  min_present_keywords: 3
+  min_inference_keywords: 10
+  bh_q: 0.05
+
+guardrails:
+  hard_fail:
+    - name: serp_rank_variance_within_keyword
+      relation: gt
+      threshold: 0
+  warn:
+    - name: similarity_variance_within_keyword
+      relation: gt
+      threshold: 0
+    - name: influential_rows_rate
+      relation: lte
+      threshold: 0.05
+
+actionable_association:
+  backend: bge
+  median_abs_rho_gte: 0.25
+  same_sign_fraction_gte: 0.60
+  pooled_ci_excludes_zero: true
+
+effect_size:
+  translation: approximate_delta_rank_per_1sd_similarity
+  formula: median_rank * (exp(-(coefficient * similarity_sd)) - 1)
+  note: use the keyword-clustered pooled regression coefficient, the observed backend score standard deviation, and the panel median rank.
+
+sensitivity:
+  multivariate_vif_threshold: 5
+  backend_drop_order:
+    - gemini_semantic_similarity
+    - gemini_doc_retrieval
+    - bge
+  two_way_cluster:
+    clusters:
+      - target_keyword_id
+      - canonical_url_hash
+    robustness_only: true
+
+limitations:
+  - observational_only
+  - no_causal_claims
+  - measurement_error_conservative

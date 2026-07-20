@@ -42,6 +42,7 @@ def _ranking_importance_panel_frame() -> pl.DataFrame:
                     "meta_keywords_to_content_consistency": 0.1 + (serp_rank * 0.05),
                     "time_to_first_byte_ms": 100 + serp_rank,
                     "site_scale": (keyword_index * 0.1) + ((serp_rank % 2) * 0.03),
+                    "authority_proxy": ((keyword_index * 5 + serp_rank * 13) % 11) * 0.01,
                     "bge_raw_score": signal,
                     "bge_normalized_score": signal,
                     "gemini_doc_retrieval_raw_score": signal - 0.1,
@@ -539,6 +540,7 @@ def test_prepare_oos_importance_frame_keeps_baseline_controls() -> None:
             "serp_rank": [1, 2, 1, 2],
             "bge_normalized_score": [0.9, 0.1, 0.8, 0.2],
             "site_scale": [1.0, 1.1, 1.2, 1.3],
+            "authority_proxy": [0.4, 0.3, 0.2, 0.1],
         }
     )
     frame = module._prepare_oos_importance_frame(
@@ -550,6 +552,7 @@ def test_prepare_oos_importance_frame_keeps_baseline_controls() -> None:
     assert frame.attrs["predictor_columns"] == (
         "bge_normalized_score",
         "site_scale",
+        "authority_proxy",
     )
 
 

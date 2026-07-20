@@ -88,6 +88,7 @@ def _analysis_mart_frame(
                     "deprecated_html_tags": (keyword_index + serp_rank) % 3 == 0,
                     "meta_keywords_to_content_consistency": 0.5,
                     "site_scale": (keyword_index * 0.1) + (serp_rank * 0.01),
+                    "authority_proxy": ((keyword_index * 5 + serp_rank * 13) % 11) * 0.01,
                     "bge_raw_score": bge_score,
                     "bge_normalized_score": bge_score,
                     "gemini_doc_retrieval_raw_score": gemini_doc_score,

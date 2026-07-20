@@ -20,7 +20,7 @@ from seo_rank.data.validate import (
 from seo_rank.domain_blocklist import DomainBlocklist
 from seo_rank.dataforseo import DEFAULT_SERP_DEPTH
 
-FEATURE_SCHEMA_VERSION = "feature_marts.v3"
+FEATURE_SCHEMA_VERSION = "feature_marts.v5"
 SITE_SCALE_COLUMNS = (
     "images_size",
     "scripts_size",
@@ -28,6 +28,190 @@ SITE_SCALE_COLUMNS = (
     "total_transfer_size",
     "total_dom_size",
     "internal_links_count",
+)
+AUTHORITY_PROXY_MODELED_ONPAGE_COLUMNS = frozenset(
+    {
+        "onpage_score",
+        "plain_text_word_count",
+        "plain_text_rate",
+        "flesch_kincaid_readability_index",
+        "coleman_liau_readability_index",
+        "smog_readability_index",
+        "dale_chall_readability_index",
+        "description_to_content_consistency",
+        "title_to_content_consistency",
+        "meta_keywords_to_content_consistency",
+        "connection_time_ms",
+        "time_to_secure_connection_ms",
+        "request_sent_time_ms",
+        "download_time_ms",
+        "duration_time_ms",
+        "fetch_end_ms",
+        "dom_complete_ms",
+        "time_to_interactive_ms",
+        "has_valid_structured_data",
+        "micromarkup_items_count",
+        "micromarkup_errors_count",
+        "micromarkup_warnings_count",
+        "is_redirect",
+        "high_content_rate",
+        "high_character_count",
+        "small_page_size",
+        "no_image_title",
+        "no_favicon",
+        "seo_friendly_url",
+        "flash",
+        "frame",
+        "lorem_ipsum",
+        "has_micromarkup",
+        "has_micromarkup_errors",
+        "description_length",
+        "title_length",
+        "external_links_count",
+        "internal_links_count",
+        "images_count",
+        "images_size",
+        "scripts_count",
+        "stylesheets_count",
+        "follow",
+        "inbound_links_count",
+        "duplicate_meta_tags_count",
+        "h1_count",
+        "h2_count",
+        "h3_count",
+        "has_og_tags",
+        "has_twitter_tags",
+        "cache_control_cachable",
+        "cache_control_ttl",
+        "resource_warnings_count",
+        "duplicate_content",
+        "click_depth",
+        "encoded_size",
+    }
+)
+# DataForSEO negative ranking signals used as a domain-level authority proxy
+# (see DataForSEO-Negative-Ranking-Signals.md). Continuous components are
+# aggregated as domain medians of page medians, asinh-transformed, then
+# z-scored within the run; boolean flags are aggregated as domain rates and
+# z-scored without the log transform.
+AUTHORITY_PROXY_CONTINUOUS_NEGATED_COLUMNS = tuple(
+    column
+    for column in (
+        "onpage_score",
+        "plain_text_word_count",
+        "plain_text_rate",
+        "flesch_kincaid_readability_index",
+        "description_to_content_consistency",
+        "title_to_content_consistency",
+        "meta_keywords_to_content_consistency",
+        "cache_control_ttl",
+        "inbound_links_count",
+    )
+    if column not in AUTHORITY_PROXY_MODELED_ONPAGE_COLUMNS
+)
+AUTHORITY_PROXY_CONTINUOUS_COLUMNS = tuple(
+    column
+    for column in (
+        *AUTHORITY_PROXY_CONTINUOUS_NEGATED_COLUMNS,
+        "coleman_liau_readability_index",
+        "smog_readability_index",
+        "dale_chall_readability_index",
+        "time_to_first_byte_ms",
+        "largest_contentful_paint_ms",
+        "cumulative_layout_shift",
+        "first_input_delay_ms",
+        "connection_time_ms",
+        "time_to_secure_connection_ms",
+        "request_sent_time_ms",
+        "download_time_ms",
+        "duration_time_ms",
+        "fetch_end_ms",
+        "dom_complete_ms",
+        "time_to_interactive_ms",
+        "duplicate_meta_tags_count",
+        "micromarkup_errors_count",
+        "micromarkup_warnings_count",
+        "resource_errors_count",
+        "resource_warnings_count",
+        "render_blocking_scripts_count",
+        "render_blocking_stylesheets_count",
+        "encoded_size",
+    )
+    if column not in AUTHORITY_PROXY_MODELED_ONPAGE_COLUMNS
+)
+AUTHORITY_PROXY_BOOLEAN_INVERTED_COLUMNS = tuple(
+    column
+    for column in (
+        "meta_charset_consistency",
+        "follow",
+        "canonical",
+        "is_https",
+        "seo_friendly_url",
+        "has_meta_title",
+        "has_valid_structured_data",
+        "has_micromarkup",
+        "cache_control_cachable",
+    )
+    if column not in AUTHORITY_PROXY_MODELED_ONPAGE_COLUMNS
+)
+AUTHORITY_PROXY_BOOLEAN_COLUMNS = tuple(
+    column
+    for column in (
+        "title_too_long",
+        "title_too_short",
+        "no_title",
+        "no_description",
+        "no_h1_tag",
+        "has_render_blocking_resources",
+        "duplicate_meta_tags",
+        "irrelevant_description",
+        "low_readability_rate",
+        "is_4xx_code",
+        "is_5xx_code",
+        "is_broken",
+        "is_redirect",
+        "no_content_encoding",
+        "high_loading_time",
+        "high_waiting_time",
+        "no_doctype",
+        "no_encoding_meta_tag",
+        "https_to_http_links",
+        "size_greater_than_3mb",
+        "has_meta_refresh_redirect",
+        "low_content_rate",
+        "high_character_count",
+        "small_page_size",
+        "large_page_size",
+        "irrelevant_title",
+        "irrelevant_meta_keywords",
+        "deprecated_html_tags",
+        "duplicate_title_tag",
+        "no_image_alt",
+        "no_image_title",
+        "no_favicon",
+        "flash",
+        "frame",
+        "lorem_ipsum",
+        "has_micromarkup_errors",
+        "broken_links",
+        "broken_resources",
+        "duplicate_content",
+        "duplicate_description",
+        "duplicate_title",
+    )
+    if column not in AUTHORITY_PROXY_MODELED_ONPAGE_COLUMNS
+)
+AUTHORITY_PROXY_ALL_BOOLEAN_COLUMNS = (
+    *AUTHORITY_PROXY_BOOLEAN_INVERTED_COLUMNS,
+    *AUTHORITY_PROXY_BOOLEAN_COLUMNS,
+)
+AUTHORITY_PROXY_COMPONENT_COLUMNS = (
+    *AUTHORITY_PROXY_CONTINUOUS_COLUMNS,
+    *AUTHORITY_PROXY_ALL_BOOLEAN_COLUMNS,
+)
+# Components aligned so that higher = worse before averaging.
+AUTHORITY_PROXY_NEGATED_COLUMNS = frozenset(
+    (*AUTHORITY_PROXY_CONTINUOUS_NEGATED_COLUMNS, *AUTHORITY_PROXY_BOOLEAN_INVERTED_COLUMNS)
 )
 FEATURE_REQUIRED_COLUMNS = {
     "keyword_serp": (
@@ -86,6 +270,7 @@ FEATURE_REQUIRED_COLUMNS = {
         "best_serp_rank",
         "worst_serp_rank",
         "site_scale",
+        "authority_proxy",
         "schema_version",
     ),
     "textrazor_page_metrics": (
@@ -174,6 +359,7 @@ ANALYSIS_REQUIRED_COLUMNS = (
     "meta_keywords_to_content_consistency",
     "time_to_first_byte_ms",
     "site_scale",
+    "authority_proxy",
     "schema_version",
 )
 
@@ -301,6 +487,7 @@ FEATURE_VALIDATION_RULES = {
             "best_serp_rank": pl.Int64,
             "worst_serp_rank": pl.Int64,
             "site_scale": pl.Float64,
+            "authority_proxy": pl.Float64,
             "schema_version": pl.Utf8,
         },
         "unique_columns": ("domain_feature_id",),
@@ -475,6 +662,7 @@ FEATURE_VALIDATION_RULES = {
             "meta_keywords_to_content_consistency": pl.Float64,
             "time_to_first_byte_ms": pl.Int64,
             "site_scale": pl.Float64,
+            "authority_proxy": pl.Float64,
             "schema_version": pl.Utf8,
         },
         "unique_columns": ("serp_item_id",),
@@ -700,6 +888,109 @@ def build_site_scale(frame: pl.DataFrame | pl.LazyFrame) -> pl.LazyFrame:
     ).select(["run_id", "domain", "site_scale"])
 
 
+def build_authority_proxy(frame: pl.DataFrame | pl.LazyFrame) -> pl.LazyFrame:
+    """Build one standardized authority-proxy value per run and hostname.
+
+    Composite of the DataForSEO negative ranking signals: higher output means
+    fewer negative signals (more authority-like). Available finite component
+    z-scores are polarity-aligned so higher = worse, averaged, then negated.
+    """
+
+    lazy_frame = frame.lazy() if isinstance(frame, pl.DataFrame) else frame
+    page_levels = (
+        lazy_frame.group_by(["run_id", "domain", "canonical_url_hash"])
+        .agg(
+            [
+                pl.col(column).cast(pl.Float64).median().alias(column)
+                for column in AUTHORITY_PROXY_CONTINUOUS_COLUMNS
+            ]
+            + [
+                pl.col(column).cast(pl.Float64).mean().alias(column)
+                for column in AUTHORITY_PROXY_ALL_BOOLEAN_COLUMNS
+            ]
+        )
+    )
+    domain_levels = page_levels.group_by(["run_id", "domain"]).agg(
+        [
+            pl.col(column).median().alias(column)
+            for column in AUTHORITY_PROXY_CONTINUOUS_COLUMNS
+        ]
+        + [
+            pl.col(column).mean().alias(column)
+            for column in AUTHORITY_PROXY_ALL_BOOLEAN_COLUMNS
+        ]
+    )
+    transformed = domain_levels.with_columns(
+        [
+            # asinh dampens large timing and resource counts without imposing a
+            # log1p nonnegative-input requirement.
+            pl.col(column).arcsinh().alias(f"__t_{column}")
+            for column in AUTHORITY_PROXY_CONTINUOUS_COLUMNS
+        ]
+        + [
+            pl.col(column).alias(f"__t_{column}")
+            for column in AUTHORITY_PROXY_ALL_BOOLEAN_COLUMNS
+        ]
+    )
+    transformed = transformed.with_columns(
+        [
+            pl.when(
+                pl.col(f"__t_{column}").is_nan()
+                | pl.col(f"__t_{column}").is_infinite()
+            )
+            .then(None)
+            .otherwise(pl.col(f"__t_{column}"))
+            .alias(f"__t_{column}")
+            for column in AUTHORITY_PROXY_COMPONENT_COLUMNS
+        ]
+    )
+    z_scores = transformed.with_columns(
+        [
+            pl.when(
+                pl.col(f"__t_{column}").is_null()
+                | pl.col(f"__t_{column}").is_nan()
+                | pl.col(f"__t_{column}").is_infinite()
+            )
+            .then(None)
+            .when(
+                pl.col(f"__t_{column}").std(ddof=1).over("run_id").is_null()
+                | (pl.col(f"__t_{column}").std(ddof=1).over("run_id") == 0.0)
+            )
+            .then(0.0)
+            .otherwise(
+                (
+                    pl.col(f"__t_{column}")
+                    - pl.col(f"__t_{column}").mean().over("run_id")
+                )
+                / pl.col(f"__t_{column}").std(ddof=1).over("run_id")
+            )
+            .alias(f"__z_{column}")
+            for column in AUTHORITY_PROXY_COMPONENT_COLUMNS
+        ]
+    )
+    has_component = pl.any_horizontal(
+        [
+            pl.col(f"__z_{column}").is_not_null()
+            for column in AUTHORITY_PROXY_COMPONENT_COLUMNS
+        ]
+    )
+    aligned = [
+        (
+            -pl.col(f"__z_{column}")
+            if column in AUTHORITY_PROXY_NEGATED_COLUMNS
+            else pl.col(f"__z_{column}")
+        )
+        for column in AUTHORITY_PROXY_COMPONENT_COLUMNS
+    ]
+    return z_scores.with_columns(
+        pl.when(has_component)
+        .then(-pl.mean_horizontal(aligned))
+        .otherwise(None)
+        .cast(pl.Float64)
+        .alias("authority_proxy")
+    ).select(["run_id", "domain", "authority_proxy"])
+
+
 def build_analysis_panel_keyword_serp(
     keyword_serp: pl.LazyFrame,
     page_features: pl.LazyFrame,
@@ -710,8 +1001,12 @@ def build_analysis_panel_keyword_serp(
     join_keys = ["run_id", "target_keyword_id", "canonical_url_hash", "url"]
     scored_urls = page_features.select(join_keys).unique(join_keys)
     scaled_domains = (
-        domain_features.select(["run_id", "domain", "site_scale"])
-        .filter(pl.col("site_scale").is_not_null())
+        domain_features.select(["run_id", "domain", "site_scale", "authority_proxy"])
+        .filter(
+            # Complete-case policy: drop domains lacking either required control
+            # before model validation, instead of erroring the whole model.
+            pl.col("site_scale").is_not_null() & pl.col("authority_proxy").is_not_null()
+        )
         .unique(["run_id", "domain"])
     )
     return (
@@ -725,7 +1020,7 @@ def build_analysis_panel_keyword_serp(
             right_on=["run_id", "domain"],
             how="inner",
         )
-        .drop(["__domain", "site_scale"])
+        .drop(["__domain", "site_scale", "authority_proxy"])
     )
 
 
@@ -844,6 +1139,23 @@ def build_feature_lazyframes(
             how="left",
         )
     )
+    domain_authority_proxy = build_authority_proxy(
+        serp_domains.select(
+            ["run_id", "domain", "canonical_url_hash", "url", "target_keyword_id"]
+        ).join(
+            onpage_signals.select(
+                [
+                    "run_id",
+                    "target_keyword_id",
+                    "canonical_url_hash",
+                    "url",
+                    *AUTHORITY_PROXY_COMPONENT_COLUMNS,
+                ]
+            ),
+            on=["run_id", "target_keyword_id", "canonical_url_hash"],
+            how="left",
+        )
+    )
     domain_features = (
         serp_domains
         .group_by(["run_id", "target_keyword_id", "target_keyword", "domain"])
@@ -873,6 +1185,11 @@ def build_feature_lazyframes(
             on=["run_id", "domain"],
             how="left",
         )
+        .join(
+            domain_authority_proxy,
+            on=["run_id", "domain"],
+            how="left",
+        )
         .with_columns(
             pl.lit(FEATURE_SCHEMA_VERSION).alias("schema_version"),
         )
@@ -887,6 +1204,7 @@ def build_feature_lazyframes(
                 "best_serp_rank",
                 "worst_serp_rank",
                 "site_scale",
+                "authority_proxy",
                 "schema_version",
             ]
         )

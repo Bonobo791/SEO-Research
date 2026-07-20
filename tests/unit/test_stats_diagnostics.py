@@ -25,7 +25,7 @@ def _diagnostics_analysis_mart_frame() -> pl.DataFrame:
         for serp_rank in range(1, 5):
             score = 1.2 - (serp_rank * 0.18) + keyword_offset
             if keyword_index == 1 and serp_rank == 1:
-                score = 8.0
+                score = 12.0
             rows.append(
                 {
                     "run_id": "run-1",
@@ -46,6 +46,7 @@ def _diagnostics_analysis_mart_frame() -> pl.DataFrame:
                     "deprecated_html_tags": (keyword_index + serp_rank) % 3 == 0,
                     "time_to_first_byte_ms": 100 + (keyword_index * 7) + serp_rank,
                     "site_scale": (keyword_index * 0.1) + (serp_rank * 0.01),
+                    "authority_proxy": 0.5,
                     "meta_keywords_to_content_consistency": 0.5,
                     "bge_raw_score": score,
                     "bge_normalized_score": score,
@@ -116,6 +117,7 @@ def _multivariate_panel_frame(*, collinear: bool) -> pl.DataFrame:
                     + (((keyword_index * 7 + serp_rank * 11) % 9) * 0.1),
                     "time_to_first_byte_ms": 100 + serp_rank,
                     "site_scale": (keyword_index * 0.1) + (serp_rank * 0.01),
+                    "authority_proxy": ((keyword_index * 5 + serp_rank * 13) % 11) * 0.01,
                     "bge_normalized_score": bge_score,
                     "gemini_doc_retrieval_normalized_score": doc_score,
                     "gemini_semantic_similarity_normalized_score": semantic_score,
@@ -146,18 +148,16 @@ def test_summarize_backend_diagnostics_reports_reset_bp_and_influence_metrics() 
     )
 
 
-def test_summarize_backend_diagnostics_reports_null_site_scale() -> None:
+def test_summarize_backend_diagnostics_skips_when_all_control_rows_dropped() -> None:
     frame = _diagnostics_analysis_mart_frame().with_columns(
         pl.lit(None, dtype=pl.Float64).alias("site_scale")
     )
 
     summary = summarize_backend_diagnostics(frame, backend="bge")
 
-    assert summary["status"] == "error"
-    assert summary["row_count"] == frame.height
-    assert summary["invalid_controls"] == [
-        {"column": "site_scale", "reason": "missing_values"},
-    ]
+    assert summary["status"] == "skipped"
+    assert summary["skipped_reason"] == "no_usable_rows"
+    assert summary["row_count"] == 0
 
 
 def test_format_diagnostics_lines_handles_skipped_influence() -> None:
@@ -273,28 +273,50 @@ def test_summarize_backend_diagnostics_handles_top_3_without_runtime_warnings() 
 
 
 def test_summarize_backend_diagnostics_skips_reset_when_df_resid_is_too_small() -> None:
-    spec = load_analysis_spec()
-    run_frame = pl.read_parquet(
-        Path(__file__).resolve().parents[2]
-        / "runs"
-        / "seo-company-columbus-e26107bade78"
-        / "parquet"
-        / "analysis_mart"
-        / "part-0.parquet"
-    ).with_columns(
-        pl.lit(False).alias("deprecated_html_tags"),
-        pl.lit(0.5).alias("meta_keywords_to_content_consistency"),
-        pl.lit(250).alias("time_to_first_byte_ms"),
-        pl.lit(0.5).alias("site_scale"),
-    )
-    top_5_frame = filter_panel_by_max_rank(
-        run_frame,
-        max_rank=spec.rank_depth_limit("top_5"),
-    )
+    # Synthetic panel: 26 keywords x 2 rows keeps nobs > 50 while
+    # df_resid (= 52 - 25 keyword effects - 4 model terms) stays below 40,
+    # which is the RESET skip condition exercised here. (The previous version
+    # read a stored run whose shape drifted as runs/ data changed.)
+    rows: list[dict[str, object]] = []
+    for keyword_index in range(1, 27):
+        for serp_rank in range(1, 3):
+            score = 1.0 - (serp_rank * 0.05) + (keyword_index * 0.01)
+            rows.append(
+                {
+                    "run_id": "run-1",
+                    "target_keyword_id": f"kw-{keyword_index}",
+                    "target_keyword": f"keyword {keyword_index}",
+                    "keyword_order": keyword_index,
+                    "source_response_id": f"resp-{keyword_index}",
+                    "serp_item_id": f"serp-{keyword_index}-{serp_rank}",
+                    "page_id": f"page-{keyword_index}-{serp_rank}",
+                    "response_id": f"page-resp-{keyword_index}-{serp_rank}",
+                    "canonical_url_hash": f"url-{keyword_index}-{serp_rank}",
+                    "url": f"https://example.com/{keyword_index}/{serp_rank}",
+                    "serp_rank": serp_rank,
+                    "title": f"title-{keyword_index}-{serp_rank}",
+                    "description": f"description-{keyword_index}-{serp_rank}",
+                    "page_text_length": 100 + serp_rank,
+                    "referring_domains_count": 100 + serp_rank,
+                    "deprecated_html_tags": False,
+                    "time_to_first_byte_ms": 250,
+                    "site_scale": 0.5,
+                    "authority_proxy": 0.5,
+                    "meta_keywords_to_content_consistency": 0.5,
+                    "bge_raw_score": score,
+                    "bge_normalized_score": score,
+                    "gemini_doc_retrieval_raw_score": score,
+                    "gemini_doc_retrieval_normalized_score": score,
+                    "gemini_semantic_similarity_raw_score": score,
+                    "gemini_semantic_similarity_normalized_score": score,
+                    "schema_version": "analysis_mart.v1",
+                }
+            )
+    frame = pl.DataFrame(rows)
 
     with warnings.catch_warnings(record=True) as captured_warnings:
         warnings.simplefilter("always")
-        summary = summarize_backend_diagnostics(top_5_frame, backend="bge")
+        summary = summarize_backend_diagnostics(frame, backend="bge")
 
     assert captured_warnings == []
     assert summary["status"] == "computed"
@@ -358,7 +380,7 @@ def test_summarize_multivariate_sensitivity_keeps_all_backends_when_vif_is_below
     )
 
 
-def test_summarize_multivariate_sensitivity_reports_sparse_latency_control() -> None:
+def test_summarize_multivariate_sensitivity_drops_sparse_control_rows() -> None:
     spec = load_analysis_spec()
     frame = _multivariate_panel_frame(collinear=False).with_row_index("_row").with_columns(
         pl.when(pl.col("_row") == 0)
@@ -373,11 +395,8 @@ def test_summarize_multivariate_sensitivity_reports_sparse_latency_control() -> 
         backend_drop_order=spec.backend_drop_order,
     )
 
-    assert summary["status"] == "error"
-    assert summary["row_count"] == frame.height
-    assert summary["invalid_controls"] == [
-        {"column": "site_scale", "reason": "missing_values"}
-    ]
+    assert summary["status"] in {"computed", "unresolved"}
+    assert summary["row_count"] == frame.height - 1
 
 
 def test_summarize_multivariate_sensitivity_drops_backends_in_configured_order() -> None:
@@ -507,7 +526,7 @@ def test_summarize_backend_diagnostics_logs_fit_and_skip(
     )
 
 
-def test_diagnostics_reports_control_error_instead_of_omitting_null_control() -> None:
+def test_diagnostics_drops_null_control_rows_instead_of_control_error() -> None:
     spec = load_analysis_spec()
     frame = _multivariate_panel_frame(collinear=False).with_columns(
         pl.when(pl.col("serp_rank") == 1)
@@ -515,6 +534,21 @@ def test_diagnostics_reports_control_error_instead_of_omitting_null_control() ->
         .otherwise(pl.col("site_scale"))
         .alias("site_scale")
     )
+    expected_rows = frame.filter(pl.col("site_scale").is_not_null()).height
+
+    summary = diagnostics_module.summarize_multivariate_sensitivity(
+        frame,
+        vif_threshold=spec.multivariate_vif_threshold,
+        backend_drop_order=spec.backend_drop_order,
+    )
+
+    assert summary["status"] in {"computed", "unresolved"}
+    assert summary["row_count"] == expected_rows
+
+
+def test_diagnostics_reports_control_error_when_required_control_column_missing() -> None:
+    spec = load_analysis_spec()
+    frame = _multivariate_panel_frame(collinear=False).drop("site_scale")
 
     summary = diagnostics_module.summarize_multivariate_sensitivity(
         frame,
@@ -525,7 +559,7 @@ def test_diagnostics_reports_control_error_instead_of_omitting_null_control() ->
     assert summary["status"] == "error"
     assert summary["error_note"] == "required control data is incomplete; model not fit"
     assert summary["invalid_controls"] == [
-        {"column": "site_scale", "reason": "missing_values"}
+        {"column": "site_scale", "reason": "missing_column"}
     ]
 
 

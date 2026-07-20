@@ -17,6 +17,7 @@ from seo_rank.stats.model_inputs import (
     SVD_DID_NOT_CONVERGE,
     SkippedModelFit,
     control_error_summary,
+    drop_incomplete_control_rows,
     validate_control_columns,
 )
 from seo_rank.stats.rank_depth import filter_panel_by_max_rank
@@ -34,7 +35,7 @@ SIMILARITY_SCORE_COLUMNS = {
     "gemini_semantic_similarity": "gemini_semantic_similarity_normalized_score",
 }
 REGRESSION_CONTROL_COLUMNS = REQUIRED_CONTROL_COLUMNS
-BASELINE_FORMULA = "outcome ~ site_scale + C(target_keyword_id)"
+BASELINE_FORMULA = "outcome ~ site_scale + authority_proxy + C(target_keyword_id)"
 REGRESSION_REQUIRED_COLUMNS = ("serp_rank",)
 
 
@@ -545,7 +546,8 @@ def _prepare_regression_frame(
     analysis_mart: pl.DataFrame,
     score_column: str,
 ) -> pl.DataFrame:
-    return analysis_mart.filter(pl.col(score_column).is_not_null()).drop_nulls(
+    frame = drop_incomplete_control_rows(analysis_mart, REGRESSION_CONTROL_COLUMNS)
+    return frame.filter(pl.col(score_column).is_not_null()).drop_nulls(
         [score_column, *REGRESSION_REQUIRED_COLUMNS, "target_keyword_id"]
     )
 

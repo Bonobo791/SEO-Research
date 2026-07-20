@@ -63,6 +63,7 @@ def _sample_plackett_luce_panel(
                     "deprecated_html_tags": (keyword_index + serp_rank) % 3 == 0,
                     "time_to_first_byte_ms": 100 + (keyword_index * 7) + serp_rank,
                     "site_scale": (keyword_index * 0.1) + (serp_rank * 0.01),
+                    "authority_proxy": ((keyword_index * 5 + serp_rank * 13) % 11) * 0.01,
                     "meta_keywords_to_content_consistency": 0.1 + (serp_rank * 0.05),
                     "bge_raw_score": similarity,
                     "bge_normalized_score": similarity,
@@ -154,7 +155,7 @@ def test_summarize_plackett_luce_family_skips_constant_boolean_signal_without_op
     analysis_spec = load_analysis_spec()
     family = analysis_spec.signal_families.family("onpage_technical_checks")
     frame = _sample_plackett_luce_panel().with_columns(
-        pl.lit(True).alias("title_too_long"),
+        pl.lit(True).alias("is_redirect"),
     )
     optimize_calls = 0
     original = plackett_luce_module._maximize_log_likelihood
@@ -171,7 +172,7 @@ def test_summarize_plackett_luce_family_skips_constant_boolean_signal_without_op
         family=family,
     )
 
-    constant_summary = summary["signals"]["title_too_long"]
+    constant_summary = summary["signals"]["is_redirect"]
     assert constant_summary["status"] == "skipped"
     assert constant_summary["skipped_reason"] == "insufficient_signal_variance"
     assert optimize_calls < len(family.signal_columns)
@@ -201,7 +202,7 @@ def test_summarize_backend_plackett_luce_fits_rank_ordered_logit_with_clustered_
     assert summary["choice_set_size_summary"]["min"] == 5
     assert summary["choice_set_size_summary"]["max"] == 5
     assert summary["main_model"]["formula"] == (
-        "rank_ordered_logit ~ log(bge_normalized_score + 1) + site_scale"
+        "rank_ordered_logit ~ log(bge_normalized_score + 1) + site_scale + authority_proxy"
     )
     assert summary["main_model"]["omitted_controls"] == []
     assert summary["main_model"]["log_odds_per_1sd"] > 0
@@ -227,9 +228,9 @@ def test_plackett_luce_ignores_meta_keyword_control() -> None:
     summary = summarize_backend_plackett_luce(panel, backend="bge")
 
     assert fit is not None
-    assert fit.params.shape == (2,)
-    assert fit.information.shape == (2, 2)
-    assert summary["main_model"]["formula"] == "rank_ordered_logit ~ log(bge_normalized_score + 1) + site_scale"
+    assert fit.params.shape == (3,)
+    assert fit.information.shape == (3, 3)
+    assert summary["main_model"]["formula"] == "rank_ordered_logit ~ log(bge_normalized_score + 1) + site_scale + authority_proxy"
     assert summary["main_model"]["omitted_controls"] == []
 
 
@@ -242,9 +243,9 @@ def test_plackett_luce_ignores_constant_meta_keyword_control() -> None:
     summary = summarize_backend_plackett_luce(panel, backend="bge")
 
     assert fit is not None
-    assert fit.params.shape == (2,)
+    assert fit.params.shape == (3,)
     assert summary["main_model"]["formula"] == (
-        "rank_ordered_logit ~ log(bge_normalized_score + 1) + site_scale"
+        "rank_ordered_logit ~ log(bge_normalized_score + 1) + site_scale + authority_proxy"
     )
     assert summary["main_model"]["omitted_controls"] == []
 
@@ -261,9 +262,9 @@ def test_plackett_luce_omits_constant_control_but_keeps_latency_control() -> Non
     summary = summarize_backend_plackett_luce(panel, backend="bge")
 
     assert fit is not None
-    assert fit.params.shape == (1,)
-    assert fit.information.shape == (1, 1)
-    assert summary["main_model"]["formula"] == "rank_ordered_logit ~ log(bge_normalized_score + 1)"
+    assert fit.params.shape == (2,)
+    assert fit.information.shape == (2, 2)
+    assert summary["main_model"]["formula"] == "rank_ordered_logit ~ log(bge_normalized_score + 1) + authority_proxy"
     assert summary["main_model"]["omitted_controls"] == [
         {"column": "site_scale", "reason": "constant"},
     ]
@@ -432,6 +433,7 @@ def test_fit_backend_plackett_luce_treats_precision_loss_with_tiny_gradient_as_c
         / "part-0.parquet"
         ).with_row_index("_row").with_columns(
             (pl.col("_row") % 3 == 0).alias("site_scale"),
+            pl.lit(0.5).alias("authority_proxy"),
             pl.lit(0.5).alias("meta_keywords_to_content_consistency"),
             pl.lit(250).alias("time_to_first_byte_ms"),
         ).drop("_row")
@@ -612,20 +614,31 @@ def test_run_phase5_stats_fits_plackett_luce_once_per_backend(tmp_path: Path, mo
     assert call_count == 4
 
 
-def test_plackett_luce_reports_control_error_instead_of_omitting_null_control() -> None:
+def test_plackett_luce_drops_null_control_rows_instead_of_control_error() -> None:
     frame = _sample_plackett_luce_panel().with_columns(
         pl.when(pl.col("serp_rank") == 1)
         .then(None)
         .otherwise(pl.lit(250))
         .alias("site_scale"),
     )
+    expected_rows = frame.filter(pl.col("site_scale").is_not_null()).height
+
+    summary = summarize_backend_plackett_luce(frame, backend="bge")
+
+    assert summary["status"] in {"computed", "unstable"}
+    assert summary["row_count"] == expected_rows
+    assert "invalid_controls" not in summary
+
+
+def test_plackett_luce_reports_control_error_when_required_control_column_missing() -> None:
+    frame = _sample_plackett_luce_panel().drop("authority_proxy")
 
     summary = summarize_backend_plackett_luce(frame, backend="bge")
 
     assert summary["status"] == "error"
     assert summary["error_note"] == "required control data is incomplete; model not fit"
     assert summary["invalid_controls"] == [
-        {"column": "site_scale", "reason": "missing_values"}
+        {"column": "authority_proxy", "reason": "missing_column"}
     ]
 
 

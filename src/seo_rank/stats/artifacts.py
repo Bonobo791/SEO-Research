@@ -11,7 +11,12 @@ from typing import Any
 import numpy as np
 import polars as pl
 
-from seo_rank.data.features import ensure_feature_marts_for_analysis
+from seo_rank.data.features import (
+    _dataset_matches_schema,
+    build_analysis_mart,
+    ensure_feature_marts_for_analysis,
+)
+from seo_rank.data.marts import ANALYSIS_SCHEMA_VERSION
 from seo_rank.data.scans import scan_curated_table
 from seo_rank.stats.diagnostics import summarize_diagnostics_backends_from_fits
 from seo_rank.stats.diagnostics import summarize_diagnostics_families
@@ -1176,8 +1181,17 @@ def run_phase5_stats(
 ) -> AnalysisPanelResult:
     """Load the panel, write guardrail artifacts, and return the prepared panel."""
 
+    run_dir = Path(run_dir)
     logger.info("running phase5 stats run_dir=%s", run_dir)
-    ensure_feature_marts_for_analysis(Path(run_dir))
+    ensure_feature_marts_for_analysis(run_dir)
+    if (
+        (run_dir / "run.json").exists()
+        and _combined_analysis_metadata(run_dir) is None
+        and not _dataset_matches_schema(
+            run_dir / "parquet" / "analysis_mart", ANALYSIS_SCHEMA_VERSION
+        )
+    ):
+        build_analysis_mart(run_dir)
     analysis_spec = spec or load_analysis_spec()
     result = load_analysis_panel(run_dir, spec=analysis_spec)
     rank_depth_bundles, diagnostics_by_depth = build_rank_depth_bundles(

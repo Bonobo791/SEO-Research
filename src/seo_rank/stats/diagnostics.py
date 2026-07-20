@@ -32,6 +32,7 @@ from seo_rank.stats.model_inputs import (
     REQUIRED_CONTROL_COLUMNS,
     SkippedModelFit,
     control_error_summary,
+    drop_incomplete_control_rows,
     validate_control_columns,
 )
 
@@ -45,7 +46,7 @@ MIN_DF_RESID_FOR_RESET = RESET_POWER
 BREUSCH_PAGAN_P_VALUE_THRESHOLD = 0.05
 STUDENTIZED_RESIDUAL_THRESHOLD = 3.0
 MULTIVARIATE_CONTROL_COLUMNS = REQUIRED_CONTROL_COLUMNS
-MULTIVARIATE_CONTROL_TERMS = {"site_scale": "site_scale"}
+MULTIVARIATE_CONTROL_TERMS = {"site_scale": "site_scale", "authority_proxy": "authority_proxy"}
 MULTIVARIATE_SCORE_COLUMNS = (
     "bge_normalized_score",
     "gemini_doc_retrieval_normalized_score",
@@ -289,7 +290,10 @@ def _prepare_multivariate_sensitivity_data(
     if missing_columns:
         return None, "missing_required_columns", (), ()
 
-    model_frame = analysis_mart.drop_nulls(required_columns)
+    model_frame = drop_incomplete_control_rows(
+        analysis_mart.drop_nulls(required_columns),
+        MULTIVARIATE_CONTROL_COLUMNS,
+    )
     if model_frame.is_empty():
         return None, "no_usable_rows", (), ()
     if model_frame.height < 3:
@@ -447,6 +451,8 @@ def _multivariate_term_kind(term: str) -> str:
         return "intercept"
     if term == MULTIVARIATE_CONTROL_TERMS["site_scale"]:
         return "site_scale"
+    if term == MULTIVARIATE_CONTROL_TERMS["authority_proxy"]:
+        return "authority_proxy"
     if term in MULTIVARIATE_SCORE_COLUMNS_TO_BACKEND:
         return "similarity_backend"
     if term.startswith("C(target_keyword_id)"):

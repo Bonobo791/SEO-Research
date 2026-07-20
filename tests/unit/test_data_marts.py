@@ -85,6 +85,7 @@ def test_build_analysis_lazyframe_lives_in_marts_module() -> None:
                 "meta_keywords_to_content_consistency": None,
                 "time_to_first_byte_ms": None,
                 "site_scale": None,
+                "authority_proxy": None,
                 "schema_version": ANALYSIS_SCHEMA_VERSION,
         }
     ]
@@ -205,6 +206,7 @@ def test_build_analysis_lazyframe_joins_site_scale_from_domain_features() -> Non
                     "target_keyword_id": "kw-1",
                     "domain": "example.com",
                     "site_scale": 1.25,
+                    "authority_proxy": -0.75,
                 }
             ]
         ).lazy(),
@@ -214,6 +216,8 @@ def test_build_analysis_lazyframe_joins_site_scale_from_domain_features() -> Non
 
     assert result["site_scale"].to_list() == [1.25]
     assert result.schema["site_scale"] == pl.Float64
+    assert result["authority_proxy"].to_list() == [-0.75]
+    assert result.schema["authority_proxy"] == pl.Float64
 
 
 def test_build_analysis_lazyframe_ranks_within_keyword() -> None:
@@ -288,7 +292,7 @@ def test_build_analysis_lazyframe_ranks_within_keyword() -> None:
         assert f"{suffix}_z" in result.columns
 
 
-def test_build_analysis_lazyframe_schema_version_is_v7() -> None:
+def test_build_analysis_lazyframe_schema_version_matches_current_contract() -> None:
     feature_frames = {
         "keyword_serp": pl.DataFrame(
             [
@@ -334,7 +338,7 @@ def test_build_analysis_lazyframe_schema_version_is_v7() -> None:
     }
 
     result = build_analysis_lazyframe(feature_frames).collect()
-    assert result["schema_version"][0] == "analysis_mart.v7"
+    assert result["schema_version"][0] == ANALYSIS_SCHEMA_VERSION
 
 
 def test_build_analysis_lazyframe_tied_scores_rank_by_serp_rank() -> None:

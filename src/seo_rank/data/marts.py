@@ -4,12 +4,14 @@ from collections.abc import Mapping
 
 import polars as pl
 
-ANALYSIS_SCHEMA_VERSION = "analysis_mart.v7"
+ANALYSIS_SCHEMA_VERSION = "analysis_mart.v8"
 
 _DEPRECATED_HTML_TAGS_COLUMN = "deprecated_html_tags"
 _META_KEYWORDS_CONSISTENCY_COLUMN = "meta_keywords_to_content_consistency"
 _TIME_TO_FIRST_BYTE_COLUMN = "time_to_first_byte_ms"
 _SITE_SCALE_COLUMN = "site_scale"
+_AUTHORITY_PROXY_COLUMN = "authority_proxy"
+_DOMAIN_CONTROL_COLUMNS = (_SITE_SCALE_COLUMN, _AUTHORITY_PROXY_COLUMN)
 _ANALYSIS_JOIN_KEYS = ["run_id", "target_keyword_id", "canonical_url_hash"]
 
 _BACKENDS = ("bge", "gemini_doc_retrieval", "gemini_semantic_similarity")
@@ -78,7 +80,7 @@ def build_analysis_lazyframe(feature_frames: Mapping[str, pl.LazyFrame]) -> pl.L
     frame = _attach_deprecated_html_tags(frame, feature_frames.get("onpage_signals"))
     frame = _attach_meta_keywords_consistency(frame, feature_frames.get("onpage_signals"))
     frame = _attach_time_to_first_byte(frame, feature_frames.get("onpage_signals"))
-    frame = _attach_site_scale(frame, feature_frames.get("domain_features"))
+    frame = _attach_domain_controls(frame, feature_frames.get("domain_features"))
     return (
         frame
         .sort(["target_keyword_id", "serp_rank", "canonical_url_hash"])
@@ -133,13 +135,22 @@ def _attach_time_to_first_byte(
     )
 
 
-def _attach_site_scale(
+def _attach_domain_controls(
     frame: pl.LazyFrame, domain_features: pl.LazyFrame | None
 ) -> pl.LazyFrame:
-    if domain_features is None or _SITE_SCALE_COLUMN not in domain_features.collect_schema():
-        return frame.with_columns(pl.lit(None).cast(pl.Float64).alias(_SITE_SCALE_COLUMN))
+    schema = None if domain_features is None else domain_features.collect_schema()
+    present = [
+        column for column in _DOMAIN_CONTROL_COLUMNS if schema is not None and column in schema
+    ]
+    missing = [column for column in _DOMAIN_CONTROL_COLUMNS if column not in present]
+    if missing:
+        frame = frame.with_columns(
+            [pl.lit(None).cast(pl.Float64).alias(column) for column in missing]
+        )
+    if not present:
+        return frame
     domain_lookup = (
-        domain_features.select(["run_id", "domain", _SITE_SCALE_COLUMN])
+        domain_features.select(["run_id", "domain", *present])
         .unique(["run_id", "domain"])
     )
     return (

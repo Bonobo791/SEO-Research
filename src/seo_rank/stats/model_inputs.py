@@ -6,9 +6,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 import pandas as pd
+import polars as pl
 
 
-REQUIRED_CONTROL_COLUMNS = ("site_scale",)
+REQUIRED_CONTROL_COLUMNS = ("site_scale", "authority_proxy")
 CONTROL_ERROR_NOTE = "required control data is incomplete; model not fit"
 SVD_DID_NOT_CONVERGE = "svd_did_not_converge"
 
@@ -18,6 +19,22 @@ class SkippedModelFit:
     """Sentinel for a model that was eligible but failed numerically during fit."""
 
     reason: str
+
+
+def drop_incomplete_control_rows(
+    frame: pl.DataFrame,
+    columns: Sequence[str] = REQUIRED_CONTROL_COLUMNS,
+) -> pl.DataFrame:
+    """Drop rows with null required controls (complete_case policy).
+
+    Absent control columns are left unchanged for validate_control_columns /
+    legacy restore to handle.
+    """
+
+    present = [column for column in columns if column in frame.columns]
+    if not present:
+        return frame
+    return frame.filter(pl.all_horizontal(pl.col(column).is_not_null() for column in present))
 
 
 def validate_control_columns(
