@@ -31,6 +31,18 @@ def _sample_plackett_luce_panel(
     length_beta: float = -0.25,
     seed: int = 17,
 ) -> pl.DataFrame:
+    """Generate synthetic Plackett–Luce panel data for testing.
+    
+    Parameters:
+    	keyword_count (int): Number of target keywords to generate.
+    	items_per_keyword (int): Number of SERP items generated for each keyword.
+    	similarity_beta (float): Utility weight for item similarity.
+    	length_beta (float): Utility weight for the logarithm of referring-domain count.
+    	seed (int): Seed for deterministic random generation.
+    
+    Returns:
+    	pl.DataFrame: Synthetic panel data with observed SERP rankings and model features.
+    """
     rng = np.random.default_rng(seed)
     rows: list[dict[str, object]] = []
 

@@ -17,6 +17,13 @@ from seo_rank.stats.spec import load_analysis_spec
 
 
 def _diagnostics_analysis_mart_frame() -> pl.DataFrame:
+    """Build a synthetic analysis-mart DataFrame for diagnostics testing.
+    
+    Returns:
+        pl.DataFrame: Rows representing ten keywords across four search-result
+            ranks, with identifiers, control variables, metadata, and backend
+            scores.
+    """
     rows: list[dict[str, object]] = []
     for keyword_index in range(1, 11):
         target_keyword_id = f"kw-{keyword_index}"
@@ -78,6 +85,15 @@ def _empty_backend_frame() -> pl.DataFrame:
 
 
 def _multivariate_panel_frame(*, collinear: bool) -> pl.DataFrame:
+    """
+    Build a synthetic multivariate diagnostics panel with either collinear or varied backend scores.
+    
+    Parameters:
+    	collinear (bool): Whether to make all backend scores identical and collinear.
+    
+    Returns:
+    	pl.DataFrame: A panel containing six keywords, four SERP ranks per keyword, control variables, metadata, and backend scores.
+    """
     rows: list[dict[str, object]] = []
     for keyword_index in range(1, 7):
         target_keyword_id = f"kw-{keyword_index}"

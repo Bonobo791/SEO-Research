@@ -41,6 +41,21 @@ def _analysis_mart_frame(
     serp_count: int = 20,
     influential: bool = False,
 ) -> pl.DataFrame:
+    """
+    Create a synthetic analysis-mart DataFrame for phase 5 statistics tests.
+    
+    Parameters:
+        mode (str): Score-generation scenario, such as ``"confirmatory"``,
+            ``"low_signal"``, ``"collinear"``, or ``"hard_fail"``.
+        keyword_count (int): Number of target keywords to generate.
+        serp_count (int): Number of SERP rows to generate for each keyword.
+        influential (bool): Whether to add an influential score to the first
+            keyword's first SERP row.
+    
+    Returns:
+        pl.DataFrame: Synthetic analysis-mart rows with ranking, feature, and
+            backend score fields.
+    """
     rows: list[dict[str, object]] = []
     for keyword_index in range(1, keyword_count + 1):
         target_keyword_id = f"kw-{keyword_index}"

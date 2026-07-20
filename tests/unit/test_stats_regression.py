@@ -19,6 +19,7 @@ from seo_rank.stats.regression import (
 
 
 def _regression_analysis_mart_frame() -> pl.DataFrame:
+    """Create a synthetic regression analysis-mart frame with keyword, SERP, control, and backend score data."""
     rows: list[dict[str, object]] = []
     for keyword_index in range(1, 11):
         target_keyword_id = f"kw-{keyword_index}"
@@ -66,6 +67,11 @@ def _regression_analysis_mart_frame() -> pl.DataFrame:
 
 
 def _single_keyword_regression_frame() -> pl.DataFrame:
+    """Create a synthetic single-keyword regression dataset with ten SERP-ranked rows.
+    
+    Returns:
+    	pl.DataFrame: A DataFrame containing keyword metadata, control variables, and backend score columns.
+    """
     rows: list[dict[str, object]] = []
     for serp_rank in range(1, 11):
         rows.append(
@@ -103,6 +109,11 @@ def _single_keyword_regression_frame() -> pl.DataFrame:
 
 
 def _constant_similarity_keyword_regression_frame() -> pl.DataFrame:
+    """Create a regression test frame containing a constant similarity signal for one keyword.
+    
+    Returns:
+    	pl.DataFrame: A synthetic dataset for three keywords across four SERP ranks, with backend similarity scores and regression control columns.
+    """
     rows: list[dict[str, object]] = []
     for keyword_index in range(1, 4):
         target_keyword_id = f"kw-{keyword_index}"

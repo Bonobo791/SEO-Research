@@ -86,7 +86,16 @@ def _normalize_analysis_mart_controls(
     run_dir: Path,
     analysis_mart: pl.DataFrame,
 ) -> pl.DataFrame:
-    """Restore controls omitted by legacy analysis-mart partitions."""
+    """
+    Restore missing analysis-control columns using available curated sources.
+    
+    Parameters:
+    	run_dir (Path): Run directory containing curated parquet sources.
+    	analysis_mart (pl.DataFrame): Analysis mart whose missing controls should be restored.
+    
+    Returns:
+    	pl.DataFrame: Analysis mart with recoverable controls restored and unresolved page-level controls filled with null values.
+    """
     missing = [
         column for column in _ANALYSIS_CONTROL_DTYPES if column not in analysis_mart.columns
     ]
@@ -148,7 +157,17 @@ def _restore_domain_controls_from_domain_features(
     analysis_mart: pl.DataFrame,
     missing_domain: list[str],
 ) -> pl.DataFrame:
-    """Join missing site_scale / authority_proxy from domain_features by hostname."""
+    """
+    Restore missing domain-level controls by matching analysis URLs to domain features by hostname.
+    
+    Parameters:
+        run_dir (Path): Run directory containing the curated domain features.
+        analysis_mart (pl.DataFrame): Analysis data requiring domain controls.
+        missing_domain (list[str]): Domain-control column names to restore.
+    
+    Returns:
+        pl.DataFrame: Analysis mart with available domain controls joined from domain features.
+    """
     source_path = Path(run_dir) / "parquet" / "domain_features"
     if not source_path.exists() or not missing_domain:
         return analysis_mart
@@ -188,7 +207,16 @@ def _restore_analysis_controls(
     source_frame: pl.DataFrame,
     analysis_mart: pl.DataFrame,
 ) -> pl.DataFrame:
-    """Restore controls omitted by older optional family-mart schemas."""
+    """
+    Restore missing analysis controls in a family mart.
+    
+    Parameters:
+    	source_frame (pl.DataFrame): Family-mart data requiring control columns.
+    	analysis_mart (pl.DataFrame): Analysis data used to restore joinable controls.
+    
+    Returns:
+    	pl.DataFrame: The source frame with recoverable controls added and unresolved page controls filled with null values.
+    """
     if source_frame.is_empty():
         return source_frame
 

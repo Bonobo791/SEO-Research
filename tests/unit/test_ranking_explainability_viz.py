@@ -15,6 +15,12 @@ from seo_rank.stats.textrazor_explainability import summarize_ranking_explainabi
 
 
 def _explainability_panel_frame() -> pl.DataFrame:
+    """
+    Construct a synthetic explainability feature panel for visualization tests.
+    
+    Returns:
+    	pl.DataFrame: A DataFrame containing four SERP-ranked rows for each of ten keywords, with identifiers and feature values.
+    """
     rows: list[dict[str, object]] = []
     for keyword_index in range(1, 11):
         target_keyword_id = f"kw-{keyword_index}"

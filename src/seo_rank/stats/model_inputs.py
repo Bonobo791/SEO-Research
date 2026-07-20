@@ -25,10 +25,16 @@ def drop_incomplete_control_rows(
     frame: pl.DataFrame,
     columns: Sequence[str] = REQUIRED_CONTROL_COLUMNS,
 ) -> pl.DataFrame:
-    """Drop rows with null required controls (complete_case policy).
-
-    Absent control columns are left unchanged for validate_control_columns /
-    legacy restore to handle.
+    """
+    Drop rows with null values in the available required control columns.
+    
+    Parameters:
+        frame (pl.DataFrame): Input data frame.
+        columns (Sequence[str]): Control columns to check.
+    
+    Returns:
+        pl.DataFrame: The filtered data frame, or the original frame when none of
+            the specified columns are present.
     """
 
     present = [column for column in columns if column in frame.columns]
@@ -41,7 +47,17 @@ def validate_control_columns(
     model_data: pd.DataFrame,
     columns: Sequence[str] = REQUIRED_CONTROL_COLUMNS,
 ) -> tuple[dict[str, str], ...]:
-    """Return control issues instead of silently reducing a model formula."""
+    """
+    Identify required control columns that are missing or contain null values.
+    
+    Parameters:
+        model_data (pd.DataFrame): Data containing the control columns to validate.
+        columns (Sequence[str]): Required control column names.
+    
+    Returns:
+        tuple[dict[str, str], ...]: Validation issues, each containing a column name
+        and a reason of either ``"missing_column"`` or ``"missing_values"``.
+    """
 
     issues: list[dict[str, str]] = []
     for column in columns:

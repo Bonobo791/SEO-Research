@@ -20,6 +20,13 @@ from seo_rank.stats.textrazor_explainability import (
 
 
 def _textrazor_panel_frame() -> pl.DataFrame:
+    """
+    Build a synthetic TextRazor ranking panel with four SERP rows for each of ten keywords.
+    
+    Returns:
+        pl.DataFrame: Panel data containing ranking identifiers, page features, similarity
+        scores, TextRazor metrics, and metadata.
+    """
     rows: list[dict[str, object]] = []
     for keyword_index in range(1, 11):
         target_keyword_id = f"kw-{keyword_index}"

@@ -14,6 +14,7 @@ from seo_rank.stats.spec import load_analysis_spec
 
 
 def _combined_analysis_mart_frame() -> pl.DataFrame:
+    """Create a synthetic analysis mart DataFrame containing ranked results for ten keywords."""
     rows: list[dict[str, object]] = []
     for keyword_index in range(1, 11):
         target_keyword_id = f"kw-{keyword_index}"
@@ -381,6 +382,14 @@ def test_run_phase5_stats_rebuilds_legacy_feature_and_analysis_marts(
     analysis_calls: list[Path] = []
 
     def materialize_onpage_features(path: Path) -> dict[str, object]:
+        """Materialize synthetic on-page feature data for a run directory.
+        
+        Parameters:
+            path (Path): Run directory where the on-page feature parquet dataset is written.
+        
+        Returns:
+            dict[str, object]: Empty dataset metadata.
+        """
         feature_calls.append(path)
         onpage_dir = path / "parquet" / "onpage_features"
         onpage_dir.mkdir(parents=True, exist_ok=True)
@@ -388,6 +397,14 @@ def test_run_phase5_stats_rebuilds_legacy_feature_and_analysis_marts(
         return {"datasets": {}}
 
     def materialize_analysis_mart(path: Path) -> dict[str, object]:
+        """Materialize the analysis mart for a run directory.
+        
+        Parameters:
+        	path (Path): Run directory where the analysis mart parquet file is written.
+        
+        Returns:
+        	dict[str, object]: An empty dataset catalog.
+        """
         analysis_calls.append(path)
         _combined_analysis_mart_frame().with_columns(
             pl.lit(ANALYSIS_SCHEMA_VERSION).alias("schema_version")

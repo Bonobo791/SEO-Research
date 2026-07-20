@@ -954,7 +954,15 @@ CURATED_PAGE_AND_PASSAGE_SCHEMA = {
 
 
 def normalize_run(run_dir: Path) -> dict[str, object]:
-    """Materialize curated tables from stored raw responses."""
+    """
+    Materialize curated datasets from stored raw responses and update the run catalog.
+    
+    Parameters:
+    	run_dir (Path): Directory containing the run metadata and stored raw responses.
+    
+    Returns:
+    	dict[str, object]: The updated dataset catalog.
+    """
 
     run_dir = Path(run_dir)
     run_json_path = run_dir / "run.json"
@@ -1093,6 +1101,21 @@ def build_curated_lazyframes_from_raw_responses(
     page_similarity_scores: Mapping[str, Mapping[str, Mapping[str, object]]],
     blocklist: DomainBlocklist,
 ) -> dict[str, pl.LazyFrame]:
+    """
+    Builds curated lazy datasets from stored raw responses.
+    
+    Parameters:
+    	raw_responses (pl.LazyFrame): Stored raw response records to normalize.
+    	run_id (str): Identifier of the run associated with the responses.
+    	seed (str): Seed used when normalizing keyword expansions.
+    	depth (int): Maximum SERP depth to include.
+    	keyword_limit (int): Maximum number of normalized keywords to include.
+    	page_similarity_scores (Mapping[str, Mapping[str, Mapping[str, object]]]): Similarity scores indexed by keyword and URL.
+    	blocklist (DomainBlocklist): Domains excluded from URL-based curated datasets and similarity scoring.
+    
+    Returns:
+    	dict[str, pl.LazyFrame]: Curated datasets keyed by dataset name.
+    """
     keyword_responses = raw_responses.filter(
         pl.col("endpoint") == "keyword_expansion"
     ).select(["response_id", "response_body_bytes"])

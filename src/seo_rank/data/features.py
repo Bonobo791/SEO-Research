@@ -835,7 +835,15 @@ FEATURE_VALIDATION_RULES["onpage_features"] = {
 
 
 def build_site_scale(frame: pl.DataFrame | pl.LazyFrame) -> pl.LazyFrame:
-    """Build one standardized-mean site-scale value per run and hostname."""
+    """
+    Build a standardized site-scale score for each run and domain.
+    
+    Parameters:
+    	frame (pl.DataFrame | pl.LazyFrame): Source records containing site-scale measurements grouped by run, domain, and canonical URL.
+    
+    Returns:
+    	pl.LazyFrame: Lazy frame with `run_id`, `domain`, and `site_scale`; the score is null when any required measurement is unavailable.
+    """
 
     lazy_frame = frame.lazy() if isinstance(frame, pl.DataFrame) else frame
     page_medians = (
@@ -889,11 +897,20 @@ def build_site_scale(frame: pl.DataFrame | pl.LazyFrame) -> pl.LazyFrame:
 
 
 def build_authority_proxy(frame: pl.DataFrame | pl.LazyFrame) -> pl.LazyFrame:
-    """Build one standardized authority-proxy value per run and hostname.
-
-    Composite of the DataForSEO negative ranking signals: higher output means
-    fewer negative signals (more authority-like). Available finite component
-    z-scores are polarity-aligned so higher = worse, averaged, then negated.
+    """
+    Build a standardized authority score for each run and domain.
+    
+    The score combines available DataForSEO negative-ranking signals, aligns their
+    polarity, and averages their run-level standardized values. Higher scores
+    indicate fewer negative signals.
+    
+    Parameters:
+        frame (pl.DataFrame | pl.LazyFrame): On-page signal data containing run,
+            domain, and canonical URL identifiers.
+    
+    Returns:
+        pl.LazyFrame: A lazy frame with `run_id`, `domain`, and `authority_proxy`.
+            The score is null when no valid signal components are available.
     """
 
     lazy_frame = frame.lazy() if isinstance(frame, pl.DataFrame) else frame
@@ -996,7 +1013,17 @@ def build_analysis_panel_keyword_serp(
     page_features: pl.LazyFrame,
     domain_features: pl.LazyFrame,
 ) -> pl.LazyFrame:
-    """Keep only URL keys with scored pages and a usable domain control."""
+    """
+    Retain keyword SERP rows with scored pages and complete domain-level control features.
+    
+    Parameters:
+    	keyword_serp (pl.LazyFrame): Keyword SERP rows to filter.
+    	page_features (pl.LazyFrame): Page features used to identify scored URLs.
+    	domain_features (pl.LazyFrame): Domain features containing site-scale and authority controls.
+    
+    Returns:
+    	pl.LazyFrame: Keyword SERP rows whose URLs have page features and whose domains have both control values.
+    """
 
     join_keys = ["run_id", "target_keyword_id", "canonical_url_hash", "url"]
     scored_urls = page_features.select(join_keys).unique(join_keys)
@@ -1027,6 +1054,15 @@ def build_analysis_panel_keyword_serp(
 def build_feature_lazyframes(
     curated_frames: Mapping[str, pl.LazyFrame],
 ) -> dict[str, pl.LazyFrame]:
+    """
+    Build lazy feature and analysis marts from curated input frames.
+    
+    Parameters:
+    	curated_frames (Mapping[str, pl.LazyFrame]): Curated lazy frames keyed by dataset name.
+    
+    Returns:
+    	dict[str, pl.LazyFrame]: Lazy frames for keyword SERP, page, passage, domain, backlink, on-page, TextRazor, and entity-signal marts.
+    """
     keywords = curated_frames["keywords"]
     serp_items = curated_frames["serp_items"]
     pages = curated_frames["pages"]

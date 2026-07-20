@@ -17,6 +17,11 @@ from seo_rank.stats.spec import AnalysisSpec, load_analysis_spec
 
 
 def _analysis_mart_frame() -> pl.DataFrame:
+    """Build a synthetic analysis mart containing ranked keyword results and domain controls.
+    
+    Returns:
+    	pl.DataFrame: An in-memory analysis mart with model scores, SERP metadata, and domain control columns.
+    """
     rows: list[dict[str, object]] = []
     for keyword_index in range(1, 10):
         target_keyword_id = f"kw-{keyword_index}"
@@ -114,6 +119,11 @@ def _analysis_mart_frame() -> pl.DataFrame:
 
 
 def _zero_serp_variance_frame() -> pl.DataFrame:
+    """Create a synthetic analysis mart with no SERP-rank variance within a keyword.
+    
+    Returns:
+    	pl.DataFrame: Two rows for one keyword sharing the same SERP rank, with varying score values and domain controls.
+    """
     return pl.DataFrame(
         [
             {
@@ -190,6 +200,14 @@ def _analysis_spec_with_primary_rank_depth(depth_key: str) -> AnalysisSpec:
 
 
 def _analysis_mart_frame_with_depth(max_rank: int) -> pl.DataFrame:
+    """Create a synthetic analysis mart with rows spanning the requested SERP rank depth.
+    
+    Parameters:
+    	max_rank (int): Maximum SERP rank to include.
+    
+    Returns:
+    	pl.DataFrame: Analysis mart rows with synthetic ranking metrics and domain controls.
+    """
     rows: list[dict[str, object]] = []
     for serp_rank in range(1, max_rank + 1):
         rows.append(

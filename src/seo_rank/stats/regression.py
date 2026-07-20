@@ -546,6 +546,16 @@ def _prepare_regression_frame(
     analysis_mart: pl.DataFrame,
     score_column: str,
 ) -> pl.DataFrame:
+    """
+    Prepare the regression input frame by retaining rows with complete control data and required modeling values.
+    
+    Parameters:
+    	analysis_mart (pl.DataFrame): Source analysis data.
+    	score_column (str): Similarity score column used by the regression.
+    
+    Returns:
+    	pl.DataFrame: Filtered data containing usable regression rows.
+    """
     frame = drop_incomplete_control_rows(analysis_mart, REGRESSION_CONTROL_COLUMNS)
     return frame.filter(pl.col(score_column).is_not_null()).drop_nulls(
         [score_column, *REGRESSION_REQUIRED_COLUMNS, "target_keyword_id"]

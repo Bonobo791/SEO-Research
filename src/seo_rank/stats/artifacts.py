@@ -1179,7 +1179,17 @@ def run_phase5_stats(
     spec: AnalysisSpec | None = None,
     entity_ids: set[str] | None = None,
 ) -> AnalysisPanelResult:
-    """Load the panel, write guardrail artifacts, and return the prepared panel."""
+    """
+    Run Phase 5 statistics analysis and write its summary, diagnostics, and report artifacts.
+    
+    Parameters:
+    	run_dir (Path): Directory containing the run data and receiving the generated statistics artifacts.
+    	spec (AnalysisSpec | None): Analysis specification to use; loads the default specification when omitted.
+    	entity_ids (set[str] | None): Entity identifiers to include in entity-level statistics.
+    
+    Returns:
+    	AnalysisPanelResult: The loaded analysis panel and its associated guardrail results.
+    """
 
     run_dir = Path(run_dir)
     logger.info("running phase5 stats run_dir=%s", run_dir)

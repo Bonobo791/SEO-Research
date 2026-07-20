@@ -281,6 +281,16 @@ def _prepare_multivariate_sensitivity_data(
     tuple[str, ...],
     tuple[dict[str, str], ...],
 ]:
+    """
+    Prepare validated data for the multivariate sensitivity model.
+    
+    Parameters:
+    	analysis_mart (pl.DataFrame): Analysis data containing model inputs and control columns.
+    	active_backends (Sequence[str]): Backends whose similarity score columns are included.
+    
+    Returns:
+    	tuple: Model data, a skip reason, validated control column names, and control validation issues.
+    """
     required_columns = [
         "target_keyword_id",
         "serp_rank",
@@ -447,6 +457,15 @@ def _next_multivariate_drop_backend(
 
 
 def _multivariate_term_kind(term: str) -> str:
+    """
+    Classify a multivariate model term by its diagnostic category.
+    
+    Parameters:
+    	term (str): The model term to classify.
+    
+    Returns:
+    	str: The term category, such as intercept, control, similarity backend, keyword fixed effect, or other.
+    """
     if term == "Intercept":
         return "intercept"
     if term == MULTIVARIATE_CONTROL_TERMS["site_scale"]:

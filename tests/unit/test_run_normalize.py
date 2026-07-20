@@ -55,6 +55,18 @@ def _page_similarity_entry(
     gemini_doc_retrieval: float = 0.9,
     gemini_semantic_similarity: float = 0.9,
 ) -> dict[str, object]:
+    """Build a page similarity record for a keyword and URL.
+    
+    Parameters:
+    	target_keyword (str): Keyword associated with the similarity scores.
+    	url (str): URL associated with the similarity scores.
+    	bge (float): BGE similarity score.
+    	gemini_doc_retrieval (float): Gemini document retrieval score.
+    	gemini_semantic_similarity (float): Gemini semantic similarity score.
+    
+    Returns:
+    	dict[str, object]: A similarity record containing raw and normalized scores.
+    """
     return {
         "target_keyword": target_keyword,
         "url": url,

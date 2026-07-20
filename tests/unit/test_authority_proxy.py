@@ -16,6 +16,12 @@ from seo_rank.stats.spec import load_analysis_spec
 
 
 def _component_defaults() -> dict[str, object]:
+    """
+    Build default feature values for authority-proxy components.
+    
+    Returns:
+    	dict[str, object]: A mapping of continuous and boolean component columns to their baseline values.
+    """
     row: dict[str, object] = {}
     for column in AUTHORITY_PROXY_CONTINUOUS_COLUMNS:
         row[column] = 90.0 if column in AUTHORITY_PROXY_CONTINUOUS_NEGATED_COLUMNS else 10.0
@@ -27,6 +33,18 @@ def _component_defaults() -> dict[str, object]:
 
 
 def _row(run_id: str, domain: str, page_index: int, **overrides: object) -> dict[str, object]:
+    """
+    Create a feature row with identifiers, default component values, and optional overrides.
+    
+    Parameters:
+    	run_id (str): Identifier for the run containing the row.
+    	domain (str): Domain associated with the row.
+    	page_index (int): Index used to construct the canonical URL hash.
+    	overrides (object): Feature values that replace the corresponding defaults.
+    
+    Returns:
+    	dict[str, object]: The assembled feature row.
+    """
     row = {
         "run_id": run_id,
         "domain": domain,

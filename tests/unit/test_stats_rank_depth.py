@@ -32,6 +32,15 @@ def _sample_panel() -> pl.DataFrame:
 
 
 def _depth_divergent_panel(*, keyword_count: int = 12) -> pl.DataFrame:
+    """
+    Build a synthetic panel with rank-dependent similarity scores across multiple keywords.
+    
+    Parameters:
+        keyword_count (int): Number of keywords to include.
+    
+    Returns:
+        pl.DataFrame: Panel containing 20 ranked results per keyword.
+    """
     rows: list[dict[str, object]] = []
     for keyword_index in range(1, keyword_count + 1):
         keyword_id = f"kw-{keyword_index}"
