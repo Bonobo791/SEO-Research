@@ -12,7 +12,7 @@ import numpy as np
 import polars as pl
 
 from seo_rank.data.features import (
-    _dataset_matches_schema,
+    dataset_matches_schema,
     build_analysis_mart,
     ensure_feature_marts_for_analysis,
 )
@@ -1197,7 +1197,7 @@ def run_phase5_stats(
     if (
         (run_dir / "run.json").exists()
         and _combined_analysis_metadata(run_dir) is None
-        and not _dataset_matches_schema(
+        and not dataset_matches_schema(
             run_dir / "parquet" / "analysis_mart", ANALYSIS_SCHEMA_VERSION
         )
     ):

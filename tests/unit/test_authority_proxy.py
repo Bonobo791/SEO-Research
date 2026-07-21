@@ -7,7 +7,6 @@ from seo_rank.data.features import (
     AUTHORITY_PROXY_BOOLEAN_COLUMNS,
     AUTHORITY_PROXY_BOOLEAN_INVERTED_COLUMNS,
     AUTHORITY_PROXY_CONTINUOUS_COLUMNS,
-    AUTHORITY_PROXY_CONTINUOUS_NEGATED_COLUMNS,
     AUTHORITY_PROXY_MODELED_ONPAGE_COLUMNS,
     build_analysis_panel_keyword_serp,
     build_authority_proxy,
@@ -24,7 +23,7 @@ def _component_defaults() -> dict[str, object]:
     """
     row: dict[str, object] = {}
     for column in AUTHORITY_PROXY_CONTINUOUS_COLUMNS:
-        row[column] = 90.0 if column in AUTHORITY_PROXY_CONTINUOUS_NEGATED_COLUMNS else 10.0
+        row[column] = 10.0
     for column in AUTHORITY_PROXY_BOOLEAN_COLUMNS:
         row[column] = False
     for column in AUTHORITY_PROXY_BOOLEAN_INVERTED_COLUMNS:

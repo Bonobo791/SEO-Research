@@ -1,6 +1,7 @@
 """Feature mart builders for stored runs."""
 
 import hashlib
+import logging
 import json
 from collections.abc import Mapping
 from pathlib import Path
@@ -8,7 +9,7 @@ from pathlib import Path
 import polars as pl
 import pyarrow.parquet as pq
 
-from seo_rank.data.marts import build_analysis_lazyframe
+from seo_rank.data.marts import build_analysis_lazyframe, extract_hostname
 from seo_rank.data.normalize import CURATED_VALIDATION_RULES, filter_blocklisted_domain_rows
 from seo_rank.data.scans import scan_curated_table
 from seo_rank.data.validate import (
@@ -19,6 +20,8 @@ from seo_rank.data.validate import (
 )
 from seo_rank.domain_blocklist import DomainBlocklist
 from seo_rank.dataforseo import DEFAULT_SERP_DEPTH
+
+logger = logging.getLogger(__name__)
 
 FEATURE_SCHEMA_VERSION = "feature_marts.v5"
 SITE_SCALE_COLUMNS = (
@@ -93,26 +96,11 @@ AUTHORITY_PROXY_MODELED_ONPAGE_COLUMNS = frozenset(
 # (see DataForSEO-Negative-Ranking-Signals.md). Continuous components are
 # aggregated as domain medians of page medians, asinh-transformed, then
 # z-scored within the run; boolean flags are aggregated as domain rates and
-# z-scored without the log transform.
-AUTHORITY_PROXY_CONTINUOUS_NEGATED_COLUMNS = tuple(
-    column
-    for column in (
-        "onpage_score",
-        "plain_text_word_count",
-        "plain_text_rate",
-        "flesch_kincaid_readability_index",
-        "description_to_content_consistency",
-        "title_to_content_consistency",
-        "meta_keywords_to_content_consistency",
-        "cache_control_ttl",
-        "inbound_links_count",
-    )
-    if column not in AUTHORITY_PROXY_MODELED_ONPAGE_COLUMNS
-)
+# z-scored without the log transform. Surviving continuous components are
+# already higher=worse; only boolean-inverted columns need polarity flip.
 AUTHORITY_PROXY_CONTINUOUS_COLUMNS = tuple(
     column
     for column in (
-        *AUTHORITY_PROXY_CONTINUOUS_NEGATED_COLUMNS,
         "coleman_liau_readability_index",
         "smog_readability_index",
         "dale_chall_readability_index",
@@ -210,9 +198,7 @@ AUTHORITY_PROXY_COMPONENT_COLUMNS = (
     *AUTHORITY_PROXY_ALL_BOOLEAN_COLUMNS,
 )
 # Components aligned so that higher = worse before averaging.
-AUTHORITY_PROXY_NEGATED_COLUMNS = frozenset(
-    (*AUTHORITY_PROXY_CONTINUOUS_NEGATED_COLUMNS, *AUTHORITY_PROXY_BOOLEAN_INVERTED_COLUMNS)
-)
+AUTHORITY_PROXY_NEGATED_COLUMNS = frozenset(AUTHORITY_PROXY_BOOLEAN_INVERTED_COLUMNS)
 FEATURE_REQUIRED_COLUMNS = {
     "keyword_serp": (
         "run_id",
@@ -913,6 +899,7 @@ def build_authority_proxy(frame: pl.DataFrame | pl.LazyFrame) -> pl.LazyFrame:
             The score is null when no valid signal components are available.
     """
 
+    logger.info("building authority_proxy")
     lazy_frame = frame.lazy() if isinstance(frame, pl.DataFrame) else frame
     page_levels = (
         lazy_frame.group_by(["run_id", "domain", "canonical_url_hash"])
@@ -1039,7 +1026,7 @@ def build_analysis_panel_keyword_serp(
     return (
         keyword_serp.join(scored_urls, on=join_keys, how="inner")
         .with_columns(
-            pl.col("url").str.extract(r"^https?://([^/]+)", 1).alias("__domain")
+            extract_hostname(pl.col("url")).alias("__domain")
         )
         .join(
             scaled_domains,
@@ -1162,7 +1149,7 @@ def build_feature_lazyframes(
     )
 
     serp_domains = serp_items.with_columns(
-        pl.col("url").str.extract(r"^https?://([^/]+)", 1).alias("domain"),
+        extract_hostname(pl.col("url")).alias("domain"),
     )
     domain_site_scale = build_site_scale(
         serp_domains.select(
@@ -1352,14 +1339,13 @@ def build_entity_signals_lazyframe(
     candidate_keywords = occurrences.select(
         ["run_id", "target_keyword_id", "target_keyword", "entity_id"]
     ).unique()
+    serp_ranks = serp_items.group_by(
+        ["run_id", "target_keyword_id", "canonical_url_hash"]
+    ).agg(pl.col("serp_rank").min())
     usable_pages = textrazor_page_metrics.select(
         ["run_id", "target_keyword_id", "target_keyword", "canonical_url_hash", "url"]
     ).join(
-        serp_items.select(
-            ["run_id", "target_keyword_id", "canonical_url_hash", "url", "serp_rank"]
-        )
-        .group_by(["run_id", "target_keyword_id", "canonical_url_hash", "url"])
-        .agg(pl.col("serp_rank").min()),
+        serp_ranks,
         on=["run_id", "target_keyword_id", "canonical_url_hash"],
         how="inner",
     )
@@ -1432,7 +1418,7 @@ def ensure_feature_marts_for_analysis(run_dir: Path) -> None:
 
     parquet_dir = Path(run_dir) / "parquet"
     feature_marts_stale = any(
-        not _dataset_matches_schema(parquet_dir / name, FEATURE_SCHEMA_VERSION)
+        not dataset_matches_schema(parquet_dir / name, FEATURE_SCHEMA_VERSION)
         for name in REQUIRED_FEATURE_MARTS_FOR_ANALYSIS
     )
     if not feature_marts_stale:
@@ -1442,7 +1428,7 @@ def ensure_feature_marts_for_analysis(run_dir: Path) -> None:
     build_feature_marts(Path(run_dir))
 
 
-def _dataset_matches_schema(dataset_dir: Path, expected_version: str) -> bool:
+def dataset_matches_schema(dataset_dir: Path, expected_version: str) -> bool:
     files = sorted(dataset_dir.glob("part-*.parquet"))
     if not files:
         return False

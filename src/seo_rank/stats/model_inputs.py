@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 
 import pandas as pd
 import polars as pl
 
+logger = logging.getLogger(__name__)
 
 REQUIRED_CONTROL_COLUMNS = ("site_scale", "authority_proxy")
 CONTROL_ERROR_NOTE = "required control data is incomplete; model not fit"
@@ -40,7 +42,9 @@ def drop_incomplete_control_rows(
     present = [column for column in columns if column in frame.columns]
     if not present:
         return frame
-    return frame.filter(pl.all_horizontal(pl.col(column).is_not_null() for column in present))
+    return frame.filter(
+        pl.all_horizontal([pl.col(column).is_not_null() for column in present])
+    )
 
 
 def validate_control_columns(
@@ -65,6 +69,11 @@ def validate_control_columns(
             issues.append({"column": column, "reason": "missing_column"})
         elif model_data[column].isna().any():
             issues.append({"column": column, "reason": "missing_values"})
+    logger.info(
+        "validating control columns columns=%s issue_count=%d",
+        list(columns),
+        len(issues),
+    )
     return tuple(issues)
 
 

@@ -1,8 +1,11 @@
 """Analysis mart builders for stored runs."""
 
+import logging
 from collections.abc import Mapping
 
 import polars as pl
+
+logger = logging.getLogger(__name__)
 
 ANALYSIS_SCHEMA_VERSION = "analysis_mart.v8"
 
@@ -15,6 +18,10 @@ _DOMAIN_CONTROL_COLUMNS = (_SITE_SCALE_COLUMN, _AUTHORITY_PROXY_COLUMN)
 _ANALYSIS_JOIN_KEYS = ["run_id", "target_keyword_id", "canonical_url_hash"]
 
 _BACKENDS = ("bge", "gemini_doc_retrieval", "gemini_semantic_similarity")
+
+
+def extract_hostname(url_expr: pl.Expr) -> pl.Expr:
+    return url_expr.str.extract(r"^https?://([^/]+)", 1)
 
 
 def _rank_columns() -> list[pl.Expr]:
@@ -53,6 +60,7 @@ def build_analysis_lazyframe(feature_frames: Mapping[str, pl.LazyFrame]) -> pl.L
     Returns:
         pl.LazyFrame: The assembled analysis mart with optional feature columns, similarity rankings, and schema version.
     """
+    logger.info("building analysis lazyframe")
     frame = (
         feature_frames["keyword_serp"]
         .join(
@@ -184,7 +192,7 @@ def _attach_domain_controls(
     )
     return (
         frame.with_columns(
-            pl.col("url").str.extract(r"^https?://([^/]+)", 1).alias("__domain")
+            extract_hostname(pl.col("url")).alias("__domain")
         )
         .join(
             domain_lookup,

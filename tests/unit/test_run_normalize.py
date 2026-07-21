@@ -181,6 +181,8 @@ def test_normalize_run_scopes_similarity_scores_to_unblocked_serp_urls(
     catalog = normalize_run(output_dir)
 
     assert catalog["datasets"]["serp_items"]["row_count"] == 1
+    # normalize_run applies filter_blocklisted_domain_rows to all curated
+    # datasets except keywords, so blocked_url is absent from pages/passages.
     for dataset_name in ("pages", "passages"):
         rows = ds.dataset(
             output_dir / "parquet" / dataset_name,

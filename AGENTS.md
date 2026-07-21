@@ -224,7 +224,7 @@ command without the rtk prefix.
 - The active pre-registered spec is `analysis_spec.v1.2.yaml` (adds the
   `authority_proxy` control alongside `site_scale`). Older stored runs whose
   `analysis_mart`/`domain_features` predate the control will report
-  control-error status until `seo-rank build-features --run runs/RUN_ID`
+  control-error status until `rtk seo-rank build-features --run runs/RUN_ID`
   re-materializes `domain_features`.
 
 ## Documentation map

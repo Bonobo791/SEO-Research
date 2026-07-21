@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -109,6 +110,8 @@ ONPAGE_ITEM_LEVEL_CHECK_FALLBACK_FIELDS = frozenset(
 )
 from seo_rank.text import normalize_page_text
 from seo_rank.textrazor import TEXTRAZOR_ENDPOINTS, normalize_entities, normalize_page_metrics
+
+logger = logging.getLogger(__name__)
 
 CURATED_SCHEMA_VERSION = "curated.v1"
 
@@ -965,6 +968,7 @@ def normalize_run(run_dir: Path) -> dict[str, object]:
     """
 
     run_dir = Path(run_dir)
+    logger.info("normalizing run run_dir=%s", run_dir)
     run_json_path = run_dir / "run.json"
     run_payload = json.loads(run_json_path.read_text(encoding="utf-8"))
     run_id = str(run_payload["run_id"])

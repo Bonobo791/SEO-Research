@@ -9,6 +9,7 @@ from typing import Any
 
 import polars as pl
 
+from seo_rank.data.marts import extract_hostname
 from seo_rank.data.scans import scan_curated_table
 from seo_rank.stats.rank_depth import filter_panel_by_max_rank
 from seo_rank.stats.spec import AnalysisSpec, load_analysis_spec
@@ -174,7 +175,9 @@ def _restore_domain_controls_from_domain_features(
     if "url" not in analysis_mart.columns or "run_id" not in analysis_mart.columns:
         return analysis_mart
     try:
-        domain_features = scan_curated_table(run_dir, "domain_features").collect()
+        domain_features = scan_curated_table(run_dir, "domain_features").collect(
+            engine="streaming"
+        )
     except OSError:
         logger.warning(
             "failed to scan domain_features for control restore run_dir=%s",
@@ -191,7 +194,7 @@ def _restore_domain_controls_from_domain_features(
     )
     return (
         analysis_mart.with_columns(
-            pl.col("url").str.extract(r"^https?://([^/]+)", 1).alias("__domain")
+            extract_hostname(pl.col("url")).alias("__domain")
         )
         .join(
             domain_lookup,
