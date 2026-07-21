@@ -184,7 +184,7 @@ def _attach_domain_controls(
         frame = frame.with_columns(
             [pl.lit(None).cast(pl.Float64).alias(column) for column in missing]
         )
-    if not present:
+    if not present or domain_features is None:
         return frame
     domain_lookup = (
         domain_features.select(["run_id", "domain", *present])

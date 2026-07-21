@@ -39,7 +39,7 @@ Plackett-Luce is deferred backlog work only and is not wired in code today.
 
 #### Progress
 
-**Slices:** 27 of 42 shipped, 2 partial, 13 open.
+**Slices:** 27 of 48 shipped, 2 partial, 19 open.
 
 | # | Slice | Layer | Status | Primary deliverable |
 | - | ----- | ----- | ------ | ------------------- |
@@ -85,6 +85,12 @@ Plackett-Luce is deferred backlog work only and is not wired in code today.
 | 40 | Entity KB linkage enrichment (Phase 5.7) | Data | Open | Wikidata/types + linkage richness |
 | 41 | Signal registry for new families (Phase 5.7) | Stats | Open | `analysis_spec` families + validation |
 | 42 | Salience explainability & golden fixtures (Phase 5.7) | Stats | Open | Curated models + slice 31 golden path |
+| 43 | TabFM runtime and extras | Stats | Open | Pinned `tabfm` + `jax` / `cuda` extras |
+| 44 | TabFM candidate panel and labels | Stats | Open | All-rank Top-3/5/10/20 targets with eligibility accounting |
+| 45 | TabFM keyword-held-out OOF scoring | Stats | Open | Per-task OOF positive-class ranking scores |
+| 46 | TabFM ranking metrics | Stats | Open | Macro NDCG@5/@10, pairwise, Kendall, Spearman, rank-score R² |
+| 47 | TabFM report and artifact wiring | CLI | Open | Default script output + `ranking_r2.json` block |
+| 48 | TabFM fixtures and regression tests | Stats | Open | Deterministic model stub and failure-path coverage |
 
 **Remaining to close the core Phase 5 delivery:** slice 31 (TextRazor golden
 fixtures; see `ROADMAP.md`). OLS / Plackett-Luce standardization and relative-rank work (former
@@ -108,9 +114,13 @@ entity salience).
 Slice 6 live E2E: **S5-11** in `FIXUPS.md` (`page_text` `tasks[].result: null`
 schema drift).
 
+**Next implementation priority:** slices 43–48, TabFM ranking-band
+classification in the standalone explainability workflow. It is additive to the
+Phase 5 confirmatory estimand and does not change `seo-rank analyze` artifacts.
+
 #### Dev slices
 
-**Progress:** 27 of 42 shipped, 2 partial, 13 open.
+**Progress:** 27 of 48 shipped, 2 partial, 19 open.
 
 1. **[x] Slice 1 — Estimand & analysis spec**
    - Add `analysis_spec.v1.yaml`: outcome (`-log(serp_rank)`), predictors,
@@ -458,6 +468,44 @@ schema drift).
     - End-to-end golden fixture (complements slice 31) with known rank
       relationships for new TextRazor columns.
 
+43. **[ ] Slice 43 — TabFM runtime and extras**
+    - Pin the latest stable `tabfm` release and define `jax` (CPU) and `cuda`
+      (GPU JAX) extras so `pip install -e .[jax,cuda]` is the documented runtime.
+    - Make missing optional model dependencies fail loudly when the standalone
+      explainability script starts.
+
+44. **[ ] Slice 44 — TabFM candidate panel and labels**
+    - Load every stored candidate rank for the TabFM path, independently of the
+      existing explainability rank-depth filter.
+    - Derive independent Top-3, Top-5, Top-10, and Top-20 labels; retain only
+      keyword groups with both classes for the applicable task and report
+      excluded groups and rows.
+
+45. **[ ] Slice 45 — TabFM keyword-held-out OOF scoring**
+    - Reuse the curated ranking-importance predictors and fold-local
+      preprocessing; fit TabFM only on training keywords and aggregate held-out
+      positive-class probabilities into ranking scores.
+    - Reuse grouped-fold/repeat controls and surface skipped single-class
+      training folds explicitly.
+
+46. **[ ] Slice 46 — TabFM ranking metrics**
+    - Report macro-by-keyword NDCG@5 and NDCG@10 with the fixed roadmap
+      relevance grades, plus pairwise accuracy, Kendall's tau, Spearman
+      correlation, and secondary rank-score R² against `-log(serp_rank)`.
+    - Keep task coverage, OOF row count, and metric skip reasons in the
+      JSON-safe summary.
+
+47. **[ ] Slice 47 — TabFM report and artifact wiring**
+    - Run TabFM classification by default in `analysis/textrazor_ranking_r2.py`
+      while leaving existing OLS/Ridge results additive and unchanged.
+    - Render a compact per-threshold table and persist the
+      `tabfm_classification` block in `stats/ranking_r2.json`.
+
+48. **[ ] Slice 48 — TabFM fixtures and regression tests**
+    - Add deterministic stub-model tests for labels, keyword isolation, metric
+      calculations, rank-beyond-20 eligibility, dependency failures, and JSON /
+      terminal output contracts.
+
 #### Phase 5 intent
 
 - **Estimand lock** — ship `analysis_spec.v1.yaml` (outcome `-log(serp_rank)`,
@@ -571,7 +619,7 @@ schema drift).
 
 ## Phase 5 acceptance criteria
 
-**Status:** 27 of 42 slices shipped, 2 partial, 13 open.
+**Status:** 27 of 48 slices shipped, 2 partial, 19 open.
 
 | Acceptance item | Slice(s) | Status |
 | --------------- | -------- | ------ |

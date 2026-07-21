@@ -882,6 +882,98 @@ def build_site_scale(frame: pl.DataFrame | pl.LazyFrame) -> pl.LazyFrame:
     ).select(["run_id", "domain", "site_scale"])
 
 
+def _onpage_frame_for_authority_proxy(onpage_signals: pl.LazyFrame) -> pl.LazyFrame:
+    """
+    Select join keys and authority-proxy components from onpage signals.
+
+    Component columns absent from the curated schema are added as null so
+    build_authority_proxy can still run on whatever signals are available.
+    """
+    schema = onpage_signals.collect_schema()
+    present = [
+        column for column in AUTHORITY_PROXY_COMPONENT_COLUMNS if column in schema
+    ]
+    missing = [
+        column for column in AUTHORITY_PROXY_COMPONENT_COLUMNS if column not in schema
+    ]
+    frame = onpage_signals.select(
+        [
+            "run_id",
+            "target_keyword_id",
+            "canonical_url_hash",
+            "url",
+            *present,
+        ]
+    )
+    if missing:
+        frame = frame.with_columns([pl.lit(None).alias(column) for column in missing])
+    return frame
+
+
+def _authority_proxy_domain_levels(lazy_frame: pl.LazyFrame) -> pl.LazyFrame:
+    """
+    Aggregate authority-proxy component columns to one row per run and domain.
+
+    Page-level continuous columns use median; boolean columns use mean. Those
+    page rows are then aggregated again to domain level with the same rules.
+    """
+    page_levels = lazy_frame.group_by(
+        ["run_id", "domain", "canonical_url_hash"]
+    ).agg(
+        [
+            pl.col(column).cast(pl.Float64).median().alias(column)
+            for column in AUTHORITY_PROXY_CONTINUOUS_COLUMNS
+        ]
+        + [
+            pl.col(column).cast(pl.Float64).mean().alias(column)
+            for column in AUTHORITY_PROXY_ALL_BOOLEAN_COLUMNS
+        ]
+    )
+    return page_levels.group_by(["run_id", "domain"]).agg(
+        [
+            pl.col(column).median().alias(column)
+            for column in AUTHORITY_PROXY_CONTINUOUS_COLUMNS
+        ]
+        + [
+            pl.col(column).mean().alias(column)
+            for column in AUTHORITY_PROXY_ALL_BOOLEAN_COLUMNS
+        ]
+    )
+
+
+def _authority_proxy_within_run_z_scores(transformed: pl.LazyFrame) -> pl.LazyFrame:
+    """
+    Standardize transformed authority-proxy components within each run.
+
+    Null/non-finite inputs stay null. Zero or missing within-run standard
+    deviation maps to 0.0; otherwise compute (x - mean) / std over run_id.
+    """
+    return transformed.with_columns(
+        [
+            pl.when(
+                pl.col(f"__t_{column}").is_null()
+                | pl.col(f"__t_{column}").is_nan()
+                | pl.col(f"__t_{column}").is_infinite()
+            )
+            .then(None)
+            .when(
+                pl.col(f"__t_{column}").std(ddof=1).over("run_id").is_null()
+                | (pl.col(f"__t_{column}").std(ddof=1).over("run_id") == 0.0)
+            )
+            .then(0.0)
+            .otherwise(
+                (
+                    pl.col(f"__t_{column}")
+                    - pl.col(f"__t_{column}").mean().over("run_id")
+                )
+                / pl.col(f"__t_{column}").std(ddof=1).over("run_id")
+            )
+            .alias(f"__z_{column}")
+            for column in AUTHORITY_PROXY_COMPONENT_COLUMNS
+        ]
+    )
+
+
 def build_authority_proxy(frame: pl.DataFrame | pl.LazyFrame) -> pl.LazyFrame:
     """
     Build a standardized authority score for each run and domain.
@@ -901,29 +993,7 @@ def build_authority_proxy(frame: pl.DataFrame | pl.LazyFrame) -> pl.LazyFrame:
 
     logger.info("building authority_proxy")
     lazy_frame = frame.lazy() if isinstance(frame, pl.DataFrame) else frame
-    page_levels = (
-        lazy_frame.group_by(["run_id", "domain", "canonical_url_hash"])
-        .agg(
-            [
-                pl.col(column).cast(pl.Float64).median().alias(column)
-                for column in AUTHORITY_PROXY_CONTINUOUS_COLUMNS
-            ]
-            + [
-                pl.col(column).cast(pl.Float64).mean().alias(column)
-                for column in AUTHORITY_PROXY_ALL_BOOLEAN_COLUMNS
-            ]
-        )
-    )
-    domain_levels = page_levels.group_by(["run_id", "domain"]).agg(
-        [
-            pl.col(column).median().alias(column)
-            for column in AUTHORITY_PROXY_CONTINUOUS_COLUMNS
-        ]
-        + [
-            pl.col(column).mean().alias(column)
-            for column in AUTHORITY_PROXY_ALL_BOOLEAN_COLUMNS
-        ]
-    )
+    domain_levels = _authority_proxy_domain_levels(lazy_frame)
     transformed = domain_levels.with_columns(
         [
             # asinh dampens large timing and resource counts without imposing a
@@ -948,30 +1018,7 @@ def build_authority_proxy(frame: pl.DataFrame | pl.LazyFrame) -> pl.LazyFrame:
             for column in AUTHORITY_PROXY_COMPONENT_COLUMNS
         ]
     )
-    z_scores = transformed.with_columns(
-        [
-            pl.when(
-                pl.col(f"__t_{column}").is_null()
-                | pl.col(f"__t_{column}").is_nan()
-                | pl.col(f"__t_{column}").is_infinite()
-            )
-            .then(None)
-            .when(
-                pl.col(f"__t_{column}").std(ddof=1).over("run_id").is_null()
-                | (pl.col(f"__t_{column}").std(ddof=1).over("run_id") == 0.0)
-            )
-            .then(0.0)
-            .otherwise(
-                (
-                    pl.col(f"__t_{column}")
-                    - pl.col(f"__t_{column}").mean().over("run_id")
-                )
-                / pl.col(f"__t_{column}").std(ddof=1).over("run_id")
-            )
-            .alias(f"__z_{column}")
-            for column in AUTHORITY_PROXY_COMPONENT_COLUMNS
-        ]
-    )
+    z_scores = _authority_proxy_within_run_z_scores(transformed)
     has_component = pl.any_horizontal(
         [
             pl.col(f"__z_{column}").is_not_null()
@@ -993,6 +1040,7 @@ def build_authority_proxy(frame: pl.DataFrame | pl.LazyFrame) -> pl.LazyFrame:
         .cast(pl.Float64)
         .alias("authority_proxy")
     ).select(["run_id", "domain", "authority_proxy"])
+
 
 
 def build_analysis_panel_keyword_serp(
@@ -1166,15 +1214,7 @@ def build_feature_lazyframes(
         serp_domains.select(
             ["run_id", "domain", "canonical_url_hash", "url", "target_keyword_id"]
         ).join(
-            onpage_signals.select(
-                [
-                    "run_id",
-                    "target_keyword_id",
-                    "canonical_url_hash",
-                    "url",
-                    *AUTHORITY_PROXY_COMPONENT_COLUMNS,
-                ]
-            ),
+            _onpage_frame_for_authority_proxy(onpage_signals),
             on=["run_id", "target_keyword_id", "canonical_url_hash"],
             how="left",
         )

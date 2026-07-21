@@ -6,8 +6,10 @@ import pytest
 from seo_rank.data.features import (
     AUTHORITY_PROXY_BOOLEAN_COLUMNS,
     AUTHORITY_PROXY_BOOLEAN_INVERTED_COLUMNS,
+    AUTHORITY_PROXY_COMPONENT_COLUMNS,
     AUTHORITY_PROXY_CONTINUOUS_COLUMNS,
     AUTHORITY_PROXY_MODELED_ONPAGE_COLUMNS,
+    _onpage_frame_for_authority_proxy,
     build_analysis_panel_keyword_serp,
     build_authority_proxy,
 )
@@ -44,7 +46,7 @@ def _row(run_id: str, domain: str, page_index: int, **overrides: object) -> dict
     Returns:
     	dict[str, object]: The assembled feature row.
     """
-    row = {
+    row: dict[str, object] = {
         "run_id": run_id,
         "domain": domain,
         "canonical_url_hash": f"{domain}-{page_index}",
@@ -257,3 +259,36 @@ def test_analysis_panel_drops_rows_with_null_authority_proxy() -> None:
     ).collect()
 
     assert result["canonical_url_hash"].to_list() == ["hash-a"]
+
+def test_onpage_frame_for_authority_proxy_null_fills_absent_component_columns() -> None:
+    """Absent CWV columns are selected as null so build_authority_proxy can run."""
+    join_keys = {
+        "run_id": ["run-1"],
+        "target_keyword_id": ["kw-1"],
+        "canonical_url_hash": ["hash-a"],
+        "url": ["https://a.example/x"],
+    }
+    present_components = [
+        column
+        for column in AUTHORITY_PROXY_COMPONENT_COLUMNS
+        if column != "time_to_first_byte_ms"
+    ]
+    row = {**join_keys}
+    for column in present_components:
+        if column in AUTHORITY_PROXY_CONTINUOUS_COLUMNS:
+            row[column] = [10.0]
+        elif column in AUTHORITY_PROXY_BOOLEAN_COLUMNS:
+            row[column] = [False]
+        else:
+            row[column] = [True]
+
+    frame = pl.DataFrame(row).lazy()
+    assert "time_to_first_byte_ms" not in frame.collect_schema()
+
+    result = _onpage_frame_for_authority_proxy(frame).collect()
+
+    assert "time_to_first_byte_ms" in result.columns
+    assert result["time_to_first_byte_ms"].null_count() == 1
+    for column in AUTHORITY_PROXY_COMPONENT_COLUMNS:
+        assert column in result.columns
+

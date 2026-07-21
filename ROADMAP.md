@@ -136,7 +136,7 @@ Plackett-Luce analysis.
 
 #### Dev slices
 
-**Progress:** 27 of 42 shipped, 2 partial, 13 open.
+**Progress:** 27 of 48 shipped, 2 partial, 19 open.
 
 1. **[x] Slice 1 — Estimand & analysis spec**
    - Add `analysis_spec.v1.yaml`: outcome (`-log(serp_rank)`), predictors,
@@ -465,6 +465,37 @@ seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-textrazor-on
 
 42. **[ ] Slice 42 — Salience explainability & golden fixtures (Phase 5.7 tracker)**
     - See **Phase 5.7** below; complements slice 31.
+
+43. **[ ] Slice 43 — TabFM runtime and extras**
+    - Pin the latest stable `tabfm` release and define `jax` (CPU) and `cuda`
+      (GPU JAX) extras for `pip install -e .[jax,cuda]`.
+    - Fail loudly when the standalone ranking explainability script lacks its
+      required optional model runtime.
+
+44. **[ ] Slice 44 — TabFM candidate panel and labels**
+    - Load all stored candidate ranks for TabFM independently of the current
+      rank-depth filter; no new SERP collection is required.
+    - Derive independent Top-3, Top-5, Top-10, and Top-20 labels and account
+      for keyword groups without both classes.
+
+45. **[ ] Slice 45 — TabFM keyword-held-out OOF scoring**
+    - Reuse curated ranking-importance predictors and fold-local preprocessing.
+    - Fit on training keywords only and aggregate held-out positive-class
+      probabilities into per-task ranking scores.
+
+46. **[ ] Slice 46 — TabFM ranking metrics**
+    - Add macro-by-keyword NDCG@5/@10, pairwise accuracy, Kendall's tau,
+      Spearman correlation, and secondary rank-score R² against
+      `-log(serp_rank)`.
+
+47. **[ ] Slice 47 — TabFM report and artifact wiring**
+    - Run classification by default in `analysis/textrazor_ranking_r2.py`.
+    - Render per-threshold results and write a `tabfm_classification` block to
+      `stats/ranking_r2.json` without replacing existing explainability output.
+
+48. **[ ] Slice 48 — TabFM fixtures and regression tests**
+    - Cover deterministic labels, grouped OOF isolation, metrics, rank-beyond-20
+      eligibility, dependency failures, and JSON / terminal contracts.
 
 #### Phase 5 acceptance criteria
 
@@ -883,6 +914,13 @@ dossier tests (exploratory appendix only).
 | Keyword holdout validation | 5 | Open |
 | Optional time-split across two runs | 5 | Open |
 | Limitations: observational, no causal claims; word vs char denominator note | 0–5 | Open |
+
+### Next item — TabFM ranking-band classification
+
+**Tracked in Phase 5 slices 43–48.** This is the next implementation priority:
+an additive, standalone model report over the existing analyzed Parquet data.
+It does not alter the Phase 5 confirmatory Spearman / OLS / Plackett-Luce
+estimand or `seo-rank analyze` artifacts.
 
 ### Phase 5.7 — TextRazor structured signals & entity salience
 
