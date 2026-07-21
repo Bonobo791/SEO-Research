@@ -41,6 +41,21 @@ def _analysis_mart_frame(
     serp_count: int = 20,
     influential: bool = False,
 ) -> pl.DataFrame:
+    """
+    Create a synthetic analysis-mart DataFrame for phase 5 statistics tests.
+    
+    Parameters:
+        mode (str): Score-generation scenario, such as ``"confirmatory"``,
+            ``"low_signal"``, ``"collinear"``, or ``"hard_fail"``.
+        keyword_count (int): Number of target keywords to generate.
+        serp_count (int): Number of SERP rows to generate for each keyword.
+        influential (bool): Whether to add an influential score to the first
+            keyword's first SERP row.
+    
+    Returns:
+        pl.DataFrame: Synthetic analysis-mart rows with ranking, feature, and
+            backend score fields.
+    """
     rows: list[dict[str, object]] = []
     for keyword_index in range(1, keyword_count + 1):
         target_keyword_id = f"kw-{keyword_index}"
@@ -88,6 +103,7 @@ def _analysis_mart_frame(
                     "deprecated_html_tags": (keyword_index + serp_rank) % 3 == 0,
                     "meta_keywords_to_content_consistency": 0.5,
                     "site_scale": (keyword_index * 0.1) + (serp_rank * 0.01),
+                    "authority_proxy": ((keyword_index * 5 + serp_rank * 13) % 11) * 0.01,
                     "bge_raw_score": bge_score,
                     "bge_normalized_score": bge_score,
                     "gemini_doc_retrieval_raw_score": gemini_doc_score,

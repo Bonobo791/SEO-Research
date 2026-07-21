@@ -56,7 +56,7 @@ def test_entity_signals_builds_page_level_presence_and_provenance() -> None:
             "entity_mention_count": 2,
             "entity_confidence_mean": 3.0,
             "entity_relevance_mean": 0.4,
-            "schema_version": "feature_marts.v3",
+            "schema_version": "feature_marts.v5",
         },
         {
             "run_id": "run-1",
@@ -72,7 +72,7 @@ def test_entity_signals_builds_page_level_presence_and_provenance() -> None:
             "entity_mention_count": 0,
             "entity_confidence_mean": None,
             "entity_relevance_mean": None,
-            "schema_version": "feature_marts.v3",
+            "schema_version": "feature_marts.v5",
         },
     ]
 
@@ -106,7 +106,10 @@ def test_entity_signals_keeps_best_rank_for_duplicate_serp_url() -> None:
             "run_id": ["run-1", "run-1"],
             "target_keyword_id": ["kw-1", "kw-1"],
             "canonical_url_hash": ["url-a", "url-a"],
-            "url": ["https://a.example/page", "https://a.example/page"],
+            "url": [
+                "https://a.example/page?srsltid=first",
+                "https://a.example/page?srsltid=second",
+            ],
             "serp_rank": [4, 2],
         }
     ).lazy()

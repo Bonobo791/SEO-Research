@@ -7,11 +7,21 @@ import polars as pl
 import pytest
 
 from seo_rank.stats.artifacts import run_phase5_stats
-from seo_rank.stats.panel import load_analysis_panel, prepare_analysis_panel, prepare_rank_depth_panel
+from seo_rank.stats.panel import (
+    _restore_analysis_controls,
+    load_analysis_panel,
+    prepare_analysis_panel,
+    prepare_rank_depth_panel,
+)
 from seo_rank.stats.spec import AnalysisSpec, load_analysis_spec
 
 
 def _analysis_mart_frame() -> pl.DataFrame:
+    """Build a synthetic analysis mart containing ranked keyword results and domain controls.
+    
+    Returns:
+    	pl.DataFrame: An in-memory analysis mart with model scores, SERP metadata, and domain control columns.
+    """
     rows: list[dict[str, object]] = []
     for keyword_index in range(1, 10):
         target_keyword_id = f"kw-{keyword_index}"
@@ -102,10 +112,18 @@ def _analysis_mart_frame() -> pl.DataFrame:
             "schema_version": "analysis_mart.v1",
         }
     )
-    return pl.DataFrame(rows)
+    return pl.DataFrame(rows).with_columns(
+        pl.lit(0.5).alias("site_scale"),
+        pl.lit(0.25).alias("authority_proxy"),
+    )
 
 
 def _zero_serp_variance_frame() -> pl.DataFrame:
+    """Create a synthetic analysis mart with no SERP-rank variance within a keyword.
+    
+    Returns:
+    	pl.DataFrame: Two rows for one keyword sharing the same SERP rank, with varying score values and domain controls.
+    """
     return pl.DataFrame(
         [
             {
@@ -161,6 +179,9 @@ def _zero_serp_variance_frame() -> pl.DataFrame:
                 "schema_version": "analysis_mart.v1",
             },
         ]
+    ).with_columns(
+        pl.lit(0.5).alias("site_scale"),
+        pl.lit(0.25).alias("authority_proxy"),
     )
 
 
@@ -179,6 +200,14 @@ def _analysis_spec_with_primary_rank_depth(depth_key: str) -> AnalysisSpec:
 
 
 def _analysis_mart_frame_with_depth(max_rank: int) -> pl.DataFrame:
+    """Create a synthetic analysis mart with rows spanning the requested SERP rank depth.
+    
+    Parameters:
+    	max_rank (int): Maximum SERP rank to include.
+    
+    Returns:
+    	pl.DataFrame: Analysis mart rows with synthetic ranking metrics and domain controls.
+    """
     rows: list[dict[str, object]] = []
     for serp_rank in range(1, max_rank + 1):
         rows.append(
@@ -209,7 +238,11 @@ def _analysis_mart_frame_with_depth(max_rank: int) -> pl.DataFrame:
                 "schema_version": "analysis_mart.v1",
             }
         )
-    return pl.DataFrame(rows)
+    return pl.DataFrame(rows).with_columns(
+        pl.lit(0.5).alias("site_scale"),
+        pl.lit(0.25).alias("authority_proxy"),
+    )
+
 
 
 def test_load_analysis_panel_filters_top20_and_evaluates_guardrails(
@@ -255,6 +288,145 @@ def test_load_analysis_panel_filters_top20_and_evaluates_guardrails(
         "no_causal_claims": "Do not interpret coefficients as causal ranking factors.",
         "measurement_error_conservative": "Similarity scores are model outputs and may attenuate effects.",
     }
+
+
+
+def test_load_analysis_panel_restores_authority_proxy_from_domain_features(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = tmp_path / "runs" / "run-1"
+    (run_dir / "parquet" / "analysis_mart").mkdir(parents=True)
+    (run_dir / "parquet" / "domain_features").mkdir(parents=True)
+
+    analysis_mart = (
+        _analysis_mart_frame()
+        .drop("authority_proxy")
+        .with_columns(pl.lit(0.5).alias("site_scale"))
+    )
+    domain_features = pl.DataFrame(
+        {
+            "run_id": ["run-1"],
+            "domain": ["example.com"],
+            "site_scale": [0.5],
+            "authority_proxy": [0.42],
+            "schema_version": ["domain_features.v1"],
+        }
+    )
+
+    def _scan(path, table_name):
+        if table_name == "analysis_mart":
+            return analysis_mart.lazy()
+        if table_name == "domain_features":
+            return domain_features.lazy()
+        raise AssertionError(f"unexpected table {table_name}")
+
+    monkeypatch.setattr("seo_rank.stats.panel.scan_curated_table", _scan)
+
+    result = load_analysis_panel(run_dir)
+
+    assert "authority_proxy" in result.analysis_mart.columns
+    assert result.analysis_mart["authority_proxy"].null_count() == 0
+    assert result.analysis_mart["authority_proxy"].unique().to_list() == [0.42]
+
+
+def test_load_analysis_panel_does_not_null_fill_missing_domain_controls(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = tmp_path / "runs" / "run-1"
+    (run_dir / "parquet" / "analysis_mart").mkdir(parents=True)
+
+    analysis_mart = _analysis_mart_frame().drop(["site_scale", "authority_proxy"])
+
+    monkeypatch.setattr(
+        "seo_rank.stats.panel.scan_curated_table",
+        lambda path, table_name: analysis_mart.lazy(),
+    )
+
+    result = load_analysis_panel(run_dir)
+
+    assert "authority_proxy" not in result.analysis_mart.columns
+    assert "site_scale" not in result.analysis_mart.columns
+    assert result.analysis_mart.height == analysis_mart.height
+
+
+def test_restore_analysis_controls_leaves_domain_controls_absent_when_missing() -> None:
+    source = pl.DataFrame(
+        {
+            "run_id": ["run-1"],
+            "target_keyword_id": ["kw-1"],
+            "canonical_url_hash": ["url-1"],
+            "url": ["https://example.com/1"],
+            "deprecated_html_tags": [False],
+        }
+    )
+    analysis_mart = pl.DataFrame(
+        {
+            "run_id": ["run-1"],
+            "target_keyword_id": ["kw-1"],
+            "canonical_url_hash": ["url-1"],
+            "url": ["https://example.com/1"],
+            "time_to_first_byte_ms": [100],
+        }
+    )
+
+    restored = _restore_analysis_controls(source, analysis_mart)
+
+    assert "authority_proxy" not in restored.columns
+    assert "site_scale" not in restored.columns
+    assert "time_to_first_byte_ms" in restored.columns
+    assert restored["time_to_first_byte_ms"].to_list() == [100]
+
+
+def test_restore_analysis_controls_joins_domain_controls_from_analysis_mart() -> None:
+    source = pl.DataFrame(
+        {
+            "run_id": ["run-1"],
+            "target_keyword_id": ["kw-1"],
+            "canonical_url_hash": ["url-1"],
+            "url": ["https://example.com/1"],
+        }
+    )
+    analysis_mart = pl.DataFrame(
+        {
+            "run_id": ["run-1"],
+            "target_keyword_id": ["kw-1"],
+            "canonical_url_hash": ["url-1"],
+            "url": ["https://example.com/1"],
+            "site_scale": [0.5],
+            "authority_proxy": [0.42],
+        }
+    )
+
+    restored = _restore_analysis_controls(source, analysis_mart)
+
+    assert restored["authority_proxy"].to_list() == [0.42]
+    assert restored["site_scale"].to_list() == [0.5]
+
+
+def test_prepare_analysis_panel_keeps_rows_with_null_required_controls(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "runs" / "run-1"
+    analysis_mart = _analysis_mart_frame().with_columns(
+        pl.lit(0.5).alias("site_scale"),
+        pl.when(pl.col("canonical_url_hash") == "url-1-1")
+        .then(None)
+        .otherwise(pl.lit(0.25))
+        .alias("authority_proxy"),
+    )
+
+    result = prepare_analysis_panel(run_dir, analysis_mart)
+
+    # complete_case applies at model fit, not panel prepare — Spearman/guardrails
+    # keep the full prepared panel including null-control rows.
+    assert result.analysis_mart.height == analysis_mart.height
+    assert result.panel.height == analysis_mart.filter(
+        pl.col("bge_normalized_score").is_not_null()
+    ).height
+    assert result.panel.filter(pl.col("authority_proxy").is_null()).height == 1
+    assert "url-1-1" in result.panel["canonical_url_hash"].to_list()
 
 
 def test_prepare_analysis_panel_uses_spec_primary_rank_depth_limit(

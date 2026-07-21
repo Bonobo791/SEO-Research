@@ -6,6 +6,7 @@ from pathlib import Path
 import polars as pl
 
 from seo_rank.data.features import ONPAGE_FEATURES_EXPECTED_SCHEMA, ONPAGE_FEATURES_EXTRA_COLUMNS
+from seo_rank.data.marts import ANALYSIS_SCHEMA_VERSION
 from seo_rank.stats.artifacts import _format_regression_lines
 from seo_rank.stats.artifacts import build_family_source_frames
 from seo_rank.stats.artifacts import run_phase5_stats
@@ -13,6 +14,7 @@ from seo_rank.stats.spec import load_analysis_spec
 
 
 def _combined_analysis_mart_frame() -> pl.DataFrame:
+    """Create a synthetic analysis mart DataFrame containing ranked results for ten keywords."""
     rows: list[dict[str, object]] = []
     for keyword_index in range(1, 11):
         target_keyword_id = f"kw-{keyword_index}"
@@ -40,6 +42,7 @@ def _combined_analysis_mart_frame() -> pl.DataFrame:
                     "deprecated_html_tags": (keyword_index + serp_rank) % 3 == 0,
                     "meta_keywords_to_content_consistency": 0.5,
                     "site_scale": (keyword_index * 0.1) + (serp_rank * 0.01),
+                    "authority_proxy": ((keyword_index * 5 + serp_rank * 13) % 11) * 0.01,
                     "bge_raw_score": signal,
                     "bge_normalized_score": signal,
                     "gemini_doc_retrieval_raw_score": signal - 0.1,
@@ -311,18 +314,18 @@ def test_run_phase5_stats_emits_combined_family_tree_and_keeps_similarity_compat
     }
     assert onpage_quality_family["spearman"]["signals"]["onpage_score"]["status"] == "computed"
     assert onpage_quality_family["regression"]["signals"]["onpage_score"]["status"] == "computed"
-    assert onpage_cwv_family["spearman"]["signals"]["time_to_first_byte_ms"]["status"] == "computed"
+    assert onpage_cwv_family["spearman"]["signals"]["connection_time_ms"]["status"] == "computed"
     onpage_technical_family = summary["rank_depths"]["top_20"]["families"]["onpage_technical_checks"]
-    assert onpage_technical_family["regression"]["signals"]["title_too_long"]["status"] == "computed"
+    assert onpage_technical_family["regression"]["signals"]["has_valid_structured_data"]["status"] == "computed"
     assert onpage_quality_family["plackett_luce"]["signals"]["onpage_score"]["status"] in {
         "computed",
         "unstable",
     }
-    assert onpage_cwv_family["plackett_luce"]["signals"]["time_to_first_byte_ms"]["status"] in {
+    assert onpage_cwv_family["plackett_luce"]["signals"]["connection_time_ms"]["status"] in {
         "computed",
         "unstable",
     }
-    assert onpage_technical_family["plackett_luce"]["signals"]["title_too_long"]["status"] in {
+    assert onpage_technical_family["plackett_luce"]["signals"]["has_valid_structured_data"]["status"] in {
         "computed",
         "unstable",
         "skipped",
@@ -344,7 +347,7 @@ def test_run_phase5_stats_emits_combined_family_tree_and_keeps_similarity_compat
     assert "#### Family: onpage_technical_checks" in report
 
 
-def test_run_phase5_stats_rebuilds_onpage_features_for_legacy_run_directories(
+def test_run_phase5_stats_rebuilds_legacy_feature_and_analysis_marts(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -365,7 +368,9 @@ def test_run_phase5_stats_rebuilds_onpage_features_for_legacy_run_directories(
     (parquet_dir / "analysis_mart").mkdir(parents=True)
     (parquet_dir / "backlinks_analysis").mkdir(parents=True, exist_ok=True)
     (parquet_dir / "textrazor_page_metrics").mkdir(parents=True)
-    _combined_analysis_mart_frame().write_parquet(parquet_dir / "analysis_mart" / "part-0.parquet")
+    _combined_analysis_mart_frame().drop("authority_proxy").write_parquet(
+        parquet_dir / "analysis_mart" / "part-0.parquet"
+    )
     _combined_backlinks_analysis_frame().write_parquet(
         parquet_dir / "backlinks_analysis" / "part-0.parquet"
     )
@@ -373,18 +378,46 @@ def test_run_phase5_stats_rebuilds_onpage_features_for_legacy_run_directories(
         parquet_dir / "textrazor_page_metrics" / "part-0.parquet"
     )
 
-    build_calls: list[Path] = []
+    feature_calls: list[Path] = []
+    analysis_calls: list[Path] = []
 
     def materialize_onpage_features(path: Path) -> dict[str, object]:
-        build_calls.append(path)
+        """Materialize synthetic on-page feature data for a run directory.
+        
+        Parameters:
+            path (Path): Run directory where the on-page feature parquet dataset is written.
+        
+        Returns:
+            dict[str, object]: Empty dataset metadata.
+        """
+        feature_calls.append(path)
         onpage_dir = path / "parquet" / "onpage_features"
         onpage_dir.mkdir(parents=True, exist_ok=True)
         _combined_onpage_features_frame().write_parquet(onpage_dir / "part-0.parquet")
         return {"datasets": {}}
 
+    def materialize_analysis_mart(path: Path) -> dict[str, object]:
+        """Materialize the analysis mart for a run directory.
+        
+        Parameters:
+        	path (Path): Run directory where the analysis mart parquet file is written.
+        
+        Returns:
+        	dict[str, object]: An empty dataset catalog.
+        """
+        analysis_calls.append(path)
+        _combined_analysis_mart_frame().with_columns(
+            pl.lit(ANALYSIS_SCHEMA_VERSION).alias("schema_version")
+        ).write_parquet(path / "parquet" / "analysis_mart" / "part-0.parquet")
+        return {"datasets": {}}
+
     monkeypatch.setattr(
         "seo_rank.data.features.build_feature_marts",
         materialize_onpage_features,
+    )
+    monkeypatch.setattr(
+        "seo_rank.stats.artifacts.build_analysis_mart",
+        materialize_analysis_mart,
     )
 
     result = run_phase5_stats(run_dir)
@@ -392,7 +425,8 @@ def test_run_phase5_stats_rebuilds_onpage_features_for_legacy_run_directories(
     summary = json.loads((run_dir / "stats" / "stats_summary.json").read_text(encoding="utf-8"))
     onpage_quality = summary["rank_depths"]["top_20"]["families"]["onpage_content_quality"]
 
-    assert build_calls == [run_dir]
+    assert feature_calls == [run_dir]
+    assert analysis_calls == [run_dir]
     assert result.hard_fail is False
     assert onpage_quality["spearman"]["signals"]["onpage_score"]["status"] == "computed"
     assert onpage_quality["regression"]["signals"]["onpage_score"]["status"] == "computed"

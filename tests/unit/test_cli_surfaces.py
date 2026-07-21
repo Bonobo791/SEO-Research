@@ -5,7 +5,8 @@ import polars as pl
 import pytest
 
 from seo_rank.cli import build_parser, main
-from seo_rank.data.features import ensure_feature_marts_for_analysis
+from seo_rank.data.features import FEATURE_SCHEMA_VERSION, ensure_feature_marts_for_analysis
+from seo_rank.data.marts import ANALYSIS_SCHEMA_VERSION
 
 
 def test_build_parser_exposes_phase_45_commands() -> None:
@@ -83,7 +84,7 @@ def test_storage_commands_dispatch_to_data_layer(
     )
     monkeypatch.setattr(
         "seo_rank.cli.scan_raw_responses",
-        lambda path: pl.DataFrame(
+        lambda _path: pl.DataFrame(
             [
                 {
                     "run_id": "run-1",
@@ -96,7 +97,7 @@ def test_storage_commands_dispatch_to_data_layer(
     )
     monkeypatch.setattr(
         "seo_rank.cli.scan_analysis_mart",
-        lambda path: pl.DataFrame(
+        lambda _path: pl.DataFrame(
             [
                 {
                     "target_keyword": "technical seo",
@@ -113,7 +114,7 @@ def test_storage_commands_dispatch_to_data_layer(
     )
     monkeypatch.setattr(
         "seo_rank.cli.ensure_feature_marts_for_analysis",
-        lambda path: None,
+        lambda _path: None,
     )
 
     assert main(["normalize", "--run", str(run_dir)]) == 0
@@ -164,15 +165,97 @@ def test_ensure_feature_marts_for_analysis_rebuilds_when_onpage_features_missing
         pl.DataFrame([{"run_id": "run-1"}]).write_parquet(parquet_dir / name / "part-0.parquet")
 
     build_calls: list[Path] = []
-
     monkeypatch.setattr(
         "seo_rank.data.features.build_feature_marts",
         lambda path: build_calls.append(path) or {"datasets": {}},
+    )
+    monkeypatch.setattr(
+        "seo_rank.data.features.build_analysis_mart",
+        lambda _path: (_ for _ in ()).throw(AssertionError("helper must not rebuild analysis")),
     )
 
     ensure_feature_marts_for_analysis(run_dir)
 
     assert build_calls == [run_dir]
+
+
+def test_ensure_feature_marts_for_analysis_rebuilds_stale_feature_marts_only(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    run_dir = tmp_path / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "run.json").write_text('{"catalog": {"datasets": {}}}', encoding="utf-8")
+    parquet_dir = run_dir / "parquet"
+    for name in (
+        "keyword_serp",
+        "page_features",
+        "passage_features",
+        "domain_features",
+        "backlinks_analysis",
+        "onpage_features",
+        "entity_signals",
+    ):
+        (parquet_dir / name).mkdir(parents=True)
+        pl.DataFrame([{"schema_version": "feature_marts.v3"}]).write_parquet(
+            parquet_dir / name / "part-0.parquet"
+        )
+    (parquet_dir / "analysis_mart").mkdir()
+    pl.DataFrame([{"schema_version": ANALYSIS_SCHEMA_VERSION}]).write_parquet(
+        parquet_dir / "analysis_mart" / "part-0.parquet"
+    )
+
+    feature_calls: list[Path] = []
+    monkeypatch.setattr(
+        "seo_rank.data.features.build_feature_marts",
+        lambda path: feature_calls.append(path) or {"datasets": {}},
+    )
+    monkeypatch.setattr(
+        "seo_rank.data.features.build_analysis_mart",
+        lambda _path: (_ for _ in ()).throw(AssertionError("helper must not rebuild analysis")),
+    )
+
+    ensure_feature_marts_for_analysis(run_dir)
+
+    assert feature_calls == [run_dir]
+
+
+def test_ensure_feature_marts_for_analysis_noops_when_marts_are_current(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    run_dir = tmp_path / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "run.json").write_text('{"catalog": {"datasets": {}}}', encoding="utf-8")
+    parquet_dir = run_dir / "parquet"
+    for name in (
+        "keyword_serp",
+        "page_features",
+        "passage_features",
+        "domain_features",
+        "backlinks_analysis",
+        "onpage_features",
+        "entity_signals",
+    ):
+        (parquet_dir / name).mkdir(parents=True)
+        pl.DataFrame([{"schema_version": FEATURE_SCHEMA_VERSION}]).write_parquet(
+            parquet_dir / name / "part-0.parquet"
+        )
+    (parquet_dir / "analysis_mart").mkdir()
+    pl.DataFrame([{"schema_version": ANALYSIS_SCHEMA_VERSION}]).write_parquet(
+        parquet_dir / "analysis_mart" / "part-0.parquet"
+    )
+
+    monkeypatch.setattr(
+        "seo_rank.data.features.build_feature_marts",
+        lambda _path: (_ for _ in ()).throw(AssertionError("feature marts should be current")),
+    )
+    monkeypatch.setattr(
+        "seo_rank.data.features.build_analysis_mart",
+        lambda _path: (_ for _ in ()).throw(AssertionError("analysis mart should be current")),
+    )
+
+    ensure_feature_marts_for_analysis(run_dir)
 
 
 def test_analyze_rebuilds_onpage_features_for_legacy_run_directories(
@@ -194,18 +277,21 @@ def test_analyze_rebuilds_onpage_features_for_legacy_run_directories(
         pl.DataFrame([{"run_id": "run-1"}]).write_parquet(parquet_dir / name / "part-0.parquet")
 
     build_calls: list[Path] = []
-
     monkeypatch.setattr(
         "seo_rank.data.features.build_feature_marts",
         lambda path: build_calls.append(path) or {"datasets": {}},
     )
     monkeypatch.setattr(
+        "seo_rank.data.features.build_analysis_mart",
+        lambda _path: (_ for _ in ()).throw(AssertionError("helper must not rebuild analysis")),
+    )
+    monkeypatch.setattr(
         "seo_rank.cli.build_analysis_mart",
-        lambda path: {"datasets": {}},
+        lambda _path: {"datasets": {}},
     )
     monkeypatch.setattr(
         "seo_rank.cli.run_phase5_stats",
-        lambda path: SimpleNamespace(hard_fail=False),
+        lambda _path: SimpleNamespace(hard_fail=False),
     )
 
     exit_code = main(["analyze", "--run", str(run_dir)])
@@ -284,19 +370,19 @@ def test_analyze_rejects_unknown_keyword_with_exit_code_2(
 
     monkeypatch.setattr(
         "seo_rank.cli.build_analysis_mart",
-        lambda path: {"datasets": {}},
+        lambda _path: {"datasets": {}},
     )
     monkeypatch.setattr(
         "seo_rank.cli.run_phase5_stats",
-        lambda path: SimpleNamespace(hard_fail=False),
+        lambda _path: SimpleNamespace(hard_fail=False),
     )
     monkeypatch.setattr(
         "seo_rank.cli.ensure_feature_marts_for_analysis",
-        lambda path: None,
+        lambda _path: None,
     )
     monkeypatch.setattr(
         "seo_rank.cli.scan_analysis_mart",
-        lambda path: pl.DataFrame(
+        lambda _path: pl.DataFrame(
             [{"target_keyword": "other keyword", "url": "https://example.com"}]
         ).lazy(),
     )
@@ -319,15 +405,15 @@ def test_analyze_returns_exit_code_1_when_phase5_guardrails_fail(
 
     monkeypatch.setattr(
         "seo_rank.cli.build_analysis_mart",
-        lambda path: {"datasets": {}},
+        lambda _path: {"datasets": {}},
     )
     monkeypatch.setattr(
         "seo_rank.cli.run_phase5_stats",
-        lambda path: SimpleNamespace(hard_fail=True),
+        lambda _path: SimpleNamespace(hard_fail=True),
     )
     monkeypatch.setattr(
         "seo_rank.cli.ensure_feature_marts_for_analysis",
-        lambda path: None,
+        lambda _path: None,
     )
 
     assert main(["analyze", "--run", str(run_dir)]) == 1
@@ -395,7 +481,7 @@ def test_replay_returns_exit_code_2_without_traceback_on_missing_response(
 
     monkeypatch.setattr(
         "seo_rank.cli.scan_raw_responses",
-        lambda path: pl.DataFrame(
+        lambda _path: pl.DataFrame(
             [{"response_id": "other-id", "response_body_bytes": b"{}"}]
         ).lazy(),
     )

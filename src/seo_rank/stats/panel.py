@@ -9,6 +9,7 @@ from typing import Any
 
 import polars as pl
 
+from seo_rank.data.marts import extract_hostname
 from seo_rank.data.scans import scan_curated_table
 from seo_rank.stats.rank_depth import filter_panel_by_max_rank
 from seo_rank.stats.spec import AnalysisSpec, load_analysis_spec
@@ -17,10 +18,15 @@ from seo_rank.stats.spec import AnalysisSpec, load_analysis_spec
 logger = logging.getLogger(__name__)
 
 _ANALYSIS_JOIN_KEYS = ("run_id", "target_keyword_id", "canonical_url_hash", "url")
-_ANALYSIS_CONTROL_DTYPES = {
+_DOMAIN_CONTROL_COLUMNS = ("site_scale", "authority_proxy")
+_PAGE_CONTROL_DTYPES = {
     "deprecated_html_tags": pl.Boolean,
     "time_to_first_byte_ms": pl.Int64,
+}
+_ANALYSIS_CONTROL_DTYPES = {
+    **_PAGE_CONTROL_DTYPES,
     "site_scale": pl.Float64,
+    "authority_proxy": pl.Float64,
 }
 
 SIMILARITY_RATE_COLUMNS = {
@@ -81,14 +87,39 @@ def _normalize_analysis_mart_controls(
     run_dir: Path,
     analysis_mart: pl.DataFrame,
 ) -> pl.DataFrame:
-    """Restore controls omitted by legacy analysis-mart partitions."""
+    """
+    Restore missing analysis-control columns using available curated sources.
+    
+    Parameters:
+    	run_dir (Path): Run directory containing curated parquet sources.
+    	analysis_mart (pl.DataFrame): Analysis mart whose missing controls should be restored.
+    
+    Returns:
+    	pl.DataFrame: Analysis mart with recoverable controls restored and unresolved page-level controls filled with null values.
+    """
     missing = [
         column for column in _ANALYSIS_CONTROL_DTYPES if column not in analysis_mart.columns
     ]
     if not missing:
         return analysis_mart
 
+    missing_domain = [column for column in missing if column in _DOMAIN_CONTROL_COLUMNS]
+    if missing_domain:
+        analysis_mart = _restore_domain_controls_from_domain_features(
+            run_dir,
+            analysis_mart,
+            missing_domain,
+        )
+        missing = [
+            column for column in _ANALYSIS_CONTROL_DTYPES if column not in analysis_mart.columns
+        ]
+        if not missing:
+            return analysis_mart
+
+    missing_page = [column for column in missing if column in _PAGE_CONTROL_DTYPES]
     for source_name in ("onpage_features", "onpage_signals", "backlinks"):
+        if not missing_page:
+            break
         source_path = Path(run_dir) / "parquet" / source_name
         if not source_path.exists():
             continue
@@ -98,7 +129,7 @@ def _normalize_analysis_mart_controls(
             continue
         joinable = [
             column
-            for column in missing
+            for column in missing_page
             if column in source.columns and all(key in source.columns for key in _ANALYSIS_JOIN_KEYS)
         ]
         if not joinable:
@@ -108,15 +139,70 @@ def _normalize_analysis_mart_controls(
             on=list(_ANALYSIS_JOIN_KEYS),
             how="left",
         )
-        missing = [column for column in missing if column not in analysis_mart.columns]
-        if not missing:
-            return analysis_mart
+        missing_page = [column for column in missing_page if column not in analysis_mart.columns]
 
-    return analysis_mart.with_columns(
-        [
-            pl.lit(None).cast(_ANALYSIS_CONTROL_DTYPES[column]).alias(column)
-            for column in missing
-        ]
+    # Null-fill page-grain controls only. Domain controls stay absent when
+    # domain_features cannot restore them so rematerialize / validate fails loud.
+    if missing_page:
+        analysis_mart = analysis_mart.with_columns(
+            [
+                pl.lit(None).cast(_PAGE_CONTROL_DTYPES[column]).alias(column)
+                for column in missing_page
+            ]
+        )
+    return analysis_mart
+
+
+def _restore_domain_controls_from_domain_features(
+    run_dir: Path,
+    analysis_mart: pl.DataFrame,
+    missing_domain: list[str],
+) -> pl.DataFrame:
+    """
+    Restore missing domain-level controls by matching analysis URLs to domain features by hostname.
+    
+    Parameters:
+        run_dir (Path): Run directory containing the curated domain features.
+        analysis_mart (pl.DataFrame): Analysis data requiring domain controls.
+        missing_domain (list[str]): Domain-control column names to restore.
+    
+    Returns:
+        pl.DataFrame: Analysis mart with available domain controls joined from domain features.
+    """
+    source_path = Path(run_dir) / "parquet" / "domain_features"
+    if not source_path.exists() or not missing_domain:
+        return analysis_mart
+    if "url" not in analysis_mart.columns or "run_id" not in analysis_mart.columns:
+        return analysis_mart
+    try:
+        domain_features = scan_curated_table(run_dir, "domain_features").collect(
+            engine="streaming"
+        )
+    except OSError:
+        logger.warning(
+            "failed to scan domain_features for control restore run_dir=%s",
+            run_dir,
+        )
+        return analysis_mart
+
+    present = [column for column in missing_domain if column in domain_features.columns]
+    if not present or "domain" not in domain_features.columns:
+        return analysis_mart
+
+    domain_lookup = domain_features.select(["run_id", "domain", *present]).unique(
+        ["run_id", "domain"]
+    )
+    return (
+        analysis_mart.with_columns(
+            extract_hostname(pl.col("url")).alias("__domain")
+        )
+        .join(
+            domain_lookup,
+            left_on=["run_id", "__domain"],
+            right_on=["run_id", "domain"],
+            how="left",
+        )
+        .drop("__domain")
     )
 
 
@@ -124,7 +210,16 @@ def _restore_analysis_controls(
     source_frame: pl.DataFrame,
     analysis_mart: pl.DataFrame,
 ) -> pl.DataFrame:
-    """Restore controls omitted by older optional family-mart schemas."""
+    """
+    Restore missing analysis controls in a family mart.
+    
+    Parameters:
+    	source_frame (pl.DataFrame): Family-mart data requiring control columns.
+    	analysis_mart (pl.DataFrame): Analysis data used to restore joinable controls.
+    
+    Returns:
+    	pl.DataFrame: The source frame with recoverable controls added and unresolved page controls filled with null values.
+    """
     if source_frame.is_empty():
         return source_frame
 
@@ -147,12 +242,16 @@ def _restore_analysis_controls(
             how="left",
         )
 
-    remaining = [column for column in missing if column not in source_frame.columns]
-    if remaining:
+    remaining_page = [
+        column
+        for column in missing
+        if column in _PAGE_CONTROL_DTYPES and column not in source_frame.columns
+    ]
+    if remaining_page:
         source_frame = source_frame.with_columns(
             [
-                pl.lit(None).cast(_ANALYSIS_CONTROL_DTYPES[column]).alias(column)
-                for column in remaining
+                pl.lit(None).cast(_PAGE_CONTROL_DTYPES[column]).alias(column)
+                for column in remaining_page
             ]
         )
     return source_frame

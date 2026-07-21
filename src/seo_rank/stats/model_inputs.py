@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 
 import pandas as pd
+import polars as pl
 
+logger = logging.getLogger(__name__)
 
-REQUIRED_CONTROL_COLUMNS = ("site_scale",)
+REQUIRED_CONTROL_COLUMNS = ("site_scale", "authority_proxy")
 CONTROL_ERROR_NOTE = "required control data is incomplete; model not fit"
 SVD_DID_NOT_CONVERGE = "svd_did_not_converge"
 
@@ -20,11 +23,45 @@ class SkippedModelFit:
     reason: str
 
 
+def drop_incomplete_control_rows(
+    frame: pl.DataFrame,
+    columns: Sequence[str] = REQUIRED_CONTROL_COLUMNS,
+) -> pl.DataFrame:
+    """
+    Drop rows with null values in the available required control columns.
+    
+    Parameters:
+        frame (pl.DataFrame): Input data frame.
+        columns (Sequence[str]): Control columns to check.
+    
+    Returns:
+        pl.DataFrame: The filtered data frame, or the original frame when none of
+            the specified columns are present.
+    """
+
+    present = [column for column in columns if column in frame.columns]
+    if not present:
+        return frame
+    return frame.filter(
+        pl.all_horizontal([pl.col(column).is_not_null() for column in present])
+    )
+
+
 def validate_control_columns(
     model_data: pd.DataFrame,
     columns: Sequence[str] = REQUIRED_CONTROL_COLUMNS,
 ) -> tuple[dict[str, str], ...]:
-    """Return control issues instead of silently reducing a model formula."""
+    """
+    Identify required control columns that are missing or contain null values.
+    
+    Parameters:
+        model_data (pd.DataFrame): Data containing the control columns to validate.
+        columns (Sequence[str]): Required control column names.
+    
+    Returns:
+        tuple[dict[str, str], ...]: Validation issues, each containing a column name
+        and a reason of either ``"missing_column"`` or ``"missing_values"``.
+    """
 
     issues: list[dict[str, str]] = []
     for column in columns:
@@ -32,6 +69,11 @@ def validate_control_columns(
             issues.append({"column": column, "reason": "missing_column"})
         elif model_data[column].isna().any():
             issues.append({"column": column, "reason": "missing_values"})
+    logger.info(
+        "validating control columns columns=%s issue_count=%d",
+        list(columns),
+        len(issues),
+    )
     return tuple(issues)
 
 

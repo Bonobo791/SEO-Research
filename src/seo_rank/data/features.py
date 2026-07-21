@@ -1,6 +1,7 @@
 """Feature mart builders for stored runs."""
 
 import hashlib
+import logging
 import json
 from collections.abc import Mapping
 from pathlib import Path
@@ -8,7 +9,7 @@ from pathlib import Path
 import polars as pl
 import pyarrow.parquet as pq
 
-from seo_rank.data.marts import build_analysis_lazyframe
+from seo_rank.data.marts import build_analysis_lazyframe, extract_hostname
 from seo_rank.data.normalize import CURATED_VALIDATION_RULES, filter_blocklisted_domain_rows
 from seo_rank.data.scans import scan_curated_table
 from seo_rank.data.validate import (
@@ -20,7 +21,9 @@ from seo_rank.data.validate import (
 from seo_rank.domain_blocklist import DomainBlocklist
 from seo_rank.dataforseo import DEFAULT_SERP_DEPTH
 
-FEATURE_SCHEMA_VERSION = "feature_marts.v3"
+logger = logging.getLogger(__name__)
+
+FEATURE_SCHEMA_VERSION = "feature_marts.v5"
 SITE_SCALE_COLUMNS = (
     "images_size",
     "scripts_size",
@@ -29,6 +32,173 @@ SITE_SCALE_COLUMNS = (
     "total_dom_size",
     "internal_links_count",
 )
+AUTHORITY_PROXY_MODELED_ONPAGE_COLUMNS = frozenset(
+    {
+        "onpage_score",
+        "plain_text_word_count",
+        "plain_text_rate",
+        "flesch_kincaid_readability_index",
+        "coleman_liau_readability_index",
+        "smog_readability_index",
+        "dale_chall_readability_index",
+        "description_to_content_consistency",
+        "title_to_content_consistency",
+        "meta_keywords_to_content_consistency",
+        "connection_time_ms",
+        "time_to_secure_connection_ms",
+        "request_sent_time_ms",
+        "download_time_ms",
+        "duration_time_ms",
+        "fetch_end_ms",
+        "dom_complete_ms",
+        "time_to_interactive_ms",
+        "has_valid_structured_data",
+        "micromarkup_items_count",
+        "micromarkup_errors_count",
+        "micromarkup_warnings_count",
+        "is_redirect",
+        "high_content_rate",
+        "high_character_count",
+        "small_page_size",
+        "no_image_title",
+        "no_favicon",
+        "seo_friendly_url",
+        "flash",
+        "frame",
+        "lorem_ipsum",
+        "has_micromarkup",
+        "has_micromarkup_errors",
+        "description_length",
+        "title_length",
+        "external_links_count",
+        "internal_links_count",
+        "images_count",
+        "images_size",
+        "scripts_count",
+        "stylesheets_count",
+        "follow",
+        "inbound_links_count",
+        "duplicate_meta_tags_count",
+        "h1_count",
+        "h2_count",
+        "h3_count",
+        "has_og_tags",
+        "has_twitter_tags",
+        "cache_control_cachable",
+        "cache_control_ttl",
+        "resource_warnings_count",
+        "duplicate_content",
+        "click_depth",
+        "encoded_size",
+    }
+)
+# DataForSEO negative ranking signals used as a domain-level authority proxy
+# (see DataForSEO-Negative-Ranking-Signals.md). Continuous components are
+# aggregated as domain medians of page medians, asinh-transformed, then
+# z-scored within the run; boolean flags are aggregated as domain rates and
+# z-scored without the log transform. Surviving continuous components are
+# already higher=worse; only boolean-inverted columns need polarity flip.
+AUTHORITY_PROXY_CONTINUOUS_COLUMNS = tuple(
+    column
+    for column in (
+        "coleman_liau_readability_index",
+        "smog_readability_index",
+        "dale_chall_readability_index",
+        "time_to_first_byte_ms",
+        "largest_contentful_paint_ms",
+        "cumulative_layout_shift",
+        "first_input_delay_ms",
+        "connection_time_ms",
+        "time_to_secure_connection_ms",
+        "request_sent_time_ms",
+        "download_time_ms",
+        "duration_time_ms",
+        "fetch_end_ms",
+        "dom_complete_ms",
+        "time_to_interactive_ms",
+        "duplicate_meta_tags_count",
+        "micromarkup_errors_count",
+        "micromarkup_warnings_count",
+        "resource_errors_count",
+        "resource_warnings_count",
+        "render_blocking_scripts_count",
+        "render_blocking_stylesheets_count",
+        "encoded_size",
+    )
+    if column not in AUTHORITY_PROXY_MODELED_ONPAGE_COLUMNS
+)
+AUTHORITY_PROXY_BOOLEAN_INVERTED_COLUMNS = tuple(
+    column
+    for column in (
+        "meta_charset_consistency",
+        "follow",
+        "canonical",
+        "is_https",
+        "seo_friendly_url",
+        "has_meta_title",
+        "has_valid_structured_data",
+        "has_micromarkup",
+        "cache_control_cachable",
+    )
+    if column not in AUTHORITY_PROXY_MODELED_ONPAGE_COLUMNS
+)
+AUTHORITY_PROXY_BOOLEAN_COLUMNS = tuple(
+    column
+    for column in (
+        "title_too_long",
+        "title_too_short",
+        "no_title",
+        "no_description",
+        "no_h1_tag",
+        "has_render_blocking_resources",
+        "duplicate_meta_tags",
+        "irrelevant_description",
+        "low_readability_rate",
+        "is_4xx_code",
+        "is_5xx_code",
+        "is_broken",
+        "is_redirect",
+        "no_content_encoding",
+        "high_loading_time",
+        "high_waiting_time",
+        "no_doctype",
+        "no_encoding_meta_tag",
+        "https_to_http_links",
+        "size_greater_than_3mb",
+        "has_meta_refresh_redirect",
+        "low_content_rate",
+        "high_character_count",
+        "small_page_size",
+        "large_page_size",
+        "irrelevant_title",
+        "irrelevant_meta_keywords",
+        "deprecated_html_tags",
+        "duplicate_title_tag",
+        "no_image_alt",
+        "no_image_title",
+        "no_favicon",
+        "flash",
+        "frame",
+        "lorem_ipsum",
+        "has_micromarkup_errors",
+        "broken_links",
+        "broken_resources",
+        "duplicate_content",
+        "duplicate_description",
+        "duplicate_title",
+    )
+    if column not in AUTHORITY_PROXY_MODELED_ONPAGE_COLUMNS
+)
+AUTHORITY_PROXY_ALL_BOOLEAN_COLUMNS = (
+    *AUTHORITY_PROXY_BOOLEAN_INVERTED_COLUMNS,
+    *AUTHORITY_PROXY_BOOLEAN_COLUMNS,
+)
+AUTHORITY_PROXY_COMPONENT_COLUMNS = (
+    *AUTHORITY_PROXY_CONTINUOUS_COLUMNS,
+    *AUTHORITY_PROXY_ALL_BOOLEAN_COLUMNS,
+)
+# Components aligned so that higher = worse before averaging.
+AUTHORITY_PROXY_NEGATED_COLUMNS = frozenset(AUTHORITY_PROXY_BOOLEAN_INVERTED_COLUMNS)
 FEATURE_REQUIRED_COLUMNS = {
     "keyword_serp": (
         "run_id",
@@ -86,6 +256,7 @@ FEATURE_REQUIRED_COLUMNS = {
         "best_serp_rank",
         "worst_serp_rank",
         "site_scale",
+        "authority_proxy",
         "schema_version",
     ),
     "textrazor_page_metrics": (
@@ -174,6 +345,7 @@ ANALYSIS_REQUIRED_COLUMNS = (
     "meta_keywords_to_content_consistency",
     "time_to_first_byte_ms",
     "site_scale",
+    "authority_proxy",
     "schema_version",
 )
 
@@ -301,6 +473,7 @@ FEATURE_VALIDATION_RULES = {
             "best_serp_rank": pl.Int64,
             "worst_serp_rank": pl.Int64,
             "site_scale": pl.Float64,
+            "authority_proxy": pl.Float64,
             "schema_version": pl.Utf8,
         },
         "unique_columns": ("domain_feature_id",),
@@ -475,6 +648,7 @@ FEATURE_VALIDATION_RULES = {
             "meta_keywords_to_content_consistency": pl.Float64,
             "time_to_first_byte_ms": pl.Int64,
             "site_scale": pl.Float64,
+            "authority_proxy": pl.Float64,
             "schema_version": pl.Utf8,
         },
         "unique_columns": ("serp_item_id",),
@@ -647,7 +821,15 @@ FEATURE_VALIDATION_RULES["onpage_features"] = {
 
 
 def build_site_scale(frame: pl.DataFrame | pl.LazyFrame) -> pl.LazyFrame:
-    """Build one standardized-mean site-scale value per run and hostname."""
+    """
+    Build a standardized site-scale score for each run and domain.
+    
+    Parameters:
+    	frame (pl.DataFrame | pl.LazyFrame): Source records containing site-scale measurements grouped by run, domain, and canonical URL.
+    
+    Returns:
+    	pl.LazyFrame: Lazy frame with `run_id`, `domain`, and `site_scale`; the score is null when any required measurement is unavailable.
+    """
 
     lazy_frame = frame.lazy() if isinstance(frame, pl.DataFrame) else frame
     page_medians = (
@@ -700,24 +882,199 @@ def build_site_scale(frame: pl.DataFrame | pl.LazyFrame) -> pl.LazyFrame:
     ).select(["run_id", "domain", "site_scale"])
 
 
+def _onpage_frame_for_authority_proxy(onpage_signals: pl.LazyFrame) -> pl.LazyFrame:
+    """
+    Select join keys and authority-proxy components from onpage signals.
+
+    Component columns absent from the curated schema are added as null so
+    build_authority_proxy can still run on whatever signals are available.
+    """
+    schema = onpage_signals.collect_schema()
+    present = [
+        column for column in AUTHORITY_PROXY_COMPONENT_COLUMNS if column in schema
+    ]
+    missing = [
+        column for column in AUTHORITY_PROXY_COMPONENT_COLUMNS if column not in schema
+    ]
+    frame = onpage_signals.select(
+        [
+            "run_id",
+            "target_keyword_id",
+            "canonical_url_hash",
+            "url",
+            *present,
+        ]
+    )
+    if missing:
+        frame = frame.with_columns([pl.lit(None).alias(column) for column in missing])
+    return frame
+
+
+def _authority_proxy_domain_levels(lazy_frame: pl.LazyFrame) -> pl.LazyFrame:
+    """
+    Aggregate authority-proxy component columns to one row per run and domain.
+
+    Page-level continuous columns use median; boolean columns use mean. Those
+    page rows are then aggregated again to domain level with the same rules.
+    """
+    page_levels = lazy_frame.group_by(
+        ["run_id", "domain", "canonical_url_hash"]
+    ).agg(
+        [
+            pl.col(column).cast(pl.Float64).median().alias(column)
+            for column in AUTHORITY_PROXY_CONTINUOUS_COLUMNS
+        ]
+        + [
+            pl.col(column).cast(pl.Float64).mean().alias(column)
+            for column in AUTHORITY_PROXY_ALL_BOOLEAN_COLUMNS
+        ]
+    )
+    return page_levels.group_by(["run_id", "domain"]).agg(
+        [
+            pl.col(column).median().alias(column)
+            for column in AUTHORITY_PROXY_CONTINUOUS_COLUMNS
+        ]
+        + [
+            pl.col(column).mean().alias(column)
+            for column in AUTHORITY_PROXY_ALL_BOOLEAN_COLUMNS
+        ]
+    )
+
+
+def _authority_proxy_within_run_z_scores(transformed: pl.LazyFrame) -> pl.LazyFrame:
+    """
+    Standardize transformed authority-proxy components within each run.
+
+    Null/non-finite inputs stay null. Zero or missing within-run standard
+    deviation maps to 0.0; otherwise compute (x - mean) / std over run_id.
+    """
+    return transformed.with_columns(
+        [
+            pl.when(
+                pl.col(f"__t_{column}").is_null()
+                | pl.col(f"__t_{column}").is_nan()
+                | pl.col(f"__t_{column}").is_infinite()
+            )
+            .then(None)
+            .when(
+                pl.col(f"__t_{column}").std(ddof=1).over("run_id").is_null()
+                | (pl.col(f"__t_{column}").std(ddof=1).over("run_id") == 0.0)
+            )
+            .then(0.0)
+            .otherwise(
+                (
+                    pl.col(f"__t_{column}")
+                    - pl.col(f"__t_{column}").mean().over("run_id")
+                )
+                / pl.col(f"__t_{column}").std(ddof=1).over("run_id")
+            )
+            .alias(f"__z_{column}")
+            for column in AUTHORITY_PROXY_COMPONENT_COLUMNS
+        ]
+    )
+
+
+def build_authority_proxy(frame: pl.DataFrame | pl.LazyFrame) -> pl.LazyFrame:
+    """
+    Build a standardized authority score for each run and domain.
+    
+    The score combines available DataForSEO negative-ranking signals, aligns their
+    polarity, and averages their run-level standardized values. Higher scores
+    indicate fewer negative signals.
+    
+    Parameters:
+        frame (pl.DataFrame | pl.LazyFrame): On-page signal data containing run,
+            domain, and canonical URL identifiers.
+    
+    Returns:
+        pl.LazyFrame: A lazy frame with `run_id`, `domain`, and `authority_proxy`.
+            The score is null when no valid signal components are available.
+    """
+
+    logger.info("building authority_proxy")
+    lazy_frame = frame.lazy() if isinstance(frame, pl.DataFrame) else frame
+    domain_levels = _authority_proxy_domain_levels(lazy_frame)
+    transformed = domain_levels.with_columns(
+        [
+            # asinh dampens large timing and resource counts without imposing a
+            # log1p nonnegative-input requirement.
+            pl.col(column).arcsinh().alias(f"__t_{column}")
+            for column in AUTHORITY_PROXY_CONTINUOUS_COLUMNS
+        ]
+        + [
+            pl.col(column).alias(f"__t_{column}")
+            for column in AUTHORITY_PROXY_ALL_BOOLEAN_COLUMNS
+        ]
+    )
+    transformed = transformed.with_columns(
+        [
+            pl.when(
+                pl.col(f"__t_{column}").is_nan()
+                | pl.col(f"__t_{column}").is_infinite()
+            )
+            .then(None)
+            .otherwise(pl.col(f"__t_{column}"))
+            .alias(f"__t_{column}")
+            for column in AUTHORITY_PROXY_COMPONENT_COLUMNS
+        ]
+    )
+    z_scores = _authority_proxy_within_run_z_scores(transformed)
+    has_component = pl.any_horizontal(
+        [
+            pl.col(f"__z_{column}").is_not_null()
+            for column in AUTHORITY_PROXY_COMPONENT_COLUMNS
+        ]
+    )
+    aligned = [
+        (
+            -pl.col(f"__z_{column}")
+            if column in AUTHORITY_PROXY_NEGATED_COLUMNS
+            else pl.col(f"__z_{column}")
+        )
+        for column in AUTHORITY_PROXY_COMPONENT_COLUMNS
+    ]
+    return z_scores.with_columns(
+        pl.when(has_component)
+        .then(-pl.mean_horizontal(aligned))
+        .otherwise(None)
+        .cast(pl.Float64)
+        .alias("authority_proxy")
+    ).select(["run_id", "domain", "authority_proxy"])
+
+
+
 def build_analysis_panel_keyword_serp(
     keyword_serp: pl.LazyFrame,
     page_features: pl.LazyFrame,
     domain_features: pl.LazyFrame,
 ) -> pl.LazyFrame:
-    """Keep only URL keys with scored pages and a usable domain control."""
+    """
+    Retain keyword SERP rows with scored pages and complete domain-level control features.
+    
+    Parameters:
+    	keyword_serp (pl.LazyFrame): Keyword SERP rows to filter.
+    	page_features (pl.LazyFrame): Page features used to identify scored URLs.
+    	domain_features (pl.LazyFrame): Domain features containing site-scale and authority controls.
+    
+    Returns:
+    	pl.LazyFrame: Keyword SERP rows whose URLs have page features and whose domains have both control values.
+    """
 
     join_keys = ["run_id", "target_keyword_id", "canonical_url_hash", "url"]
     scored_urls = page_features.select(join_keys).unique(join_keys)
     scaled_domains = (
-        domain_features.select(["run_id", "domain", "site_scale"])
-        .filter(pl.col("site_scale").is_not_null())
+        domain_features.select(["run_id", "domain", "site_scale", "authority_proxy"])
+        .filter(
+            # Complete-case policy: drop domains lacking either required control
+            # before model validation, instead of erroring the whole model.
+            pl.col("site_scale").is_not_null() & pl.col("authority_proxy").is_not_null()
+        )
         .unique(["run_id", "domain"])
     )
     return (
         keyword_serp.join(scored_urls, on=join_keys, how="inner")
         .with_columns(
-            pl.col("url").str.extract(r"^https?://([^/]+)", 1).alias("__domain")
+            extract_hostname(pl.col("url")).alias("__domain")
         )
         .join(
             scaled_domains,
@@ -725,13 +1082,22 @@ def build_analysis_panel_keyword_serp(
             right_on=["run_id", "domain"],
             how="inner",
         )
-        .drop(["__domain", "site_scale"])
+        .drop(["__domain", "site_scale", "authority_proxy"])
     )
 
 
 def build_feature_lazyframes(
     curated_frames: Mapping[str, pl.LazyFrame],
 ) -> dict[str, pl.LazyFrame]:
+    """
+    Build lazy feature and analysis marts from curated input frames.
+    
+    Parameters:
+    	curated_frames (Mapping[str, pl.LazyFrame]): Curated lazy frames keyed by dataset name.
+    
+    Returns:
+    	dict[str, pl.LazyFrame]: Lazy frames for keyword SERP, page, passage, domain, backlink, on-page, TextRazor, and entity-signal marts.
+    """
     keywords = curated_frames["keywords"]
     serp_items = curated_frames["serp_items"]
     pages = curated_frames["pages"]
@@ -831,7 +1197,7 @@ def build_feature_lazyframes(
     )
 
     serp_domains = serp_items.with_columns(
-        pl.col("url").str.extract(r"^https?://([^/]+)", 1).alias("domain"),
+        extract_hostname(pl.col("url")).alias("domain"),
     )
     domain_site_scale = build_site_scale(
         serp_domains.select(
@@ -840,6 +1206,15 @@ def build_feature_lazyframes(
             onpage_signals.select(
                 ["run_id", "target_keyword_id", "canonical_url_hash", "url", *SITE_SCALE_COLUMNS]
             ),
+            on=["run_id", "target_keyword_id", "canonical_url_hash"],
+            how="left",
+        )
+    )
+    domain_authority_proxy = build_authority_proxy(
+        serp_domains.select(
+            ["run_id", "domain", "canonical_url_hash", "url", "target_keyword_id"]
+        ).join(
+            _onpage_frame_for_authority_proxy(onpage_signals),
             on=["run_id", "target_keyword_id", "canonical_url_hash"],
             how="left",
         )
@@ -873,6 +1248,11 @@ def build_feature_lazyframes(
             on=["run_id", "domain"],
             how="left",
         )
+        .join(
+            domain_authority_proxy,
+            on=["run_id", "domain"],
+            how="left",
+        )
         .with_columns(
             pl.lit(FEATURE_SCHEMA_VERSION).alias("schema_version"),
         )
@@ -887,6 +1267,7 @@ def build_feature_lazyframes(
                 "best_serp_rank",
                 "worst_serp_rank",
                 "site_scale",
+                "authority_proxy",
                 "schema_version",
             ]
         )
@@ -998,14 +1379,13 @@ def build_entity_signals_lazyframe(
     candidate_keywords = occurrences.select(
         ["run_id", "target_keyword_id", "target_keyword", "entity_id"]
     ).unique()
+    serp_ranks = serp_items.group_by(
+        ["run_id", "target_keyword_id", "canonical_url_hash"]
+    ).agg(pl.col("serp_rank").min())
     usable_pages = textrazor_page_metrics.select(
         ["run_id", "target_keyword_id", "target_keyword", "canonical_url_hash", "url"]
     ).join(
-        serp_items.select(
-            ["run_id", "target_keyword_id", "canonical_url_hash", "url", "serp_rank"]
-        )
-        .group_by(["run_id", "target_keyword_id", "canonical_url_hash", "url"])
-        .agg(pl.col("serp_rank").min()),
+        serp_ranks,
         on=["run_id", "target_keyword_id", "canonical_url_hash"],
         how="inner",
     )
@@ -1078,7 +1458,7 @@ def ensure_feature_marts_for_analysis(run_dir: Path) -> None:
 
     parquet_dir = Path(run_dir) / "parquet"
     feature_marts_stale = any(
-        not _dataset_matches_schema(parquet_dir / name, FEATURE_SCHEMA_VERSION)
+        not dataset_matches_schema(parquet_dir / name, FEATURE_SCHEMA_VERSION)
         for name in REQUIRED_FEATURE_MARTS_FOR_ANALYSIS
     )
     if not feature_marts_stale:
@@ -1088,7 +1468,7 @@ def ensure_feature_marts_for_analysis(run_dir: Path) -> None:
     build_feature_marts(Path(run_dir))
 
 
-def _dataset_matches_schema(dataset_dir: Path, expected_version: str) -> bool:
+def dataset_matches_schema(dataset_dir: Path, expected_version: str) -> bool:
     files = sorted(dataset_dir.glob("part-*.parquet"))
     if not files:
         return False

@@ -32,6 +32,15 @@ def _sample_panel() -> pl.DataFrame:
 
 
 def _depth_divergent_panel(*, keyword_count: int = 12) -> pl.DataFrame:
+    """
+    Build a synthetic panel with rank-dependent similarity scores across multiple keywords.
+    
+    Parameters:
+        keyword_count (int): Number of keywords to include.
+    
+    Returns:
+        pl.DataFrame: Panel containing 20 ranked results per keyword.
+    """
     rows: list[dict[str, object]] = []
     for keyword_index in range(1, keyword_count + 1):
         keyword_id = f"kw-{keyword_index}"
@@ -60,6 +69,7 @@ def _depth_divergent_panel(*, keyword_count: int = 12) -> pl.DataFrame:
                     "deprecated_html_tags": serp_rank % 2 == 0,
                     "meta_keywords_to_content_consistency": 0.1 + (serp_rank * 0.05),
                     "site_scale": (keyword_index * 0.1) + (serp_rank * 0.01),
+                    "authority_proxy": ((keyword_index * 5 + serp_rank * 13) % 11) * 0.01,
                     "bge_normalized_score": similarity,
                     "gemini_doc_retrieval_normalized_score": similarity * 0.8,
                     "gemini_semantic_similarity_normalized_score": similarity * 0.6,

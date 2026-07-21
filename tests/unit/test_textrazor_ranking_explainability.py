@@ -20,6 +20,13 @@ from seo_rank.stats.textrazor_explainability import (
 
 
 def _textrazor_panel_frame() -> pl.DataFrame:
+    """
+    Build a synthetic TextRazor ranking panel with four SERP rows for each of ten keywords.
+    
+    Returns:
+        pl.DataFrame: Panel data containing ranking identifiers, page features, similarity
+        scores, TextRazor metrics, and metadata.
+    """
     rows: list[dict[str, object]] = []
     for keyword_index in range(1, 11):
         target_keyword_id = f"kw-{keyword_index}"
@@ -48,6 +55,7 @@ def _textrazor_panel_frame() -> pl.DataFrame:
                     "meta_keywords_to_content_consistency": 0.1 + (serp_rank * 0.05),
                     "time_to_first_byte_ms": 100 + serp_rank,
                     "site_scale": (keyword_index * 0.1) + (serp_rank * 0.01),
+                    "authority_proxy": ((keyword_index * 5 + serp_rank * 13) % 11) * 0.01,
                     "bge_raw_score": signal,
                     "bge_normalized_score": signal,
                     "gemini_doc_retrieval_raw_score": signal - 0.1,
@@ -77,6 +85,7 @@ def test_fit_multivariate_ranking_model_skips_when_design_matrix_is_column_rank_
             "referring_domains_count": [100, 200, 300, 400, 500, 600, 600],
             "deprecated_html_tags": [False, False, True, False, True, False, True],
             "site_scale": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            "authority_proxy": [0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1],
             "meta_keywords_to_content_consistency": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
             "bge_normalized_score": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.6],
         }

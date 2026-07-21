@@ -100,3 +100,30 @@ digitalpiloto.com  # keyword="columbus seo company" reason=page_text-crawl-statu
 yelp.com  # keyword="seo companies columbus ohio" reason=onpage_instant_pages-http-403
 columbuswebseo.com  # keyword="columbus seo" reason=page_text-50402
 zealousgrowth.com  # keyword="columbus local seo company" reason=page_text-crawl-status-page-content-is-empty
+bigframe.net  # keyword="best columbus seo company" reason=page_text-crawl-status-page-content-is-empty
+quora.com  # keyword="columbus seo service" reason=page_text-crawl-status-page-content-is-emptyviprealestate.com  # keyword="cypress texas real estate" reason=page_text-crawl-status-page-content-is-empty
+ezhomesearch.com  # keyword="house for sale in cypress" reason=onpage_instant_pages-http-403
+loopnet.com  # keyword="cypress tx realtor" reason=page_text-crawl-status-page-content-is-empty
+century21.com  # keyword="houses for sale in cypress texas" reason=onpage_instant_pages-http-403
+byowner.com  # keyword="towne lake cypress homes for sale" reason=onpage_instant_pages-http-403
+realtylifestyles.com  # keyword="towne lake cypress homes for sale" reason=onpage_instant_pages-http-403
+tripointehomes.com  # keyword="bridgeland homes for sale cypress tx" reason=onpage_instant_pages-http-404
+dawnforeteam.com  # keyword="bridgeland homes for sale cypress tx" reason=onpage_instant_pages-http-403
+woodlandsnewhomes.com  # keyword="bridgeland homes for sale cypress tx" reason=page_text-crawl-status-page-content-is-empty
+teamprice.com  # keyword="cypress texas real estate" reason=page_text-crawl-status-page-content-is-empty
+viprealestate.com  # keyword="cypress texas real estate" reason=page_text-crawl-status-page-content-is-empty
+fairfieldranch.com  # keyword="homes for sale in fairfield cypress tx" reason=onpage_instant_pages-http-403
+raymorteam.com  # keyword="homes for sale in fairfield cypress tx" reason=page_text-crawl-status-page-content-is-empty
+justia.com  # keyword="real estate agents in cypress tx" reason=onpage_instant_pages-http-403
+key2texasrealty.com  # keyword="real estate agents in cypress tx" reason=page_text-crawl-status-page-content-is-empty
+cypressstaterealty.com  # keyword="realtors in cypress" reason=onpage_instant_pages-http-403
+apexrealty.net  # keyword="bridge creek cypress homes for sale" reason=onpage_instant_pages-http-403
+ownyourparadise.com  # keyword="bridge creek cypress homes for sale" reason=onpage_instant_pages-http-403
+kellyrealtors.com  # keyword="bridge creek cypress homes for sale" reason=onpage_instant_pages-http-403
+newestateonly.com  # keyword="bridge creek cypress homes for sale" reason=page_text-crawl-status-page-content-is-empty
+newhomesource.com  # keyword="bridge creek cypress homes for sale" reason=page_text-crawl-status-page-content-is-empty
+ownrealestateintexas.com  # keyword="real estate for sale cypress tx" reason=page_text-crawl-status-page-content-is-empty
+greaterhoustonhomesforsale.com  # keyword="real estate for sale cypress tx" reason=page_text-crawl-status-page-content-is-empty
+har.com  # keyword="spring cypress homes for sale" reason=page_text-crawl-status-page-content-is-empty
+us.sulekha.com  # keyword="top realtor cypress tx" reason=onpage_instant_pages-http-400
+agentpronto.com  # keyword="top realtor cypress tx" reason=onpage_instant_pages-http-403

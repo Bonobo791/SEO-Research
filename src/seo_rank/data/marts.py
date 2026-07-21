@@ -1,18 +1,27 @@
 """Analysis mart builders for stored runs."""
 
+import logging
 from collections.abc import Mapping
 
 import polars as pl
 
-ANALYSIS_SCHEMA_VERSION = "analysis_mart.v7"
+logger = logging.getLogger(__name__)
+
+ANALYSIS_SCHEMA_VERSION = "analysis_mart.v8"
 
 _DEPRECATED_HTML_TAGS_COLUMN = "deprecated_html_tags"
 _META_KEYWORDS_CONSISTENCY_COLUMN = "meta_keywords_to_content_consistency"
 _TIME_TO_FIRST_BYTE_COLUMN = "time_to_first_byte_ms"
 _SITE_SCALE_COLUMN = "site_scale"
+_AUTHORITY_PROXY_COLUMN = "authority_proxy"
+_DOMAIN_CONTROL_COLUMNS = (_SITE_SCALE_COLUMN, _AUTHORITY_PROXY_COLUMN)
 _ANALYSIS_JOIN_KEYS = ["run_id", "target_keyword_id", "canonical_url_hash"]
 
 _BACKENDS = ("bge", "gemini_doc_retrieval", "gemini_semantic_similarity")
+
+
+def extract_hostname(url_expr: pl.Expr) -> pl.Expr:
+    return url_expr.str.extract(r"^https?://([^/]+)", 1)
 
 
 def _rank_columns() -> list[pl.Expr]:
@@ -42,6 +51,16 @@ def _rank_columns() -> list[pl.Expr]:
 
 
 def build_analysis_lazyframe(feature_frames: Mapping[str, pl.LazyFrame]) -> pl.LazyFrame:
+    """
+    Build the analysis mart from keyword SERP, page, on-page, and domain feature frames.
+    
+    Parameters:
+        feature_frames (Mapping[str, pl.LazyFrame]): Feature frames keyed by their source names.
+    
+    Returns:
+        pl.LazyFrame: The assembled analysis mart with optional feature columns, similarity rankings, and schema version.
+    """
+    logger.info("building analysis lazyframe")
     frame = (
         feature_frames["keyword_serp"]
         .join(
@@ -78,7 +97,7 @@ def build_analysis_lazyframe(feature_frames: Mapping[str, pl.LazyFrame]) -> pl.L
     frame = _attach_deprecated_html_tags(frame, feature_frames.get("onpage_signals"))
     frame = _attach_meta_keywords_consistency(frame, feature_frames.get("onpage_signals"))
     frame = _attach_time_to_first_byte(frame, feature_frames.get("onpage_signals"))
-    frame = _attach_site_scale(frame, feature_frames.get("domain_features"))
+    frame = _attach_domain_controls(frame, feature_frames.get("domain_features"))
     return (
         frame
         .sort(["target_keyword_id", "serp_rank", "canonical_url_hash"])
@@ -119,6 +138,16 @@ def _attach_meta_keywords_consistency(
 def _attach_time_to_first_byte(
     frame: pl.LazyFrame, onpage_signals: pl.LazyFrame | None
 ) -> pl.LazyFrame:
+    """
+    Add time-to-first-byte data to the analysis frame when available.
+    
+    Parameters:
+        frame (pl.LazyFrame): The analysis frame to enrich.
+        onpage_signals (pl.LazyFrame | None): Optional on-page signals containing time-to-first-byte data.
+    
+    Returns:
+        pl.LazyFrame: The frame with a time-to-first-byte column, populated from on-page signals or filled with null values.
+    """
     if (
         onpage_signals is None
         or _TIME_TO_FIRST_BYTE_COLUMN not in onpage_signals.collect_schema()
@@ -133,18 +162,37 @@ def _attach_time_to_first_byte(
     )
 
 
-def _attach_site_scale(
+def _attach_domain_controls(
     frame: pl.LazyFrame, domain_features: pl.LazyFrame | None
 ) -> pl.LazyFrame:
-    if domain_features is None or _SITE_SCALE_COLUMN not in domain_features.collect_schema():
-        return frame.with_columns(pl.lit(None).cast(pl.Float64).alias(_SITE_SCALE_COLUMN))
+    """
+    Attach available domain control values to the analysis frame.
+    
+    Parameters:
+        frame (pl.LazyFrame): Analysis rows to enrich.
+        domain_features (pl.LazyFrame | None): Optional domain-level feature data.
+    
+    Returns:
+        pl.LazyFrame: The frame with domain control columns attached; unavailable controls are null.
+    """
+    schema = None if domain_features is None else domain_features.collect_schema()
+    present = [
+        column for column in _DOMAIN_CONTROL_COLUMNS if schema is not None and column in schema
+    ]
+    missing = [column for column in _DOMAIN_CONTROL_COLUMNS if column not in present]
+    if missing:
+        frame = frame.with_columns(
+            [pl.lit(None).cast(pl.Float64).alias(column) for column in missing]
+        )
+    if not present or domain_features is None:
+        return frame
     domain_lookup = (
-        domain_features.select(["run_id", "domain", _SITE_SCALE_COLUMN])
+        domain_features.select(["run_id", "domain", *present])
         .unique(["run_id", "domain"])
     )
     return (
         frame.with_columns(
-            pl.col("url").str.extract(r"^https?://([^/]+)", 1).alias("__domain")
+            extract_hostname(pl.col("url")).alias("__domain")
         )
         .join(
             domain_lookup,

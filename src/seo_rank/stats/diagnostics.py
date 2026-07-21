@@ -32,6 +32,7 @@ from seo_rank.stats.model_inputs import (
     REQUIRED_CONTROL_COLUMNS,
     SkippedModelFit,
     control_error_summary,
+    drop_incomplete_control_rows,
     validate_control_columns,
 )
 
@@ -45,7 +46,7 @@ MIN_DF_RESID_FOR_RESET = RESET_POWER
 BREUSCH_PAGAN_P_VALUE_THRESHOLD = 0.05
 STUDENTIZED_RESIDUAL_THRESHOLD = 3.0
 MULTIVARIATE_CONTROL_COLUMNS = REQUIRED_CONTROL_COLUMNS
-MULTIVARIATE_CONTROL_TERMS = {"site_scale": "site_scale"}
+MULTIVARIATE_CONTROL_TERMS = {"site_scale": "site_scale", "authority_proxy": "authority_proxy"}
 MULTIVARIATE_SCORE_COLUMNS = (
     "bge_normalized_score",
     "gemini_doc_retrieval_normalized_score",
@@ -280,6 +281,16 @@ def _prepare_multivariate_sensitivity_data(
     tuple[str, ...],
     tuple[dict[str, str], ...],
 ]:
+    """
+    Prepare validated data for the multivariate sensitivity model.
+    
+    Parameters:
+    	analysis_mart (pl.DataFrame): Analysis data containing model inputs and control columns.
+    	active_backends (Sequence[str]): Backends whose similarity score columns are included.
+    
+    Returns:
+    	tuple: Model data, a skip reason, validated control column names, and control validation issues.
+    """
     required_columns = [
         "target_keyword_id",
         "serp_rank",
@@ -289,7 +300,10 @@ def _prepare_multivariate_sensitivity_data(
     if missing_columns:
         return None, "missing_required_columns", (), ()
 
-    model_frame = analysis_mart.drop_nulls(required_columns)
+    model_frame = drop_incomplete_control_rows(
+        analysis_mart.drop_nulls(required_columns),
+        MULTIVARIATE_CONTROL_COLUMNS,
+    )
     if model_frame.is_empty():
         return None, "no_usable_rows", (), ()
     if model_frame.height < 3:
@@ -443,10 +457,21 @@ def _next_multivariate_drop_backend(
 
 
 def _multivariate_term_kind(term: str) -> str:
+    """
+    Classify a multivariate model term by its diagnostic category.
+    
+    Parameters:
+    	term (str): The model term to classify.
+    
+    Returns:
+    	str: The term category, such as intercept, control, similarity backend, keyword fixed effect, or other.
+    """
     if term == "Intercept":
         return "intercept"
     if term == MULTIVARIATE_CONTROL_TERMS["site_scale"]:
         return "site_scale"
+    if term == MULTIVARIATE_CONTROL_TERMS["authority_proxy"]:
+        return "authority_proxy"
     if term in MULTIVARIATE_SCORE_COLUMNS_TO_BACKEND:
         return "similarity_backend"
     if term.startswith("C(target_keyword_id)"):

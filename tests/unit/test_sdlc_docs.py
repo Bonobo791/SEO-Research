@@ -418,8 +418,8 @@ def test_phase_5_progress_counts_are_aligned() -> None:
     goals = (ROOT / "GOALS.md").read_text(encoding="utf-8")
     roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
 
-    assert "27 of 42 shipped, 2 partial, 13 open" in goals
-    assert "27 of 42 shipped, 2 partial, 13 open" in roadmap
+    assert "27 of 48 shipped, 2 partial, 19 open" in goals
+    assert "27 of 48 shipped, 2 partial, 19 open" in roadmap
 
 
 def test_ranking_explainability_docs_cross_link() -> None:

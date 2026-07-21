@@ -164,7 +164,7 @@ def test_materialization_drops_blocklisted_domain_rows_and_replaces_stale_parts(
         assert ds.dataset(output_dir / "parquet" / name, format="parquet").count_rows() == 0
 
 
-def test_build_analysis_panel_keyword_serp_keeps_only_scored_urls_with_site_scale() -> None:
+def test_build_analysis_panel_keyword_serp_keeps_only_scored_urls_with_complete_controls() -> None:
     keyword_serp = pl.DataFrame(
         [
             {
@@ -199,10 +199,20 @@ def test_build_analysis_panel_keyword_serp_keeps_only_scored_urls_with_site_scal
     ).lazy()
     domain_features = pl.DataFrame(
         [
-            {"run_id": "run-1", "domain": "complete.example", "site_scale": 1.25},
-            {"run_id": "run-1", "domain": "incomplete.example", "site_scale": None},
+            {
+                "run_id": "run-1",
+                "domain": "complete.example",
+                "site_scale": 1.25,
+                "authority_proxy": 0.25,
+            },
+            {
+                "run_id": "run-1",
+                "domain": "incomplete.example",
+                "site_scale": None,
+                "authority_proxy": 0.25,
+            },
         ],
-        schema_overrides={"site_scale": pl.Float64},
+        schema_overrides={"site_scale": pl.Float64, "authority_proxy": pl.Float64},
     ).lazy()
 
     result = build_analysis_panel_keyword_serp(

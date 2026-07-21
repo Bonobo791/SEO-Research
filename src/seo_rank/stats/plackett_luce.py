@@ -21,6 +21,7 @@ from seo_rank.stats.model_inputs import (
     SVD_DID_NOT_CONVERGE,
     SkippedModelFit,
     control_error_summary,
+    drop_incomplete_control_rows,
     validate_control_columns,
 )
 
@@ -867,7 +868,18 @@ def _prepare_plackett_luce_frame(
     *,
     max_rank: int = DEFAULT_MAX_SERP_RANK,
 ) -> pl.DataFrame:
-    return analysis_mart.filter(
+    """Prepare a Plackett–Luce modeling frame within the specified SERP rank range.
+    
+    Rows with incomplete control values, out-of-range ranks, or null required fields are excluded.
+    
+    Parameters:
+    	max_rank (int): Maximum inclusive SERP rank to retain.
+    
+    Returns:
+    	pl.DataFrame: The filtered modeling frame.
+    """
+    frame = drop_incomplete_control_rows(analysis_mart, PL_CONTROL_COLUMNS)
+    return frame.filter(
         pl.col("serp_rank").is_between(
             1,
             max_rank,

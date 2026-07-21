@@ -1,89 +1,48 @@
-- onpage_score (low)
-- plain_text_word_count (low)
-- plain_text_rate (low)
-- flesch_kincaid_readability_index (low)
-- coleman_liau_readability_index (high)
-- smog_readability_index (high)
-- dale_chall_readability_index (high)
-- description_to_content_consistency (low)
-- title_to_content_consistency (low)
-- meta_keywords_to_content_consistency (low)
-- time_to_first_byte_ms
-- largest_contentful_paint_ms
-- cumulative_layout_shift
-- first_input_delay_ms
-- connection_time_ms
-- time_to_secure_connection_ms
-- request_sent_time_ms
-- download_time_ms
-- duration_time_ms
-- fetch_end_ms
-- dom_complete_ms
-- time_to_interactive_ms
-- title_too_long
-- title_too_short
-- no_title
-- no_description
-- no_h1_tag
-- has_render_blocking_resources
-- duplicate_meta_tags
-- duplicate_meta_tags_count
-- irrelevant_description
-- low_readability_rate
-- is_4xx_code
-- is_5xx_code
-- is_broken
-- is_redirect
-- no_content_encoding
-- high_loading_time
-- high_waiting_time
-- no_doctype
-- no_encoding_meta_tag
-- https_to_http_links
-- size_greater_than_3mb
-- meta_charset_consistency (false)
-- has_meta_refresh_redirect
-- low_content_rate
-- high_character_count
-- small_page_size
-- large_page_size
-- irrelevant_title
-- irrelevant_meta_keywords
-- deprecated_html_tags
-- duplicate_title_tag
-- no_image_alt
-- no_image_title
-- no_favicon
-- flash
-- frame
-- lorem_ipsum
-- has_micromarkup_errors
-- micromarkup_errors_count
-- micromarkup_warnings_count
-- broken_links
-- broken_resources
-- duplicate_content
-- duplicate_description
-- duplicate_title
-- resource_errors_count
-- resource_warnings_count
-- render_blocking_scripts_count
-- render_blocking_stylesheets_count
-- click_depth (high)
-- encoded_size
-- total_dom_size
-- total_transfer_size
-- images_size
-- scripts_size
-- stylesheets_size
-- follow (false)
-- canonical (absent)
-- is_https (absent)
-- seo_friendly_url (false)
-- has_meta_title (false)
-- has_valid_structured_data (false)
-- has_micromarkup (false)
-- cache_control_cachable (false)
-- cache_control_ttl (low)
-- from_sitemap (false)
-- inbound_links_count (low)
+# DataForSEO Negative Ranking Signals
+
+Component source of truth for the `authority_proxy` control
+(`build_authority_proxy` in `src/seo_rank/data/features.py`, spec
+`analysis_spec.v1.2.yaml`).
+
+Legend: `included: continuous` = domain median of page medians -> asinh ->
+within-run z-score; `included: boolean` = domain rate -> within-run z-score
+(no log). `negated` marks components where low/false is bad (polarity-flipped
+so higher = worse before averaging). The composite is the negated mean of
+available finite aligned z-scores, so higher `authority_proxy` = fewer negative
+signals. A domain remains a complete model case when both controls are present;
+an unavailable optional component does not discard the proxy.
+
+Every signal registered in an `onpage_metric` family is excluded from this
+control. It is an analyzed predictor, so including it would make the control a
+mechanical part of the predictor. `test_authority_proxy.py` verifies the
+exclusion list stays exactly aligned with `analysis_spec.v1.2.yaml`.
+
+Included components:
+
+- time_to_first_byte_ms — included: continuous
+- largest_contentful_paint_ms — included: continuous
+- cumulative_layout_shift — included: continuous
+- first_input_delay_ms — included: continuous
+- resource_errors_count — included: continuous
+- render_blocking_scripts_count — included: continuous
+- render_blocking_stylesheets_count — included: continuous
+- meta_charset_consistency (false) — included: boolean, negated (1 - rate)
+- canonical (absent) — included: boolean, negated (1 - rate)
+- is_https (absent) — included: boolean, negated (1 - rate)
+- has_meta_title (false) — included: boolean, negated (1 - rate)
+- title_too_long, title_too_short, no_title, no_description, no_h1_tag,
+  has_render_blocking_resources, duplicate_meta_tags, irrelevant_description,
+  low_readability_rate, is_4xx_code, is_5xx_code, is_broken,
+  no_content_encoding, high_loading_time, high_waiting_time, no_doctype,
+  no_encoding_meta_tag, https_to_http_links, size_greater_than_3mb,
+  has_meta_refresh_redirect, low_content_rate, large_page_size,
+  irrelevant_title, irrelevant_meta_keywords, deprecated_html_tags,
+  duplicate_title_tag, no_image_alt, broken_links, broken_resources,
+  duplicate_description, duplicate_title — included: boolean
+
+Excluded components:
+
+- All registered `onpage_metric` signals — excluded: analyzed predictors.
+- click_depth and from_sitemap — excluded: crawl metadata.
+- total_dom_size, total_transfer_size, images_size, scripts_size, and
+  stylesheets_size — excluded: already captured by site_scale.

@@ -15,7 +15,7 @@ from seo_rank.stats.families import load_signal_family_registry
 
 logger = logging.getLogger(__name__)
 
-ANALYSIS_SPEC_FILENAME = "analysis_spec.v1.1.yaml"
+ANALYSIS_SPEC_FILENAME = "analysis_spec.v1.2.yaml"
 
 
 @dataclass(frozen=True)

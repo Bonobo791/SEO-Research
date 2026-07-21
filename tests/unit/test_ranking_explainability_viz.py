@@ -15,6 +15,12 @@ from seo_rank.stats.textrazor_explainability import summarize_ranking_explainabi
 
 
 def _explainability_panel_frame() -> pl.DataFrame:
+    """
+    Construct a synthetic explainability feature panel for visualization tests.
+    
+    Returns:
+    	pl.DataFrame: A DataFrame containing four SERP-ranked rows for each of ten keywords, with identifiers and feature values.
+    """
     rows: list[dict[str, object]] = []
     for keyword_index in range(1, 11):
         target_keyword_id = f"kw-{keyword_index}"
@@ -33,6 +39,7 @@ def _explainability_panel_frame() -> pl.DataFrame:
                     "deprecated_html_tags": (keyword_index + serp_rank) % 3 == 0,
                     "meta_keywords_to_content_consistency": 0.1 + (serp_rank * 0.05),
                     "site_scale": (keyword_index * 0.1) + (serp_rank * 0.01),
+                    "authority_proxy": ((keyword_index * 5 + serp_rank * 13) % 11) * 0.01,
                     "bge_normalized_score": signal,
                     "gemini_doc_retrieval_normalized_score": signal - 0.1,
                     "gemini_semantic_similarity_normalized_score": signal - 0.2,
