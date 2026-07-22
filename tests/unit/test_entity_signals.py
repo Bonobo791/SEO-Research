@@ -56,7 +56,7 @@ def test_entity_signals_builds_page_level_presence_and_provenance() -> None:
             "entity_mention_count": 2,
             "entity_confidence_mean": 3.0,
             "entity_relevance_mean": 0.4,
-            "schema_version": "feature_marts.v5",
+            "schema_version": "feature_marts.v6",
         },
         {
             "run_id": "run-1",
@@ -72,7 +72,7 @@ def test_entity_signals_builds_page_level_presence_and_provenance() -> None:
             "entity_mention_count": 0,
             "entity_confidence_mean": None,
             "entity_relevance_mean": None,
-            "schema_version": "feature_marts.v5",
+            "schema_version": "feature_marts.v6",
         },
     ]
 

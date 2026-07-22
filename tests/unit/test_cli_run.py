@@ -1168,7 +1168,7 @@ def test_run_live_textrazor_only_uses_offline_dataforseo_fixtures_and_live_textr
     assert len(textrazor_requests) == 3
     assert all(
         request["body"].startswith(
-            b"extractors=entities%2Ctopics%2Cwords%2Cphrases%2Crelations%2Centailments%2Csenses%2Cspelling&classifiers=textrazor_mediatopics_2023Q1&text="
+            b"extractors=entities%2Ctopics%2Cwords%2Cphrases%2Crelations%2Centailments%2Csenses%2Cspelling&classifiers=textrazor_mediatopics_2023Q1%2Ctextrazor_iab_content_taxonomy_3.0&text="
         )
         and b"Fixture+Page" in request["body"]
         for request in textrazor_requests

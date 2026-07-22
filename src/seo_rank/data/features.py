@@ -23,7 +23,7 @@ from seo_rank.dataforseo import DEFAULT_SERP_DEPTH
 
 logger = logging.getLogger(__name__)
 
-FEATURE_SCHEMA_VERSION = "feature_marts.v5"
+FEATURE_SCHEMA_VERSION = "feature_marts.v6"
 SITE_SCALE_COLUMNS = (
     "images_size",
     "scripts_size",
@@ -270,18 +270,39 @@ FEATURE_REQUIRED_COLUMNS = {
         "textrazor_entity_confidence_score",
         "textrazor_entity_relevance_score",
         "textrazor_topic_score",
+        "textrazor_top_topic_label",
+        "textrazor_top_topic_score",
         "textrazor_category_score",
         "textrazor_classifier_score",
+        "textrazor_top_category_label",
+        "textrazor_top_category_classifier_id",
         "textrazor_entailment_score",
         "textrazor_entailment_prior",
         "textrazor_entailment_context",
         "textrazor_word_count",
-        "textrazor_grammar_count",
-        "textrazor_sense_count",
-        "textrazor_spelling_count",
+        "textrazor_sense_score",
+        "textrazor_spelling_suggestion_count",
         "textrazor_relation_count",
         "textrazor_property_count",
         "textrazor_noun_phrase_count",
+        "textrazor_top_noun_phrase_texts",
+        "textrazor_relation_predicate_labels",
+        "textrazor_relation_param_labels",
+        "textrazor_property_names",
+        "textrazor_dependency_depth_mean",
+        "textrazor_dependency_relation_type_count",
+        "textrazor_part_of_speech_type_count",
+        "textrazor_entity_mention_count",
+        "textrazor_unique_entity_count",
+        "textrazor_unique_entity_density_per_1k_words",
+        "textrazor_entity_mention_density_per_1k_words",
+        "textrazor_linked_entity_fraction",
+        "textrazor_entity_type_entropy",
+        "textrazor_entity_salience_mean",
+        "textrazor_entity_salience_median",
+        "textrazor_entity_salience_top3_max",
+        "textrazor_entity_salience_mention_weighted",
+        "textrazor_salience_unique_entity_count",
         "textrazor_entities_present",
         "textrazor_topics_present",
         "textrazor_categories_present",
@@ -290,6 +311,7 @@ FEATURE_REQUIRED_COLUMNS = {
         "textrazor_relations_present",
         "textrazor_properties_present",
         "textrazor_noun_phrases_present",
+        "textrazor_dependency_trees_present",
         "textrazor_page_metrics_complete",
         "schema_version",
     ),
@@ -506,18 +528,39 @@ FEATURE_VALIDATION_RULES = {
             "textrazor_entity_confidence_score": pl.Float64,
             "textrazor_entity_relevance_score": pl.Float64,
             "textrazor_topic_score": pl.Float64,
+            "textrazor_top_topic_label": pl.Utf8,
+            "textrazor_top_topic_score": pl.Float64,
             "textrazor_category_score": pl.Float64,
             "textrazor_classifier_score": pl.Float64,
+            "textrazor_top_category_label": pl.Utf8,
+            "textrazor_top_category_classifier_id": pl.Utf8,
             "textrazor_entailment_score": pl.Float64,
             "textrazor_entailment_prior": pl.Float64,
             "textrazor_entailment_context": pl.Float64,
             "textrazor_word_count": pl.Int64,
-            "textrazor_grammar_count": pl.Int64,
-            "textrazor_sense_count": pl.Int64,
-            "textrazor_spelling_count": pl.Int64,
+            "textrazor_sense_score": pl.Float64,
+            "textrazor_spelling_suggestion_count": pl.Int64,
             "textrazor_relation_count": pl.Int64,
             "textrazor_property_count": pl.Int64,
             "textrazor_noun_phrase_count": pl.Int64,
+            "textrazor_top_noun_phrase_texts": pl.List(pl.Utf8),
+            "textrazor_relation_predicate_labels": pl.List(pl.Utf8),
+            "textrazor_relation_param_labels": pl.List(pl.Utf8),
+            "textrazor_property_names": pl.List(pl.Utf8),
+            "textrazor_dependency_depth_mean": pl.Float64,
+            "textrazor_dependency_relation_type_count": pl.Int64,
+            "textrazor_part_of_speech_type_count": pl.Int64,
+            "textrazor_entity_mention_count": pl.Int64,
+            "textrazor_unique_entity_count": pl.Int64,
+            "textrazor_unique_entity_density_per_1k_words": pl.Float64,
+            "textrazor_entity_mention_density_per_1k_words": pl.Float64,
+            "textrazor_linked_entity_fraction": pl.Float64,
+            "textrazor_entity_type_entropy": pl.Float64,
+            "textrazor_entity_salience_mean": pl.Float64,
+            "textrazor_entity_salience_median": pl.Float64,
+            "textrazor_entity_salience_top3_max": pl.Float64,
+            "textrazor_entity_salience_mention_weighted": pl.Float64,
+            "textrazor_salience_unique_entity_count": pl.Int64,
             "textrazor_entities_present": pl.Boolean,
             "textrazor_topics_present": pl.Boolean,
             "textrazor_categories_present": pl.Boolean,
@@ -526,6 +569,7 @@ FEATURE_VALIDATION_RULES = {
             "textrazor_relations_present": pl.Boolean,
             "textrazor_properties_present": pl.Boolean,
             "textrazor_noun_phrases_present": pl.Boolean,
+            "textrazor_dependency_trees_present": pl.Boolean,
             "textrazor_page_metrics_complete": pl.Boolean,
             "schema_version": pl.Utf8,
         },
@@ -553,18 +597,32 @@ FEATURE_VALIDATION_RULES = {
             "textrazor_entity_confidence_score": (0, None),
             "textrazor_entity_relevance_score": (0, 1),
             "textrazor_topic_score": (0, 1),
+            "textrazor_top_topic_score": (0, 1),
             "textrazor_category_score": (0, 1),
             "textrazor_classifier_score": (0, 1),
             "textrazor_entailment_score": (0, None),
             "textrazor_entailment_prior": (0, 1),
             "textrazor_entailment_context": (0, 1),
             "textrazor_word_count": (0, None),
-            "textrazor_grammar_count": (0, None),
-            "textrazor_sense_count": (0, None),
-            "textrazor_spelling_count": (0, None),
+            "textrazor_sense_score": (0, None),
+            "textrazor_spelling_suggestion_count": (0, None),
             "textrazor_relation_count": (0, None),
             "textrazor_property_count": (0, None),
             "textrazor_noun_phrase_count": (0, None),
+            "textrazor_dependency_depth_mean": (0, None),
+            "textrazor_dependency_relation_type_count": (0, None),
+            "textrazor_part_of_speech_type_count": (0, None),
+            "textrazor_entity_mention_count": (0, None),
+            "textrazor_unique_entity_count": (0, None),
+            "textrazor_unique_entity_density_per_1k_words": (0, None),
+            "textrazor_entity_mention_density_per_1k_words": (0, None),
+            "textrazor_linked_entity_fraction": (0, 1),
+            "textrazor_entity_type_entropy": (0, None),
+            "textrazor_entity_salience_mean": (0, 1),
+            "textrazor_entity_salience_median": (0, 1),
+            "textrazor_entity_salience_top3_max": (0, 1),
+            "textrazor_entity_salience_mention_weighted": (0, 1),
+            "textrazor_salience_unique_entity_count": (0, None),
         },
     },
     "entity_signals": {
@@ -1335,9 +1393,174 @@ def build_feature_lazyframes(
         "domain_features": domain_features,
         "backlinks_analysis": backlinks_analysis,
         "onpage_features": onpage_features,
-        "textrazor_page_metrics": curated_frames["textrazor_page_metrics_curated"],
+        "textrazor_page_metrics": build_textrazor_page_metrics_lazyframe(
+            curated_frames["textrazor_page_metrics_curated"],
+            entities,
+        ),
         "entity_signals": entity_signals,
     }
+
+
+ENTITY_SALIENCE_PAGE_KEYS = [
+    "run_id",
+    "target_keyword_id",
+    "target_keyword",
+    "canonical_url_hash",
+    "url",
+]
+
+ENTITY_SALIENCE_COLUMNS = (
+    "textrazor_entity_salience_mean",
+    "textrazor_entity_salience_median",
+    "textrazor_entity_salience_top3_max",
+    "textrazor_entity_salience_mention_weighted",
+    "textrazor_salience_unique_entity_count",
+)
+
+ENTITY_LINKAGE_COLUMNS = (
+    "textrazor_linked_entity_fraction",
+    "textrazor_entity_type_entropy",
+)
+
+
+def build_entity_salience_aggregates(entities: pl.LazyFrame) -> pl.LazyFrame:
+    """Aggregate entity relevance to one salience row per page.
+
+    Relevance is first averaged per entity (one entity may match several
+    surface forms), then aggregated across the page's unique entities. The
+    mention-weighted variant weights each entity by its occurrence count.
+    """
+
+    per_entity = entities.group_by([*ENTITY_SALIENCE_PAGE_KEYS, "entity_id"]).agg(
+        [
+            pl.col("relevance").mean().alias("entity_relevance_mean"),
+            pl.len().alias("entity_mention_count"),
+        ]
+    )
+    return (
+        per_entity.group_by(ENTITY_SALIENCE_PAGE_KEYS)
+        .agg(
+            [
+                pl.col("entity_relevance_mean")
+                .mean()
+                .alias("textrazor_entity_salience_mean"),
+                pl.col("entity_relevance_mean")
+                .median()
+                .alias("textrazor_entity_salience_median"),
+                pl.col("entity_relevance_mean")
+                .sort(descending=True)
+                .head(3)
+                .max()
+                .alias("textrazor_entity_salience_top3_max"),
+                (
+                    (pl.col("entity_relevance_mean") * pl.col("entity_mention_count")).sum()
+                    / pl.col("entity_mention_count").sum()
+                ).alias("textrazor_entity_salience_mention_weighted"),
+                pl.col("entity_id")
+                .n_unique()
+                .cast(pl.Int64)
+                .alias("textrazor_salience_unique_entity_count"),
+            ]
+        )
+        .sort(ENTITY_SALIENCE_PAGE_KEYS)
+    )
+
+
+def build_entity_linkage_aggregates(entities: pl.LazyFrame) -> pl.LazyFrame:
+    """Aggregate unique-entity KB linkage and TextRazor type diversity by page."""
+
+    entity_rows = entities.with_columns(
+        [
+            pl.coalesce("entity_english_id", "entity_id", "matched_text").alias(
+                "__entity_key"
+            ),
+            (pl.col("wikidata_id").is_not_null() | pl.col("wiki_link").is_not_null()).alias(
+                "__linked"
+            ),
+        ]
+    )
+    per_entity = entity_rows.group_by([*ENTITY_SALIENCE_PAGE_KEYS, "__entity_key"]).agg(
+        pl.col("__linked").any().alias("__linked")
+    )
+    linked_fraction = per_entity.group_by(ENTITY_SALIENCE_PAGE_KEYS).agg(
+        pl.col("__linked")
+        .cast(pl.Float64)
+        .mean()
+        .alias("textrazor_linked_entity_fraction")
+    )
+    type_counts = (
+        entity_rows.select([*ENTITY_SALIENCE_PAGE_KEYS, "__entity_key", "types"])
+        .explode("types")
+        .filter(pl.col("types").is_not_null() & (pl.col("types").str.len_chars() > 0))
+        .unique([*ENTITY_SALIENCE_PAGE_KEYS, "__entity_key", "types"])
+        .group_by([*ENTITY_SALIENCE_PAGE_KEYS, "types"])
+        .agg(pl.len().alias("__type_entity_count"))
+    )
+    type_entropy = (
+        type_counts.with_columns(
+            (
+                pl.col("__type_entity_count")
+                / pl.col("__type_entity_count").sum().over(ENTITY_SALIENCE_PAGE_KEYS)
+            ).alias("__type_probability")
+        )
+        .with_columns(
+            (-pl.col("__type_probability") * pl.col("__type_probability").log()).alias(
+                "__type_entropy_term"
+            )
+        )
+        .group_by(ENTITY_SALIENCE_PAGE_KEYS)
+        .agg(pl.col("__type_entropy_term").sum().alias("textrazor_entity_type_entropy"))
+    )
+    return (
+        linked_fraction.join(type_entropy, on=ENTITY_SALIENCE_PAGE_KEYS, how="left")
+        .with_columns(pl.col("textrazor_entity_type_entropy").fill_null(0.0))
+        .sort(ENTITY_SALIENCE_PAGE_KEYS)
+    )
+
+
+def build_textrazor_page_metrics_lazyframe(
+    textrazor_page_metrics_curated: pl.LazyFrame,
+    entities: pl.LazyFrame,
+) -> pl.LazyFrame:
+    """Join page-level entity salience aggregates onto the curated metrics.
+
+    Pages without entity rows keep null salience scores and a zero unique
+    entity count; the curated table itself is left untouched.
+    """
+
+    salience = build_entity_salience_aggregates(entities).select(
+        [
+            "run_id",
+            "target_keyword_id",
+            "canonical_url_hash",
+            *ENTITY_SALIENCE_COLUMNS,
+        ]
+    )
+    linkage = build_entity_linkage_aggregates(entities).select(
+        [
+            "run_id",
+            "target_keyword_id",
+            "canonical_url_hash",
+            *ENTITY_LINKAGE_COLUMNS,
+        ]
+    )
+    return (
+        textrazor_page_metrics_curated.join(
+            salience,
+            on=["run_id", "target_keyword_id", "canonical_url_hash"],
+            how="left",
+        )
+        .join(
+            linkage,
+            on=["run_id", "target_keyword_id", "canonical_url_hash"],
+            how="left",
+        )
+        .with_columns(
+            pl.col("textrazor_salience_unique_entity_count")
+            .fill_null(0)
+            .cast(pl.Int64)
+        )
+    )
 
 
 def build_entity_signals_lazyframe(
@@ -1443,6 +1666,7 @@ REQUIRED_FEATURE_MARTS_FOR_ANALYSIS = (
     "domain_features",
     "backlinks_analysis",
     "onpage_features",
+    "textrazor_page_metrics",
     "entity_signals",
 )
 

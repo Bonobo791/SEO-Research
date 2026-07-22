@@ -1,6 +1,6 @@
 """Phase 5 statistical analysis package."""
 
-from . import artifacts, bh, diagnostics, families, panel, plackett_luce, rank_depth, regression, scale, spearman, spec
+from . import artifacts, bh, diagnostics, families, panel, plackett_luce, rank_depth, regression, scale, signal_dossier, spearman, spec
 
 __all__ = [
     "artifacts",
@@ -12,6 +12,7 @@ __all__ = [
     "rank_depth",
     "regression",
     "scale",
+    "signal_dossier",
     "spearman",
     "spec",
 ]

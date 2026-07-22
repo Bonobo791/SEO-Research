@@ -19,6 +19,12 @@ ONPAGE_FAMILY_KEYS = (
     "onpage_core_web_vitals",
     "onpage_technical_checks",
 )
+TEXTRAZOR_PHASE57_FAMILY_KEYS = (
+    "textrazor_entity_salience",
+    "textrazor_entity_coverage",
+    "textrazor_entity_linkage",
+    "textrazor_syntactic_complexity",
+)
 EXCLUDED_MODEL_COLUMNS = frozenset(
     {
         "is_4xx_code",
@@ -160,8 +166,9 @@ def test_signal_family_registry_preserves_order_and_panel_grain() -> None:
         "textrazor_topic_score",
         "textrazor_category_classifier_score",
         "textrazor_entailment_score_prior_context",
-        "textrazor_word_grammar_sense_spelling",
+        "textrazor_word_sense_spelling",
         "textrazor_relation_property_noun_phrase",
+        *TEXTRAZOR_PHASE57_FAMILY_KEYS,
         "backlinks_counts",
         *ONPAGE_FAMILY_KEYS,
     )
@@ -184,6 +191,32 @@ def test_signal_family_registry_preserves_order_and_panel_grain() -> None:
     assert registry.family("onpage_core_web_vitals").signal_columns == ONPAGE_CORE_WEB_VITALS_COLUMNS
     assert registry.family("onpage_technical_checks").signal_columns == ONPAGE_TECHNICAL_CHECKS_COLUMNS
     assert registry.source_mart_for_family("onpage_content_quality") == "onpage_features"
+    assert registry.family("textrazor_entity_salience").signal_columns == (
+        "textrazor_entity_salience_mean",
+        "textrazor_entity_salience_median",
+        "textrazor_entity_salience_top3_max",
+        "textrazor_entity_salience_mention_weighted",
+        "textrazor_salience_unique_entity_count",
+    )
+    assert registry.family("textrazor_entity_coverage").signal_columns == (
+        "textrazor_entity_mention_count",
+        "textrazor_unique_entity_count",
+        "textrazor_unique_entity_density_per_1k_words",
+        "textrazor_entity_mention_density_per_1k_words",
+    )
+    assert registry.family("textrazor_entity_linkage").signal_columns == (
+        "textrazor_linked_entity_fraction",
+        "textrazor_entity_type_entropy",
+    )
+    assert registry.family("textrazor_syntactic_complexity").signal_columns == (
+        "textrazor_dependency_depth_mean",
+        "textrazor_dependency_relation_type_count",
+        "textrazor_part_of_speech_type_count",
+    )
+    for family_key in TEXTRAZOR_PHASE57_FAMILY_KEYS:
+        family = registry.family(family_key)
+        assert registry.source_mart_for_family(family_key) == "textrazor_page_metrics"
+        assert plackett_luce_enabled_for_family(family) is True
     assert registry.families_by_kind("onpage_metric") == tuple(
         registry.family(key) for key in ONPAGE_FAMILY_KEYS
     )

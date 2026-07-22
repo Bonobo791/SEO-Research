@@ -24,8 +24,8 @@ def test_build_entity_request_posts_parsed_text_without_source_url() -> None:
         "Content-Type": "application/x-www-form-urlencoded",
     }
     assert request.body == {
-        "extractors": "entities,topics,words,phrases,relations,entailments,senses,spelling",
-        "classifiers": "textrazor_mediatopics_2023Q1",
+        "extractors": "entities,topics,words,phrases,dependency-trees,relations,entailments,senses,spelling",
+        "classifiers": "textrazor_mediatopics_2023Q1,textrazor_iab_content_taxonomy_3.0",
         "text": "Technical SEO helps crawlers discover important pages.",
     }
     assert "https://example.com/technical-seo/1" not in request.body.values()
@@ -88,6 +88,6 @@ def test_execute_textrazor_request_posts_form_with_api_key_header() -> None:
     }
     assert (
         sent["body"]
-        == b"extractors=entities%2Ctopics%2Cwords%2Cphrases%2Crelations%2Centailments%2Csenses%2Cspelling&classifiers=textrazor_mediatopics_2023Q1&text=Technical+SEO+helps+crawlers."
+        == b"extractors=entities%2Ctopics%2Cwords%2Cphrases%2Cdependency-trees%2Crelations%2Centailments%2Csenses%2Cspelling&classifiers=textrazor_mediatopics_2023Q1%2Ctextrazor_iab_content_taxonomy_3.0&text=Technical+SEO+helps+crawlers."
     )
     assert sent["timeout"] == 9.0

@@ -41,6 +41,11 @@ TEXTRAZOR_RANKING_METRICS: tuple[tuple[str, str], ...] = (
     ("entailment_score", "textrazor_entailment_score"),
     ("relation_count", "textrazor_relation_count"),
     ("property_count", "textrazor_property_count"),
+    ("entity_mention_count", "textrazor_entity_mention_count"),
+    ("unique_entity_count", "textrazor_unique_entity_count"),
+    ("unique_entity_density_per_1k_words", "textrazor_unique_entity_density_per_1k_words"),
+    ("entity_mention_density_per_1k_words", "textrazor_entity_mention_density_per_1k_words"),
+    ("unique_entity_density_per_1k_chars", "textrazor_unique_entity_density_per_1k_chars"),
 )
 
 SIMILARITY_RANKING_METRICS: tuple[tuple[str, str], ...] = tuple(
@@ -561,7 +566,7 @@ _RANKING_IMPORTANCE_FAMILY_KEYS: dict[str, tuple[str, ...]] = {
         "textrazor_entailment_score_prior_context",
     ),
     "content": (
-        "textrazor_word_grammar_sense_spelling",
+        "textrazor_word_sense_spelling",
         "textrazor_relation_property_noun_phrase",
         "onpage_content_quality",
     ),

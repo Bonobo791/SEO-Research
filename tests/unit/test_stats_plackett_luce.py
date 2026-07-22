@@ -129,6 +129,14 @@ def _too_small_plackett_luce_panel() -> pl.DataFrame:
     return _sample_plackett_luce_panel(keyword_count=1, items_per_keyword=1)
 
 
+
+def _main_model(summary: dict[str, object]) -> dict[str, object]:
+    """Narrow summary['main_model'] from object to dict for typed nested access."""
+    main_model = summary["main_model"]
+    assert isinstance(main_model, dict)
+    return main_model
+
+
 def test_stats_package_exports_plackett_luce_module_surface() -> None:
     import seo_rank.stats as stats
 
@@ -213,21 +221,21 @@ def test_summarize_backend_plackett_luce_fits_rank_ordered_logit_with_clustered_
     assert summary["row_count"] == 60
     assert summary["choice_set_size_summary"]["min"] == 5
     assert summary["choice_set_size_summary"]["max"] == 5
-    assert summary["main_model"]["formula"] == (
+    assert _main_model(summary)["formula"] == (
         "rank_ordered_logit ~ log(bge_normalized_score + 1) + site_scale + authority_proxy"
     )
-    assert summary["main_model"]["omitted_controls"] == []
-    assert summary["main_model"]["log_odds_per_1sd"] > 0
-    assert summary["main_model"]["log_odds_per_1sd_standard_error"] > 0
-    assert summary["main_model"]["log_odds_per_1sd_confidence_interval"][0] < summary["main_model"][
+    assert _main_model(summary)["omitted_controls"] == []
+    assert _main_model(summary)["log_odds_per_1sd"] > 0
+    assert _main_model(summary)["log_odds_per_1sd_standard_error"] > 0
+    assert _main_model(summary)["log_odds_per_1sd_confidence_interval"][0] < _main_model(summary)[
         "log_odds_per_1sd"
     ]
-    assert summary["main_model"]["log_odds_per_1sd_confidence_interval"][1] > summary["main_model"][
+    assert _main_model(summary)["log_odds_per_1sd_confidence_interval"][1] > _main_model(summary)[
         "log_odds_per_1sd"
     ]
-    assert summary["main_model"]["odds_ratio_per_1sd"] > 1
+    assert _main_model(summary)["odds_ratio_per_1sd"] > 1
     assert summary["convergence_confirmed"] is (summary["status"] == "computed")
-    assert "coefficient" not in summary["main_model"]
+    assert "coefficient" not in _main_model(summary)
     assert "diagnostics" not in summary
 
 
@@ -242,8 +250,8 @@ def test_plackett_luce_ignores_meta_keyword_control() -> None:
     assert fit is not None
     assert fit.params.shape == (3,)
     assert fit.information.shape == (3, 3)
-    assert summary["main_model"]["formula"] == "rank_ordered_logit ~ log(bge_normalized_score + 1) + site_scale + authority_proxy"
-    assert summary["main_model"]["omitted_controls"] == []
+    assert _main_model(summary)["formula"] == "rank_ordered_logit ~ log(bge_normalized_score + 1) + site_scale + authority_proxy"
+    assert _main_model(summary)["omitted_controls"] == []
 
 
 def test_plackett_luce_ignores_constant_meta_keyword_control() -> None:
@@ -256,10 +264,10 @@ def test_plackett_luce_ignores_constant_meta_keyword_control() -> None:
 
     assert fit is not None
     assert fit.params.shape == (3,)
-    assert summary["main_model"]["formula"] == (
+    assert _main_model(summary)["formula"] == (
         "rank_ordered_logit ~ log(bge_normalized_score + 1) + site_scale + authority_proxy"
     )
-    assert summary["main_model"]["omitted_controls"] == []
+    assert _main_model(summary)["omitted_controls"] == []
 
 
 def test_plackett_luce_omits_constant_control_but_keeps_latency_control() -> None:
@@ -276,8 +284,8 @@ def test_plackett_luce_omits_constant_control_but_keeps_latency_control() -> Non
     assert fit is not None
     assert fit.params.shape == (2,)
     assert fit.information.shape == (2, 2)
-    assert summary["main_model"]["formula"] == "rank_ordered_logit ~ log(bge_normalized_score + 1) + authority_proxy"
-    assert summary["main_model"]["omitted_controls"] == [
+    assert _main_model(summary)["formula"] == "rank_ordered_logit ~ log(bge_normalized_score + 1) + authority_proxy"
+    assert _main_model(summary)["omitted_controls"] == [
         {"column": "site_scale", "reason": "constant"},
     ]
 
@@ -397,7 +405,7 @@ def test_summarize_backend_plackett_luce_ignores_sparse_meta_keyword_control() -
 
     assert summary["status"] in {"computed", "unstable"}
     assert summary["row_count"] == frame.height
-    assert summary["main_model"]["omitted_controls"] == []
+    assert _main_model(summary)["omitted_controls"] == []
 
 
 def test_summarize_backend_plackett_luce_skips_duplicate_rank_keyword() -> None:
@@ -427,9 +435,9 @@ def test_fit_backend_plackett_luce_reports_optimizer_non_convergence() -> None:
 
     summary = plackett_luce_module._summarize_fit(fit)
     assert summary["convergence_confirmed"] is False
-    assert summary["main_model"]["status"] == "unstable"
-    assert "log_odds_per_1sd" in summary["main_model"]
-    assert "odds_ratio_per_1sd" in summary["main_model"]
+    assert _main_model(summary)["status"] == "unstable"
+    assert "log_odds_per_1sd" in _main_model(summary)
+    assert "odds_ratio_per_1sd" in _main_model(summary)
 
 
 def test_fit_backend_plackett_luce_treats_precision_loss_with_tiny_gradient_as_converged(
@@ -469,7 +477,7 @@ def test_fit_backend_plackett_luce_treats_precision_loss_with_tiny_gradient_as_c
     )
     assert summary["status"] in {"computed", "unstable"}
     assert summary["convergence_confirmed"] is (summary["status"] == "computed")
-    assert summary["main_model"]["convergence_confirmed"] is (summary["status"] == "computed")
+    assert _main_model(summary)["convergence_confirmed"] is (summary["status"] == "computed")
 
 
 def test_summarize_backend_plackett_luce_marks_unstable_fit_as_unstable() -> None:
@@ -485,7 +493,7 @@ def test_summarize_backend_plackett_luce_marks_unstable_fit_as_unstable() -> Non
     )
 
     assert unstable_summary["status"] == "unstable"
-    assert unstable_summary["main_model"]["status"] == "unstable"
+    assert _main_model(unstable_summary)["status"] == "unstable"
 
 
 def test_summarize_backend_plackett_luce_skips_too_small_choice_sets() -> None:

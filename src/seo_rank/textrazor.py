@@ -29,13 +29,18 @@ TEXTRAZOR_PAGE_METRIC_EXTRACTORS = (
     "topics",
     "words",
     "phrases",
+    "dependency-trees",
     "relations",
     "entailments",
     "senses",
     "spelling",
 )
 
-TEXTRAZOR_PAGE_METRIC_CLASSIFIERS = ("textrazor_mediatopics_2023Q1",)
+TEXTRAZOR_PAGE_METRIC_CLASSIFIERS = (
+    "textrazor_mediatopics_2023Q1",
+    "textrazor_iab_content_taxonomy_3.0",
+)
+STRUCTURED_TEXT_LIMIT = 3
 
 
 @dataclass(frozen=True)
@@ -297,14 +302,38 @@ def fixture_page_metrics_response(url: str, text: str) -> dict[str, object]:
                 {"label": "Search crawling", "score": 0.41},
             ],
             "categories": [
-                {"label": "Search engine optimization", "score": 0.83, "classifierScore": 0.74},
+                {
+                    "label": "Search engine optimization",
+                    "score": 0.83,
+                    "classifierScore": 0.74,
+                    "classifierId": "textrazor_mediatopics_2023Q1",
+                },
             ],
             "entailments": [
                 {"term": "crawlers", "score": 0.61, "priorScore": 0.34, "contextScore": 0.27},
             ],
-            "words": [
-                {"text": "Technical", "isGrammar": True, "isSense": False, "isSpelling": False},
-                {"text": "SEO", "isGrammar": False, "isSense": True, "isSpelling": True},
+            "sentences": [
+                {
+                    "words": [
+                        {
+                            "token": "Technical",
+                            "position": 0,
+                            "parentPosition": -1,
+                            "relationToParent": "ROOT",
+                            "partOfSpeech": "NOUN",
+                            "senses": [{"score": 0.42}],
+                        },
+                        {
+                            "token": "SEO",
+                            "position": 1,
+                            "parentPosition": 0,
+                            "relationToParent": "compound",
+                            "partOfSpeech": "PROPN",
+                            "senses": [{"score": 0.91}, {"score": 0.73}],
+                            "spellingSuggestions": ["sea"],
+                        },
+                    ]
+                }
             ],
             "relations": [
                 {"subject": "Technical SEO", "object": "crawlers"},
@@ -361,10 +390,15 @@ def normalize_entities(
             {
                 "url": url,
                 "entity_id": entity_id,
+                "entity_english_id": _optional_string(entity.get("entityEnglishId")),
                 "matched_text": matched_text,
                 "confidence": float(confidence),
                 "relevance": float(relevance),
                 "types": [value for value in types if isinstance(value, str)],
+                "wikidata_id": _optional_string(entity.get("wikidataId")),
+                "wiki_link": _optional_string(entity.get("wikiLink")),
+                "freebase_types": _string_values(entity.get("freebaseTypes")),
+                "enriched_data_keys": _enriched_data_keys(entity.get("data")),
             }
         )
     logger.info(
@@ -374,6 +408,26 @@ def normalize_entities(
         [entity["entity_id"] for entity in normalized[:3]],
     )
     return normalized
+
+
+def _optional_string(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    return value.strip() or None
+
+
+def _string_values(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item.strip() for item in value if isinstance(item, str) and item.strip()]
+
+
+def _enriched_data_keys(value: object) -> list[str]:
+    if not isinstance(value, Mapping):
+        return []
+    return sorted(
+        key.strip() for key in value if isinstance(key, str) and key.strip()
+    )[:STRUCTURED_TEXT_LIMIT]
 
 
 def normalize_page_metrics(
@@ -391,10 +445,13 @@ def normalize_page_metrics(
     topics, topics_present = _section_rows(payload, "topics")
     categories, categories_present = _section_rows(payload, "categories")
     entailments, entailments_present = _section_rows(payload, "entailments")
-    words, words_present = _section_rows(payload, "words")
+    words, words_present = _sentence_words(payload)
     relations, relations_present = _section_rows(payload, "relations")
     properties, properties_present = _section_rows(payload, "properties")
     noun_phrases, noun_phrases_present = _section_rows(payload, "nounPhrases")
+    dependency_metrics = _dependency_tree_metrics(payload)
+    top_topic = _top_labeled_score_row(topics, section_present=topics_present)
+    top_category = _top_labeled_score_row(categories, section_present=categories_present)
     section_presence = (
         entities_present,
         topics_present,
@@ -404,6 +461,7 @@ def normalize_page_metrics(
         relations_present,
         properties_present,
         noun_phrases_present,
+        dependency_metrics["textrazor_dependency_trees_present"],
     )
     metrics = {
         "url": url,
@@ -422,6 +480,8 @@ def normalize_page_metrics(
             ("score",),
             section_present=topics_present,
         ),
+        "textrazor_top_topic_label": top_topic["label"] if top_topic else None,
+        "textrazor_top_topic_score": top_topic["score"] if top_topic else None,
         "textrazor_category_score": _max_numeric(
             categories,
             ("score",),
@@ -431,6 +491,10 @@ def normalize_page_metrics(
             categories,
             ("classifierScore", "score"),
             section_present=categories_present,
+        ),
+        "textrazor_top_category_label": top_category["label"] if top_category else None,
+        "textrazor_top_category_classifier_id": (
+            top_category["classifier_id"] if top_category else None
         ),
         "textrazor_entailment_score": _max_numeric(
             entailments,
@@ -448,19 +512,15 @@ def normalize_page_metrics(
             section_present=entailments_present,
         ),
         "textrazor_word_count": _count_rows(words, section_present=words_present),
-        "textrazor_grammar_count": _count_truthy(
+        "textrazor_sense_score": _max_nested_numeric(
             words,
-            ("isGrammar",),
+            collection_key="senses",
+            value_key="score",
             section_present=words_present,
         ),
-        "textrazor_sense_count": _count_truthy(
+        "textrazor_spelling_suggestion_count": _count_nonempty_collections(
             words,
-            ("isSense",),
-            section_present=words_present,
-        ),
-        "textrazor_spelling_count": _count_truthy(
-            words,
-            ("isSpelling",),
+            "spellingSuggestions",
             section_present=words_present,
         ),
         "textrazor_relation_count": _count_rows(relations, section_present=relations_present),
@@ -469,6 +529,26 @@ def normalize_page_metrics(
             noun_phrases,
             section_present=noun_phrases_present,
         ),
+        "textrazor_top_noun_phrase_texts": _noun_phrase_texts(
+            noun_phrases,
+            words,
+            section_present=noun_phrases_present,
+        ),
+        "textrazor_relation_predicate_labels": _relation_predicate_labels(
+            relations,
+            section_present=relations_present,
+        ),
+        "textrazor_relation_param_labels": _relation_param_labels(
+            relations,
+            words,
+            section_present=relations_present,
+        ),
+        "textrazor_property_names": _property_names(
+            properties,
+            section_present=properties_present,
+        ),
+        **dependency_metrics,
+        **_entity_count_metrics(entities, entities_present=entities_present, word_count=_count_rows(words, section_present=words_present)),
         "textrazor_entities_present": entities_present,
         "textrazor_topics_present": topics_present,
         "textrazor_categories_present": categories_present,
@@ -555,10 +635,75 @@ def _log_textrazor_response(*, url: str, summary: Mapping[str, object]) -> None:
 
 
 def _section_row_count(payload: Mapping[str, Any], key: str) -> int:
+    if key == "words":
+        words, words_present = _sentence_words(payload)
+        return len(words) if words_present else 0
     value = payload.get(key)
     if not isinstance(value, list):
         return 0
     return sum(1 for item in value if isinstance(item, Mapping))
+
+
+
+
+def _entity_count_metrics(
+    entities: list[Mapping[str, Any]],
+    *,
+    entities_present: bool,
+    word_count: int | None,
+) -> dict[str, object]:
+    counts = count_entities(entities, section_present=entities_present)
+    if counts is None:
+        return {
+            "textrazor_entity_mention_count": None,
+            "textrazor_unique_entity_count": None,
+            "textrazor_unique_entity_density_per_1k_words": None,
+            "textrazor_entity_mention_density_per_1k_words": None,
+        }
+    mention = counts["mention_count"]
+    unique = counts["unique_count"]
+    return {
+        "textrazor_entity_mention_count": mention,
+        "textrazor_unique_entity_count": unique,
+        "textrazor_unique_entity_density_per_1k_words": _entity_density_per_1k(
+            unique, word_count
+        ),
+        "textrazor_entity_mention_density_per_1k_words": _entity_density_per_1k(
+            mention, word_count
+        ),
+    }
+
+
+def entity_dedupe_key(entity: Mapping[str, Any]) -> str:
+    """Canonical unique-entity key: EnglishId → entityId → matchedText."""
+
+    for key in ("entityEnglishId", "entityId", "matchedText"):
+        value = entity.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
+def count_entities(
+    entities: Sequence[Mapping[str, Any]],
+    *,
+    section_present: bool,
+) -> dict[str, int] | None:
+    """Return mention/unique entity counts, or None when the section is absent."""
+
+    if not section_present:
+        return None
+    unique_keys = {entity_dedupe_key(entity) for entity in entities}
+    return {
+        "mention_count": len(entities),
+        "unique_count": len(unique_keys),
+    }
+
+
+def _entity_density_per_1k(count: int | None, denominator: int | None) -> float | None:
+    if count is None or denominator is None or denominator <= 0:
+        return None
+    return float(count) * 1000.0 / float(denominator)
 
 
 def _section_rows(
@@ -569,6 +714,105 @@ def _section_rows(
     if not isinstance(value, list):
         return [], False
     return [item for item in value if isinstance(item, Mapping)], True
+
+
+def _sentence_words(payload: Mapping[str, Any]) -> tuple[list[Mapping[str, Any]], bool]:
+    sentences = payload.get("sentences")
+    if not isinstance(sentences, list):
+        return [], False
+    words: list[Mapping[str, Any]] = []
+    for sentence in sentences:
+        if not isinstance(sentence, Mapping):
+            continue
+        sentence_words = sentence.get("words")
+        if not isinstance(sentence_words, list):
+            continue
+        words.extend(word for word in sentence_words if isinstance(word, Mapping))
+    return words, True
+
+
+def _dependency_tree_metrics(payload: Mapping[str, Any]) -> dict[str, object]:
+    """Summarize valid per-word dependency annotations into page scalars."""
+
+    sentences = payload.get("sentences")
+    if not isinstance(sentences, list):
+        return _empty_dependency_tree_metrics(present=False)
+    words, _ = _sentence_words(payload)
+    if not words:
+        return _empty_dependency_tree_metrics(present=True)
+
+    nodes: dict[int, tuple[int, str, str]] = {}
+    duplicate_positions: set[int] = set()
+    for word in words:
+        position = word.get("position")
+        parent_position = word.get("parentPosition")
+        relation = word.get("relationToParent")
+        part_of_speech = word.get("partOfSpeech")
+        if (
+            not isinstance(position, int)
+            or isinstance(position, bool)
+            or not isinstance(parent_position, int)
+            or isinstance(parent_position, bool)
+            or not isinstance(relation, str)
+            or not relation.strip()
+            or not isinstance(part_of_speech, str)
+            or not part_of_speech.strip()
+        ):
+            continue
+        if position in nodes:
+            duplicate_positions.add(position)
+            continue
+        nodes[position] = (parent_position, relation, part_of_speech)
+    for position in duplicate_positions:
+        nodes.pop(position, None)
+    if not nodes:
+        return _empty_dependency_tree_metrics(present=False)
+
+    valid_nodes: list[tuple[int, str, str]] = []
+    for position, node in nodes.items():
+        depth = _dependency_depth(position, nodes)
+        if depth is not None:
+            valid_nodes.append((depth, node[1], node[2]))
+    if not valid_nodes:
+        return _empty_dependency_tree_metrics(present=True)
+    depths, relations, parts_of_speech = zip(*valid_nodes, strict=True)
+    return {
+        "textrazor_dependency_depth_mean": sum(depths) / len(depths),
+        "textrazor_dependency_relation_type_count": len(set(relations)),
+        "textrazor_part_of_speech_type_count": len(set(parts_of_speech)),
+        "textrazor_dependency_trees_present": True,
+    }
+
+
+def _empty_dependency_tree_metrics(*, present: bool) -> dict[str, object]:
+    return {
+        "textrazor_dependency_depth_mean": None,
+        "textrazor_dependency_relation_type_count": None,
+        "textrazor_part_of_speech_type_count": None,
+        "textrazor_dependency_trees_present": present,
+    }
+
+
+def _dependency_depth(
+    position: int,
+    nodes: Mapping[int, tuple[int, str, str]],
+) -> int | None:
+    """Return a token's root-relative depth, or None for malformed chains."""
+
+    depth = 0
+    current = position
+    visited: set[int] = set()
+    while True:
+        if current in visited:
+            return None
+        visited.add(current)
+        parent_position = nodes[current][0]
+        if parent_position < 0 or parent_position == current:
+            return depth
+        if parent_position not in nodes:
+            return None
+        depth += 1
+        current = parent_position
 
 
 def _max_numeric(
@@ -589,24 +833,163 @@ def _max_numeric(
     return max(values) if values else 0.0
 
 
+def _top_labeled_score_row(
+    rows: list[Mapping[str, Any]],
+    *,
+    section_present: bool,
+) -> dict[str, str | float] | None:
+    """Return the first highest-scoring labeled TextRazor row."""
+
+    if not section_present:
+        return None
+    top: dict[str, str | float] | None = None
+    for row in rows:
+        label = row.get("label")
+        score = row.get("score")
+        if not isinstance(label, str) or not label.strip():
+            continue
+        if not isinstance(score, int | float):
+            continue
+        candidate = {
+            "label": label,
+            "score": float(score),
+            "classifier_id": row.get("classifierId")
+            if isinstance(row.get("classifierId"), str)
+            else None,
+        }
+        if top is None or candidate["score"] > top["score"]:
+            top = candidate
+    return top
+
+
+def _noun_phrase_texts(
+    noun_phrases: list[Mapping[str, Any]],
+    words: list[Mapping[str, Any]],
+    *,
+    section_present: bool,
+) -> list[str] | None:
+    if not section_present:
+        return None
+    return _bounded_distinct_texts(
+        _text_from_word_positions(noun_phrase, words) for noun_phrase in noun_phrases
+    )
+
+
+def _relation_predicate_labels(
+    relations: list[Mapping[str, Any]],
+    *,
+    section_present: bool,
+) -> list[str] | None:
+    if not section_present:
+        return None
+    return _bounded_distinct_texts(relation.get("relation") for relation in relations)
+
+
+def _relation_param_labels(
+    relations: list[Mapping[str, Any]],
+    words: list[Mapping[str, Any]],
+    *,
+    section_present: bool,
+) -> list[str] | None:
+    if not section_present:
+        return None
+    labels: list[str | None] = []
+    for relation in relations:
+        params = relation.get("params")
+        if not isinstance(params, list):
+            continue
+        for param in params:
+            if not isinstance(param, Mapping):
+                continue
+            name = param.get("name")
+            text = _text_from_word_positions(param, words)
+            if isinstance(name, str) and name.strip() and text is not None:
+                labels.append(f"{name}: {text}")
+    return _bounded_distinct_texts(labels)
+
+
+def _property_names(
+    properties: list[Mapping[str, Any]],
+    *,
+    section_present: bool,
+) -> list[str] | None:
+    if not section_present:
+        return None
+    return _bounded_distinct_texts(property_.get("name") for property_ in properties)
+
+
+def _text_from_word_positions(
+    row: Mapping[str, Any],
+    words: list[Mapping[str, Any]],
+) -> str | None:
+    positions = row.get("wordPositions")
+    if not isinstance(positions, list) or not positions:
+        return None
+    tokens: list[str] = []
+    for position in positions:
+        if not isinstance(position, int) or isinstance(position, bool):
+            return None
+        if position < 0 or position >= len(words):
+            return None
+        token = words[position].get("token")
+        if not isinstance(token, str) or not token.strip():
+            return None
+        tokens.append(token)
+    return " ".join(tokens)
+
+
+def _bounded_distinct_texts(values: Sequence[object]) -> list[str]:
+    values_out: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        text = value.strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        values_out.append(text)
+        if len(values_out) == STRUCTURED_TEXT_LIMIT:
+            break
+    return values_out
+
+
 def _count_rows(rows: list[Mapping[str, Any]], *, section_present: bool) -> int | None:
     if not section_present:
         return None
     return len(rows)
 
 
-def _count_truthy(
+def _max_nested_numeric(
     rows: list[Mapping[str, Any]],
-    candidate_keys: tuple[str, ...],
+    *,
+    collection_key: str,
+    value_key: str,
+    section_present: bool,
+) -> float | None:
+    if not section_present:
+        return None
+    values: list[float] = []
+    for row in rows:
+        nested = row.get(collection_key)
+        if not isinstance(nested, list):
+            continue
+        for item in nested:
+            if isinstance(item, Mapping) and isinstance(item.get(value_key), int | float):
+                values.append(float(item[value_key]))
+    return max(values) if values else 0.0
+
+
+def _count_nonempty_collections(
+    rows: list[Mapping[str, Any]],
+    key: str,
     *,
     section_present: bool,
 ) -> int | None:
     if not section_present:
         return None
-    count = 0
-    for row in rows:
-        for key in candidate_keys:
-            if bool(row.get(key)):
-                count += 1
-                break
-    return count
+    return sum(
+        1
+        for row in rows
+        if isinstance(row.get(key), list) and bool(row[key])
+    )

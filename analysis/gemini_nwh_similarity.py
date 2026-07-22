@@ -37,6 +37,7 @@ from seo_rank.similarity import fixture_bge_reranker_score
 from seo_rank.textrazor import (
     TextRazorCredentials,
     build_entity_request,
+    entity_dedupe_key,
     execute_textrazor_request,
     normalize_page_metrics,
     validate_textrazor_credentials,
@@ -514,11 +515,7 @@ def _summarize_textrazor_response(payload: dict) -> dict[str, object]:
         relevance = float(entity.get("relevanceScore", 0.0))
         confidences.append(confidence)
         relevances.append(relevance)
-        key = str(
-            entity.get("entityEnglishId")
-            or entity.get("entityId")
-            or entity.get("matchedText", "")
-        )
+        key = entity_dedupe_key(entity)
         record = unique_entities.setdefault(
             key,
             {
