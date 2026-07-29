@@ -1,4 +1,24 @@
+<!--
+SEO Research — SEO Factors Research Tool
+Copyright (C) 2026 Andrew Philip Weilbacher
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published
+by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+Commercial licensing: contact@marketingprowess.simplelogin.com — see COMMERCIAL.md
+-->
 # Entity-Signal Mart Implementation Plan
+
 
 ## Summary
 
@@ -104,3 +124,5 @@ Build a separate long-form `entity_signals` mart from stored
   plus raw p-values; only BH claims are withheld.
 - **[x] P2 — Report provenance:** every rendered entity example must include its
   source URL and matched text, not the URL alone.
+
+<!-- randomized-text: blue comets fold into a paper garden c37b92fd16af77d7 -->

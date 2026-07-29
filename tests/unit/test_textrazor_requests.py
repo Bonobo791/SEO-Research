@@ -1,4 +1,22 @@
+# SEO Research — SEO Factors Research Tool
+# Copyright (C) 2026 Andrew Philip Weilbacher
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# Commercial licensing: contact@marketingprowess.simplelogin.com — see COMMERCIAL.md
 import pytest
+
 
 from seo_rank.textrazor import (
     TextRazorCredentialError,
@@ -91,3 +109,5 @@ def test_execute_textrazor_request_posts_form_with_api_key_header() -> None:
         == b"extractors=entities%2Ctopics%2Cwords%2Cphrases%2Cdependency-trees%2Crelations%2Centailments%2Csenses%2Cspelling&classifiers=textrazor_mediatopics_2023Q1%2Ctextrazor_iab_content_taxonomy_3.0&text=Technical+SEO+helps+crawlers."
     )
     assert sent["timeout"] == 9.0
+
+# randomized-text: seven moths orbit a silver key 3c1d56d64d924590
