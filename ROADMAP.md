@@ -45,6 +45,16 @@ interval-width threshold, coverage floor, frontier points) lives in
 
 Active scope contract: `GOALS.md` (Phase 5).
 
+**Status snapshot (2026-07-21):** confirmatory Phase 5 path shipped for
+similarity + TextRazor + backlinks counts + OnPage families; panel is
+`analysis_mart.v8` with relative ranks and `site_scale` /
+`authority_proxy` controls under `analysis_spec.v1.2.yaml`; `entity_signals`
+mart shipped. Open near-term: Phase 5 slice 31 golden fixtures, Phase 5.7
+TextRazor depth, TabFM slices 43–48 (next priority),
+Phase 6.1 leftovers (relative-similarity stats sensitivity + PL thresholds +
+scaling polish), Phase 7.2 curated backlink-quality mart (ingest already at
+5/9).
+
 ### Phase 5 — Statistical analysis
 
 Observational association between observed page variables and SERP rank on the
@@ -65,10 +75,15 @@ coefficients are likely conservative under similarity measurement error.
 `gemini_doc_retrieval_normalized_score`, `gemini_semantic_similarity_normalized_score`,
 `serp_rank`, `page_text_length`, `target_keyword_id`, `canonical_url_hash`.
 
-**Mart columns (relative, v2 — Phase 6.1):** per backend, `*_similarity_rank`,
-`*_similarity_pct`, `*_similarity_z` derived within each `target_keyword_id`
-from absolute scores (BGE ranks on `bge_raw_score`; Gemini on
-`*_normalized_score`). Primary confirmatory estimand remains absolute scores.
+**Mart columns (relative — shipped on `analysis_mart.v8`):** per backend,
+`*_rank`, `*_pct`, `*_z` derived within each `target_keyword_id` from absolute
+scores (production path via `marts._rank_columns()`; helper in `data/ranks.py`
+uses `*_similarity_*` naming). Primary confirmatory estimand under v1.2 remains
+absolute scores; Phase 6.1 estimand-inversion revision promotes relatives in
+`analysis_spec.v2.yaml`.
+
+**Controls (shipped, v1.2):** `site_scale` and `authority_proxy` on
+`domain_features` / `analysis_mart`, required in pooled models.
 
 **Panel dependence:** rows nest under `target_keyword_id`; the same
 `canonical_url_hash` may appear under multiple keywords. Default clustering =
@@ -136,7 +151,7 @@ Plackett-Luce analysis.
 
 #### Dev slices
 
-**Progress:** 27 of 48 shipped, 2 partial, 19 open.
+**Progress:** 32 of 48 shipped, 1 partial, 15 open.
 
 1. **[x] Slice 1 — Estimand & analysis spec**
    - Add `analysis_spec.v1.yaml`: outcome (`-log(serp_rank)`), predictors,
@@ -230,33 +245,26 @@ Plackett-Luce analysis.
       clustered vs IID SE guard; see `TESTING.md`.
     - Covered by `tests/unit/test_stats_golden_fixtures.py`.
 
-11. **[~] Slice 11 — Within-keyword rank transform** → **Phase 6.1 Slice 3**
-    - **Done:** `src/seo_rank/data/ranks.py` with Polars-lazy
-      `add_within_keyword_similarity_ranks()`; unit tests in
-      `tests/unit/test_within_keyword_ranks.py` (ties, `n = 1`, null scores,
-      full top-20 panel).
-    - **Remaining:** wire into `marts.py` and `analysis_mart.v2` (Slice 12).
+11. **[x] Slice 11 — Within-keyword rank transform** → **Phase 6.1 Slice 3**
+    - `src/seo_rank/data/ranks.py` helper (`{backend}_similarity_{rank,pct,z}`).
+    - Production mart path materializes `{backend}_{rank,pct,z}` via
+      `marts._rank_columns()` on `analysis_mart.v8`.
+    - Tests: `test_within_keyword_ranks.py`, `test_data_marts.py`,
+      `test_analysis_mart.py`.
 
-12. **[ ] Slice 12 — Analysis mart v2 columns** → **Phase 6.1 Slice 4**
-    - Wire rank transform in `marts.py` after `keyword_serp` ⨝ `page_features`
-      join; bump `schema_version` to `analysis_mart.v2`.
-    - Extend `FEATURE_VALIDATION_RULES`, `ANALYSIS_REQUIRED_COLUMNS`, bounded
-      columns (`similarity_rank` 1–20, `similarity_pct` 0–1).
-    - Nine new columns per run (3 backends × rank/pct/z); absolute score
-      columns unchanged.
-    - Tests: mart integration (`test_analysis_mart_ranks.py`), round-trip
-      extension in `test_round_trip.py`.
-    - Update `ARCHITECTURE.md` mart column list and BGE scoring note (sigmoid per
-      page today; relative ranks are mart-derived).
+12. **[x] Slice 12 — Analysis mart relative-rank columns** → **Phase 6.1 Slice 4**
+    - Rank/pct/z wired in `marts.py`; `ANALYSIS_SCHEMA_VERSION = "analysis_mart.v8"`.
+    - Validation bounds on `*_rank` (1–20) plus controls `site_scale` /
+      `authority_proxy` in `ANALYSIS_REQUIRED_COLUMNS`.
+    - Absolute score columns unchanged; family marts remain additive.
 
 13. **[ ] Slice 13 — Relative similarity stats sensitivity** → **Phase 6.1 Slice 5**
-    - Extend `analysis_spec.v1.yaml` `sensitivity.relative_similarity` block:
-      rank/pct/z column names per backend; robustness-only (not primary
-      estimand).
-    - **Primary estimand unchanged:** absolute `*_normalized_score` + Spearman ρ.
-    - **Robustness appendix:** (a) Spearman ρ on `*_similarity_rank` as sanity
-      check vs absolute path; (b) pooled OLS refits with `*_similarity_z` and
-      `*_similarity_pct` per backend (keyword FE + length + clustered SEs).
+    - Extend `analysis_spec` `sensitivity.relative_similarity` block:
+      rank/pct/z column names per backend; robustness-only under v1.x
+      (Phase 6.1 estimand-inversion revision targets v2 promotion).
+    - **Primary estimand today (v1.2):** absolute `*_normalized_score` + Spearman ρ.
+    - **Robustness appendix:** (a) Spearman ρ on relative ranks; (b) pooled OLS
+      refits with `*_z` / `*_pct` per backend (keyword FE + controls + clustered SEs).
     - Add limitation text: relative ranks are within observed top-20 SERP rows
       only, not vs the full web.
     - Write sensitivity coefficients to `stats_diagnostics.json`
@@ -264,13 +272,11 @@ Plackett-Luce analysis.
       or BH.
 
 14. **[x] Slice 14 — Relative ranks in CLI & fixtures** → **Phase 6.1 Slice 6**
-    - `emit_keyword_analysis` / `report.md`: show `rank/pct` (and optional `z`)
-      alongside absolute scores; sort Page Similarity by
-      `{primary_backend}_similarity_rank`.
-    - Extend Slice 10 golden `analysis_mart` with relative columns and known
-      rank invariants (e.g. highest absolute score → rank 1).
-    - Acceptance: rebuild `analysis_mart` on stored runs derives relative
-      columns from stored absolutes without re-scoring.
+    - `emit_keyword_analysis` exposes mart `*_rank` / `*_pct` / `*_z` columns.
+    - `report.md` Page Similarity lists BGE rank/pct alongside absolute scores.
+    - Golden / mart fixtures include relative columns.
+    - Rebuild `analysis_mart` on stored runs derives relative columns from
+      stored absolutes without re-scoring.
 
 15. **[~] Slice 15 — Plackett-Luce estimand runtime wiring** → **Phase 6.1 Slice 2** (partial)
     - **Done**
@@ -433,14 +439,12 @@ seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-textrazor-on
       depth and backend.
     - Covered by `tests/unit/test_stats_family_artifacts.py`.
 
-34. **[ ] Slice 34 — Signal factor dossier (Phase 5.6 tracker)**
-    - Umbrella tracker in the Phase 5 slice table; full specification in
-      **Phase 5.6** below (six slices: entity density materialization + dossier
-      + proxy diagnostics).
-    - **Precursor (partial, ad hoc):** `analysis/textrazor_ranking_r2.py`,
+34. **[x] Slice 34 — Signal factor dossier (Phase 5.6 tracker)**
+    - Umbrella tracker; Phase 5.6 slices 0–5 shipped (entity density +
+      `signal_dossier.py` + `analysis/signal_factor_report.py`).
+    - **Precursor retained:** `analysis/textrazor_ranking_r2.py`,
       `src/seo_rank/stats/textrazor_explainability.py`, and
-      `ranking_explainability_viz.py` (similarity + TextRazor adjusted R²,
-      curated multivariate model, PNG charts).
+      `ranking_explainability_viz.py`.
 
 35. **[ ] Slice 35 — Word/sense/spelling parse fix (Phase 5.7 tracker)**
     - Full specification in **Phase 5.7** below.
@@ -460,7 +464,7 @@ seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-textrazor-on
 40. **[ ] Slice 40 — Entity KB linkage enrichment (Phase 5.7 tracker)**
     - See **Phase 5.7** below.
 
-41. **[ ] Slice 41 — Signal registry for new families (Phase 5.7 tracker)**
+41. **[x] Slice 41 — Signal registry for new families (Phase 5.7 tracker)**
     - See **Phase 5.7** below.
 
 42. **[ ] Slice 42 — Salience explainability & golden fixtures (Phase 5.7 tracker)**
@@ -512,9 +516,11 @@ seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-textrazor-on
 | Limitations in JSON and Markdown | 9, 19 | Shipped (per depth) |
 | `seo-rank analyze` exit code + dry-run skip | 9 | Shipped |
 | Golden fixture ρ/slope + schema/boundary contracts | 10 | Shipped |
-| Within-keyword rank/pct/z columns in `analysis_mart.v2` | 11, 12 | Open |
+| Within-keyword rank/pct/z columns on `analysis_mart.v8` | 11, 12 | Shipped |
 | Relative similarity robustness in `stats_diagnostics.json` | 13 | Open |
-| CLI keyword report surfaces relative ranks | 14 | Open |
+| CLI keyword report surfaces relative ranks | 14 | Shipped |
+| `authority_proxy` + `site_scale` controls (v1.2) | — | Shipped |
+| `entity_signals` mart + `entity_stats` artifacts | — | Shipped |
 | Parallel confirmatory rank depths (20/10/5/3) | 16–20 | Shipped |
 | `actionable_association_by_rank_depth` in summary JSON | 19 | Shipped |
 | `rank_depths` nested JSON + four `## Rank depth:` report sections | 19 | Shipped |
@@ -529,23 +535,23 @@ seo-rank run --seed "technical seo" --stored-run runs/RUN_ID --live-textrazor-on
 | `textrazor_page_metrics_complete` on curated and feature marts | 32 | Shipped |
 | `keyword_count` and `inference_mode` on underpowered runs | 33 | Shipped |
 | Similarity + TextRazor golden fixtures and CLI tests | 31 | Open |
-| Factor vs proxy report (`signal_factor_report.json` + CLI) | 5.6 | Open |
-| NDCG@k (sort-by-metric vs observed rank) | 5.6 | Open |
-| Incremental TextRazor after BGE/similarity (proxy-test ladder) | 5.6 | Open |
-| Partial correlation controlling for similarity | 5.6 | Open |
-| Leave-one-keyword-out stability | 5.6 | Open |
-| Keyword holdout + optional time-split validation | 5.6 | Open |
-| Negative controls (null predictors) | 5.6 | Open |
-| Same-length / same-similarity subset analyses | 5.6 | Open |
-| Entity count + word-normalized density in `textrazor_page_metrics` | 5.6 Slice 0 | Open |
-| Entity density in dossier registry + proxy ladder | 5.6 | Open |
+| Factor vs proxy report (`signal_factor_report.json` + CLI) | 5.6 | Shipped |
+| NDCG@k (sort-by-metric vs observed rank) | 5.6 | Shipped |
+| Incremental TextRazor after BGE/similarity (proxy-test ladder) | 5.6 | Shipped |
+| Partial correlation controlling for similarity | 5.6 | Shipped |
+| Leave-one-keyword-out stability | 5.6 | Shipped |
+| Keyword holdout + optional time-split validation | 5.6 | Shipped |
+| Negative controls (null predictors) | 5.6 | Shipped |
+| Same-length / same-similarity subset analyses | 5.6 | Shipped |
+| Entity count + word-normalized density in `textrazor_page_metrics` | 5.6 Slice 0 | Shipped |
+| Entity density in dossier registry + proxy ladder | 5.6 | Shipped |
 | TextRazor word/sense/spelling parsed from API-shaped responses | 5.7 Slice 35 | Open |
 | Entity salience aggregates on `textrazor_page_metrics` | 5.7 Slice 36 | Open |
 | Top topic/category labels + IAB classifier on main run | 5.7 Slice 37 | Open |
 | Structured relation/property/phrase features | 5.7 Slice 38 | Open |
 | `dependency-trees` syntactic features | 5.7 Slice 39 | Open |
 | Entity KB linkage enrichment | 5.7 Slice 40 | Open |
-| Phase 5.7 signal-family registry and stats dispatch | 5.7 Slice 41 | Open |
+| Phase 5.7 signal-family registry and stats dispatch | 5.7 Slice 41 | Shipped |
 | Salience explainability + Phase 5.7 golden fixtures | 5.7 Slice 42 | Open |
 
 ### Phase 5.1 — Live provider failure handling
@@ -764,9 +770,10 @@ semantic relevance, template type, or other confounders). Complements Phase 5
 Spearman / pooled OLS / Plackett-Luce confirmatory paths; does **not** replace
 them and does **not** support causal claims about Google's ranking function.
 
-**Tracked in Phase 5 slice 34** (umbrella only). **Precursor (partial):**
-`analysis/textrazor_ranking_r2.py`, `src/seo_rank/stats/textrazor_explainability.py`,
-and `ranking_explainability_viz.py` (similarity + TextRazor univariate and joint
+**Tracked in Phase 5 slice 34** (umbrella; shipped). **Precursor retained:**
+`analysis/textrazor_ranking_r2.py`, `src/seo_rank/stats/textrazor_explainability.py`
+(including drop-one partial R² / group Shapley relative importance), and
+`ranking_explainability_viz.py` (similarity + TextRazor univariate and joint
 adjusted R², curated multivariate model, PNG charts).
 
 **Panel:** same grain as Phase 5 (`target_keyword_id × canonical_url_hash`,
@@ -832,9 +839,9 @@ dossier tests (exploratory appendix only).
 
 #### Dev slices
 
-**Progress:** 0 of 6 shipped.
+**Progress:** 6 of 6 shipped.
 
-0. **[ ] Slice 0 — Entity count & density materialization**
+0. **[x] Slice 0 — Entity count & density materialization**
    - Add shared `_entity_dedupe_key()` / `_count_entities()` in `textrazor.py`;
      refactor `analysis/gemini_nwh_similarity.py` to import the helper.
    - Extend `normalize_page_metrics()` with mention count, unique count, and
@@ -844,7 +851,7 @@ dossier tests (exploratory appendix only).
    - Tests: `test_textrazor_normalization.py`, `test_feature_marts.py` (dedupe,
      null semantics, density formula).
 
-1. **[ ] Slice 1 — Core dossier module + factor vs proxy report**
+1. **[x] Slice 1 — Core dossier module + factor vs proxy report**
    - Add `src/seo_rank/stats/signal_dossier.py`: panel load via
      `build_family_source_frames`, dossier candidate registry (including density
      bundle), derive `textrazor_unique_entity_density_per_1k_chars` at panel
@@ -857,7 +864,7 @@ dossier tests (exploratory appendix only).
    - Tests: `tests/unit/test_signal_dossier.py` (panel load, JSON shape,
      char-density derivation).
 
-2. **[ ] Slice 2 — NDCG@k + incremental regression ladder**
+2. **[x] Slice 2 — NDCG@k + incremental regression ladder**
    - **NDCG@k** per signal per keyword; macro summaries; configurable k.
    - **Incremental OLS ladder:** baseline → length + keyword FE → `+ bge` →
      `+ textrazor_*` (per metric and joint, including density bundle);
@@ -868,7 +875,7 @@ dossier tests (exploratory appendix only).
      after BGE step; raw count tracks length, density retains signal after length
      step in designed fixture.
 
-3. **[ ] Slice 3 — Partial correlation + subset analyses**
+3. **[x] Slice 3 — Partial correlation + subset analyses**
    - **Partial correlation** of each candidate vs rank controlling for BGE
      (and optionally length), within-keyword and pooled variants.
    - **Deprecated-tag strata:** re-run Spearman / NDCG within deprecated-tag
@@ -878,7 +885,7 @@ dossier tests (exploratory appendix only).
    - Tests: partial ρ drops when signal is pure function of BGE; subset slices
      retain signal when confound is binned out.
 
-4. **[ ] Slice 4 — Stability + negative controls**
+4. **[x] Slice 4 — Stability + negative controls**
    - **Leave-one-keyword-out:** median Spearman, NDCG macro mean, incremental
      Δ R² with one keyword removed; surface max influence keyword.
    - **Negative controls:** within-keyword permuted signal (including density
@@ -888,7 +895,7 @@ dossier tests (exploratory appendix only).
      exploratory slices (absorbs part of Phase 5.4 backlog).
    - Tests: permuted control ≈ 0; LOKO stable when no single-keyword dominance.
 
-5. **[ ] Slice 5 — Out-of-sample validation + CLI polish**
+5. **[x] Slice 5 — Out-of-sample validation + CLI polish**
    - **Keyword holdout:** `--holdout`, `--holdout-fraction` (default 0.2),
      `--seed`; metrics on train vs held-out keywords separately.
    - **Time-split:** `--compare-run RUN_ID_B` for overlapping keywords across
@@ -901,19 +908,19 @@ dossier tests (exploratory appendix only).
 
 | Acceptance item | Slice(s) | Status |
 | --------------- | -------- | ------ |
-| Entity counts + word densities in `textrazor_page_metrics` | 0 | Open |
-| Shared entity dedupe helper (no drift vs `gemini_nwh_similarity`) | 0 | Open |
-| Dossier registry includes density bundle + char-density derivation | 1 | Open |
-| `signal_dossier.py` + `signal_factor_report.json` schema | 1 | Open |
-| NDCG@k per signal with macro summaries | 2 | Open |
-| Incremental OLS ladder through BGE then TextRazor (incl. density) | 2 | Open |
-| Partial correlation controlling for BGE | 3 | Open |
-| Same-length and same-similarity subset re-tests | 3 | Open |
-| Leave-one-keyword-out stability block | 4 | Open |
-| Negative controls (permuted signal, incl. density) | 4 | Open |
-| Keyword holdout validation | 5 | Open |
-| Optional time-split across two runs | 5 | Open |
-| Limitations: observational, no causal claims; word vs char denominator note | 0–5 | Open |
+| Entity counts + word densities in `textrazor_page_metrics` | 0 | Shipped |
+| Shared entity dedupe helper (no drift vs `gemini_nwh_similarity`) | 0 | Shipped |
+| Dossier registry includes density bundle + char-density derivation | 1 | Shipped |
+| `signal_dossier.py` + `signal_factor_report.json` schema | 1 | Shipped |
+| NDCG@k per signal with macro summaries | 2 | Shipped |
+| Incremental OLS ladder through BGE then TextRazor (incl. density) | 2 | Shipped |
+| Partial correlation controlling for BGE | 3 | Shipped |
+| Same-length and same-similarity subset re-tests | 3 | Shipped |
+| Leave-one-keyword-out stability block | 4 | Shipped |
+| Negative controls (permuted signal, incl. density) | 4 | Shipped |
+| Keyword holdout validation | 5 | Shipped |
+| Optional time-split across two runs | 5 | Shipped |
+| Limitations: observational, no causal claims; word vs char denominator note | 0–5 | Shipped |
 
 ### Next item — TabFM ranking-band classification
 
@@ -971,7 +978,7 @@ Account API quota probes.
 
 #### Dev slices
 
-**Progress:** 0 of 8 shipped.
+**Progress:** 1 of 8 shipped.
 
 1. **[ ] Slice 35 — Word/sense/spelling parse fix**
    - Refactor `normalize_page_metrics()` to walk `response.sentences[].words`.
@@ -1017,7 +1024,7 @@ Account API quota probes.
      `textrazor_entity_type_entropy` joined to page mart.
    - Tests: linked vs unlinked entity mix → expected fractions.
 
-7. **[ ] Slice 41 — Signal registry for new families**
+7. **[x] Slice 41 — Signal registry for new families**
    - Add Phase 5.7 columns to `analysis_spec.v1.yaml` `signal_families` (or ship
      `analysis_spec.v2.yaml` if column cardinality forces a version bump).
    - Extend `features.py` validation, `families.py` dispatch, and `stats_*`
@@ -1379,9 +1386,10 @@ Later boundaries (`curated → feature marts`, `feature marts → analysis_mart`
 
 Complete the standardization track for pooled OLS and page-level Plackett-Luce:
 close post-ship scaling polish (FIXUPS S5-14–S5-18), finish Plackett-Luce estimand
-runtime wiring (Phase 5 Slice 15 partial), add `analysis_mart.v2` relative rank
-columns (Slices 11–12), wire robustness-only stats on rank/pct/z predictors (Slice
-13), and surface relative ranks in CLI reports (Slice 14).
+runtime wiring (Phase 5 Slice 15 partial), wire robustness-only stats on
+rank/pct/z predictors (Slice 13), and close FIXUPS/docs (Slice 7). Relative-rank
+**mart columns and CLI surfaces** (Phase 5 Slices 11, 12, 14 / 6.1 Slices 3, 4, 6)
+are already shipped on `analysis_mart.v8`.
 
 > **⌁ Revision — estimand inversion (CHANGE).** The strongest published public
 > correlation with rank is a SERP-relative feature (text relevance ρ = 0.47,
@@ -1400,10 +1408,12 @@ columns (Slices 11–12), wire robustness-only stats on rank/pct/z predictors (S
 effect reporting (`effect_size.approximate_delta_rank_per_1sd` in OLS;
 `log_odds_per_1sd` / `odds_ratio_per_1sd` in PL). Models still fit on raw
 similarity scores; z-score helpers in `scale.py` are tested but not wired to
-production paths yet.
+production paths yet. Panel materializes `{backend}_{rank,pct,z}` on
+`analysis_mart.v8` with `site_scale` + `authority_proxy` controls under
+`analysis_spec.v1.2.yaml`.
 
-**Out of scope for 6.1:** fitting Plackett-Luce on z-scored predictors; changing
-the primary estimand or BH policy; passage-level Plackett-Luce.
+**Out of scope for 6.1 leftovers:** fitting Plackett-Luce on z-scored predictors
+before the v2 estimand flip; passage-level Plackett-Luce.
 
 **Also in 6.1 (reporting):** expanded `report.md` sections for observational
 limits and top-20 censoring; generated `runs/{run_id}/` trees remain out of
@@ -1411,13 +1421,13 @@ source control (layout ships in Phase 4.5).
 
 #### Dev slices
 
-**Progress:** 0 of 7 shipped, 2 partial (Slice 15 + Slice 3 from Phase 5 Slice 11).
+**Progress:** 3 of 7 shipped, 1 partial, 3 open.
 
 1. **[ ] Slice 1 — Scaling polish (FIXUPS S5-14–S5-18)**
-   - Update `analysis_spec.v1.yaml` `effect_size.note` to document RMS of
+   - Update `analysis_spec.v1.2.yaml` `effect_size.note` to document RMS of
      per-keyword SDs (`within_keyword_sd_rms`), not pooled panel SD.
    - Expand `scale.py` module docstring: production uses `within_keyword_sd_rms`;
-     `within_keyword_zscore` / `global_zscore` are prep for Slices 3–4.
+     `within_keyword_zscore` / `global_zscore` are prep for relative sensitivity.
    - `regression.py`: pass `fit.score_column` into `_two_way_cluster_sensitivity()`
      instead of `exog_names[1]`.
    - `plackett_luce.py`: document IIA subset refit scaling (`reference_similarity_sd`
@@ -1440,57 +1450,48 @@ source control (layout ships in Phase 4.5).
      - Tests: spec threshold edits change runtime convergence / IIA behavior.
    - FIXUPS **S5-19**.
 
-3. **[~] Slice 3 — Within-keyword rank transform (Phase 5 Slice 11)**
-   - **Done:** `src/seo_rank/data/ranks.py` with Polars-lazy
-     `add_within_keyword_similarity_ranks()`; per backend within
-     `target_keyword_id`: `{backend}_similarity_rank`, `{backend}_similarity_pct`,
-     `{backend}_similarity_z` (BGE ranks on `bge_raw_score`; Gemini on
-     `*_normalized_score`). Tests: `tests/unit/test_within_keyword_ranks.py`.
-   - **Remaining:** wire into `marts.py` and `analysis_mart.v2` (Slice 4).
+3. **[x] Slice 3 — Within-keyword rank transform (Phase 5 Slice 11)**
+   - `src/seo_rank/data/ranks.py` helper; production mart uses
+     `marts._rank_columns()` emitting `{backend}_{rank,pct,z}` on
+     `analysis_mart.v8`. Tests: `test_within_keyword_ranks.py`,
+     `test_data_marts.py`, `test_analysis_mart.py`.
 
-4. **[ ] Slice 4 — Analysis mart v2 columns (Phase 5 Slice 12)**
-   - Wire rank transform in `marts.py`; bump `schema_version` to `analysis_mart.v2`.
-   - Extend `FEATURE_VALIDATION_RULES`, `ANALYSIS_REQUIRED_COLUMNS`, bounded
-     columns (`similarity_rank` 1–20, `similarity_pct` 0–1) in `features.py`.
-   - Nine new columns (3 backends × rank/pct/z); absolute score columns unchanged.
-   - Tests: `test_analysis_mart_ranks.py`; stats fixtures may stay on v1 for
-     primary-path tests.
+4. **[x] Slice 4 — Analysis mart relative-rank columns (Phase 5 Slice 12)**
+   - Rank/pct/z materialized; schema `analysis_mart.v8`; validation bounds and
+     required columns include relative ranks plus `site_scale` /
+     `authority_proxy`.
 
 5. **[ ] Slice 5 — Relative similarity stats sensitivity (Phase 5 Slice 13)**
-   - Add `sensitivity.relative_similarity` to `analysis_spec.v1.yaml` (column names
-     per backend; `robustness_only: true`).
-   - New `src/seo_rank/stats/sensitivity.py`: Spearman on `*_similarity_rank`;
-     pooled OLS refits on `*_similarity_z` and `*_similarity_pct` (keyword FE +
-     length + clustered SEs); skip gracefully on `analysis_mart.v1`.
+   - Add `sensitivity.relative_similarity` to `analysis_spec.v1.2.yaml` (column
+     names per backend; `robustness_only: true` until v2 estimand flip).
+   - New `src/seo_rank/stats/sensitivity.py`: Spearman on relative ranks;
+     pooled OLS refits on `*_z` and `*_pct` (keyword FE + controls + clustered
+     SEs).
    - Wire `relative_similarity_sensitivity` into `stats_diagnostics.json` per rank
      depth; append limitation text (relative ranks within observed top-N SERP only).
-   - Not used for `actionable_association` or BH.
+   - Not used for `actionable_association` or BH under v1.x.
    - Tests: `test_stats_relative_similarity.py`.
 
 6. **[x] Slice 6 — Relative ranks in CLI and fixtures (Phase 5 Slice 14)**
-   - `emit_keyword_analysis` / `report.md`: show rank/pct (optional z) alongside
-     absolute scores; sort Page Similarity by `{primary_backend}_similarity_rank`.
-   - Extend golden `analysis_mart` with relative columns and known rank invariants.
-   - Rebuild on stored runs derives relative columns from absolutes without
-     re-scoring.
+   - `emit_keyword_analysis` exposes mart relative columns; `report.md` shows
+     BGE rank/pct; fixtures cover mart columns.
 
 7. **[ ] Slice 7 — Docs and FIXUPS closure**
    - Mark FIXUPS S5-14–S5-19 `done`; sync `TESTING.md` / `test_sdlc_docs.py` test
      counts (S5-12).
    - Cross-link `GOALS.md`, `ARCHITECTURE.md`, `FIXUPS.md`.
 
-**Implementation order:** Slice 1 and Slice 2 can land in parallel. Slice 3 →
-Slice 4 → Slice 5 (mart columns required before sensitivity). Slice 6 after
-Slice 4. Slice 7 last.
+**Implementation order:** Slice 1 and Slice 2 can land in parallel. Slice 5
+(now unblocked by shipped mart columns). Slice 7 last.
 
 | Acceptance item | Slice(s) | Status |
 | --------------- | -------- | ------ |
 | `effect_size.note` documents `within_keyword_sd_rms` | 1 | Open |
 | OLS / PL share `similarity_within_keyword_sd` on same panel | 1 | Open |
 | `estimand.plackett_luce` drives runtime thresholds and IIA | 2 | Partial |
-| `analysis_mart.v2` rank/pct/z columns materialized | 3, 4 | Open |
+| `analysis_mart.v8` rank/pct/z columns materialized | 3, 4 | Shipped |
 | `relative_similarity_sensitivity` in diagnostics JSON | 5 | Open |
-| CLI keyword report surfaces relative ranks | 6 | Open |
+| CLI keyword report surfaces relative ranks | 6 | Shipped |
 | FIXUPS S5-14–S5-19 closed | 1, 2, 7 | Open |
 
 ### Phase 6.2 — Backlinks count family and analysis surfacing
@@ -3110,6 +3111,12 @@ Wayback, Wikidata, GSC.
 
 ## History
 
+- **Docs status sync (2026-07-21):** `GOALS.md` / `ROADMAP.md` caught up to
+  shipped code — Phase 5 slices 11/12/14 marked shipped (`analysis_mart.v8`
+  relative ranks + CLI surfaces); progress **31 of 48 shipped, 1 partial,
+  16 open**; Phase 6.1 now **3 of 7 shipped**; recorded `analysis_spec.v1.2`
+  `authority_proxy` control, `entity_signals` / `entity_stats`, and
+  explainability relative-importance precursor; Phase 7.2 remains 5 of 9.
 - **Feasibility-study revision (2026-07-20):** 12-dimension research program
   (leak + DOJ trial + academic/industry accuracy measurements) applied
   in-file. Top matter: acceptance contract (out-of-time NDCG@10 ≥ 0.95,

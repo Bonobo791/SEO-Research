@@ -123,9 +123,8 @@ def test_ranking_importance_factor_columns_uses_seo_concept_groups() -> None:
     )
     assert groups["content"] == (
         "textrazor_word_count",
-        "textrazor_grammar_count",
-        "textrazor_sense_count",
-        "textrazor_spelling_count",
+        "textrazor_sense_score",
+        "textrazor_spelling_suggestion_count",
         "textrazor_relation_count",
         "textrazor_property_count",
         "textrazor_noun_phrase_count",

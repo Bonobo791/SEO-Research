@@ -81,12 +81,25 @@ def _combined_textrazor_frame() -> pl.DataFrame:
                     "textrazor_entailment_prior": signal - 0.05,
                     "textrazor_entailment_context": signal - 0.1,
                     "textrazor_word_count": 20 + serp_rank,
-                    "textrazor_grammar_count": 2 + serp_rank,
-                    "textrazor_sense_count": 1 + serp_rank,
-                    "textrazor_spelling_count": 1,
+                    "textrazor_sense_score": signal + 0.2,
+                    "textrazor_spelling_suggestion_count": 1,
                     "textrazor_relation_count": None,
                     "textrazor_property_count": None,
                     "textrazor_noun_phrase_count": None,
+                    "textrazor_entity_salience_mean": signal + 0.35,
+                    "textrazor_entity_salience_median": signal + 0.3,
+                    "textrazor_entity_salience_top3_max": signal + 0.4,
+                    "textrazor_entity_salience_mention_weighted": signal + 0.25,
+                    "textrazor_salience_unique_entity_count": 2 + serp_rank,
+                    "textrazor_entity_mention_count": 3 + serp_rank,
+                    "textrazor_unique_entity_count": 2 + serp_rank,
+                    "textrazor_unique_entity_density_per_1k_words": signal * 10,
+                    "textrazor_entity_mention_density_per_1k_words": signal * 12,
+                    "textrazor_linked_entity_fraction": signal / 4,
+                    "textrazor_entity_type_entropy": signal + 0.15,
+                    "textrazor_dependency_depth_mean": signal + 0.1,
+                    "textrazor_dependency_relation_type_count": 4 + serp_rank,
+                    "textrazor_part_of_speech_type_count": 5 + serp_rank,
                     "schema_version": "curated.v1",
                 }
             )
@@ -293,6 +306,10 @@ def test_run_phase5_stats_emits_combined_family_tree_and_keeps_similarity_compat
     backlinks_family = summary["rank_depths"]["top_20"]["families"]["backlinks_counts"]
     onpage_quality_family = summary["rank_depths"]["top_20"]["families"]["onpage_content_quality"]
     onpage_cwv_family = summary["rank_depths"]["top_20"]["families"]["onpage_core_web_vitals"]
+    salience_family = summary["rank_depths"]["top_20"]["families"]["textrazor_entity_salience"]
+    coverage_family = summary["rank_depths"]["top_20"]["families"]["textrazor_entity_coverage"]
+    linkage_family = summary["rank_depths"]["top_20"]["families"]["textrazor_entity_linkage"]
+    syntax_family = summary["rank_depths"]["top_20"]["families"]["textrazor_syntactic_complexity"]
 
     assert topic_family["spearman"]["signals"]["textrazor_topic_score"]["status"] == "computed"
     assert topic_family["regression"]["signals"]["textrazor_topic_score"]["status"] == "computed"
@@ -305,6 +322,19 @@ def test_run_phase5_stats_emits_combined_family_tree_and_keeps_similarity_compat
     assert sparse_family["regression"]["status"] == "skipped"
     assert sparse_family["diagnostics"]["status"] == "skipped"
     assert sparse_family["plackett_luce"]["status"] == "skipped"
+    for family, signal_column in (
+        (salience_family, "textrazor_entity_salience_mean"),
+        (coverage_family, "textrazor_entity_mention_count"),
+        (linkage_family, "textrazor_linked_entity_fraction"),
+        (syntax_family, "textrazor_dependency_depth_mean"),
+    ):
+        assert family["spearman"]["signals"][signal_column]["status"] == "computed"
+        assert family["regression"]["signals"][signal_column]["status"] == "computed"
+        assert family["diagnostics"]["signals"][signal_column]["status"] == "computed"
+        assert family["plackett_luce"]["signals"][signal_column]["status"] in {
+            "computed",
+            "unstable",
+        }
     assert backlinks_family["spearman"]["signals"]["backlinks_count"]["status"] == "computed"
     assert backlinks_family["regression"]["signals"]["backlinks_count"]["status"] == "computed"
     assert backlinks_family["diagnostics"]["signals"]["backlinks_count"]["status"] == "computed"
@@ -341,6 +371,10 @@ def test_run_phase5_stats_emits_combined_family_tree_and_keeps_similarity_compat
     assert "### Families" in report
     assert "#### Family: textrazor_topic_score" in report
     assert "#### Family: textrazor_relation_property_noun_phrase" in report
+    assert "#### Family: textrazor_entity_salience" in report
+    assert "#### Family: textrazor_entity_coverage" in report
+    assert "#### Family: textrazor_entity_linkage" in report
+    assert "#### Family: textrazor_syntactic_complexity" in report
     assert "#### Family: backlinks_counts" in report
     assert "#### Family: onpage_content_quality" in report
     assert "#### Family: onpage_core_web_vitals" in report

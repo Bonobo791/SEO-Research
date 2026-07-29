@@ -90,19 +90,44 @@ signal_families:
         - textrazor_entailment_score
         - textrazor_entailment_prior
         - textrazor_entailment_context
-    - key: textrazor_word_grammar_sense_spelling
+    - key: textrazor_word_sense_spelling
       kind: textrazor_structural
       signal_columns:
         - textrazor_word_count
-        - textrazor_grammar_count
-        - textrazor_sense_count
-        - textrazor_spelling_count
+        - textrazor_sense_score
+        - textrazor_spelling_suggestion_count
     - key: textrazor_relation_property_noun_phrase
       kind: textrazor_structural
       signal_columns:
         - textrazor_relation_count
         - textrazor_property_count
         - textrazor_noun_phrase_count
+    - key: textrazor_entity_salience
+      kind: textrazor_scalar
+      signal_columns:
+        - textrazor_entity_salience_mean
+        - textrazor_entity_salience_median
+        - textrazor_entity_salience_top3_max
+        - textrazor_entity_salience_mention_weighted
+        - textrazor_salience_unique_entity_count
+    - key: textrazor_entity_coverage
+      kind: textrazor_structural
+      signal_columns:
+        - textrazor_entity_mention_count
+        - textrazor_unique_entity_count
+        - textrazor_unique_entity_density_per_1k_words
+        - textrazor_entity_mention_density_per_1k_words
+    - key: textrazor_entity_linkage
+      kind: textrazor_structural
+      signal_columns:
+        - textrazor_linked_entity_fraction
+        - textrazor_entity_type_entropy
+    - key: textrazor_syntactic_complexity
+      kind: textrazor_structural
+      signal_columns:
+        - textrazor_dependency_depth_mean
+        - textrazor_dependency_relation_type_count
+        - textrazor_part_of_speech_type_count
     - key: backlinks_counts
       kind: backlinks_metric
       signal_columns:

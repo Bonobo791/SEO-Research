@@ -67,6 +67,11 @@ def _textrazor_panel_frame() -> pl.DataFrame:
                     "textrazor_entailment_score": signal + 0.05,
                     "textrazor_relation_count": int(serp_rank + 1),
                     "textrazor_property_count": int(serp_rank),
+                    "textrazor_entity_mention_count": int(serp_rank + 2),
+                    "textrazor_unique_entity_count": int(5 - serp_rank),
+                    "textrazor_unique_entity_density_per_1k_words": float(5 - serp_rank) * 10.0,
+                    "textrazor_entity_mention_density_per_1k_words": float(serp_rank + 2) * 10.0,
+                    "textrazor_unique_entity_density_per_1k_chars": float(5 - serp_rank) * 2.0,
                     "schema_version": "analysis_mart.v1",
                 }
             )

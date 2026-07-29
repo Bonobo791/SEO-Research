@@ -15,6 +15,7 @@ from seo_rank.data.features import FEATURE_VALIDATION_RULES
 from seo_rank.data.features import ONPAGE_FEATURES_BOUNDED_COLUMNS
 from seo_rank.data.features import ONPAGE_FEATURES_EXTRA_COLUMNS
 from seo_rank.data.features import ONPAGE_FEATURES_REQUIRED_COLUMNS
+from seo_rank.data.features import ensure_feature_marts_for_analysis
 from seo_rank.data.features import (
     build_analysis_panel_keyword_serp,
     build_feature_marts,
@@ -96,6 +97,29 @@ def test_feature_rank_bounds_follow_the_requested_serp_depth() -> None:
     assert bounds["bge_rank"] == (1, 50)
     assert bounds["gemini_doc_retrieval_rank"] == (1, 50)
     assert bounds["gemini_semantic_similarity_rank"] == (1, 50)
+
+
+def test_ensure_feature_marts_rebuilds_when_textrazor_metrics_are_stale(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = tmp_path / "run-1"
+    run_dir.mkdir()
+    (run_dir / "run.json").write_text('{"run_id": "run-1"}', encoding="utf-8")
+    rebuilt: list[Path] = []
+
+    monkeypatch.setattr(
+        "seo_rank.data.features.dataset_matches_schema",
+        lambda dataset_dir, expected_version: dataset_dir.name != "textrazor_page_metrics",
+    )
+    monkeypatch.setattr(
+        "seo_rank.data.features.build_feature_marts",
+        lambda path: rebuilt.append(path) or {},
+    )
+
+    ensure_feature_marts_for_analysis(run_dir)
+
+    assert rebuilt == [run_dir]
 
 
 def test_materialization_drops_blocklisted_domain_rows_and_replaces_stale_parts(
@@ -614,12 +638,15 @@ def test_write_feature_dataset_allows_textrazor_entailment_scores_above_one(
                 "textrazor_entailment_prior": 1.0,
                 "textrazor_entailment_context": 1.0,
                 "textrazor_word_count": 2,
-                "textrazor_grammar_count": 1,
-                "textrazor_sense_count": 1,
-                "textrazor_spelling_count": 1,
+                "textrazor_sense_score": 0.91,
+                "textrazor_spelling_suggestion_count": 1,
                 "textrazor_relation_count": 2,
                 "textrazor_property_count": 1,
                 "textrazor_noun_phrase_count": 3,
+                "textrazor_entity_mention_count": 2,
+                "textrazor_unique_entity_count": 2,
+                "textrazor_unique_entity_density_per_1k_words": 1000.0,
+                "textrazor_entity_mention_density_per_1k_words": 1000.0,
                 "textrazor_entities_present": True,
                 "textrazor_topics_present": True,
                 "textrazor_categories_present": True,
@@ -666,12 +693,15 @@ def test_write_feature_dataset_includes_dataset_name_on_validation_failure(
                 "textrazor_entailment_prior": 0.34,
                 "textrazor_entailment_context": 0.27,
                 "textrazor_word_count": 2,
-                "textrazor_grammar_count": 1,
-                "textrazor_sense_count": 1,
-                "textrazor_spelling_count": 1,
+                "textrazor_sense_score": 0.91,
+                "textrazor_spelling_suggestion_count": 1,
                 "textrazor_relation_count": 2,
                 "textrazor_property_count": 1,
                 "textrazor_noun_phrase_count": 3,
+                "textrazor_entity_mention_count": 2,
+                "textrazor_unique_entity_count": 2,
+                "textrazor_unique_entity_density_per_1k_words": 1000.0,
+                "textrazor_entity_mention_density_per_1k_words": 1000.0,
                 "textrazor_entities_present": True,
                 "textrazor_topics_present": True,
                 "textrazor_categories_present": True,

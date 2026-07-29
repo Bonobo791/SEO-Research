@@ -65,16 +65,16 @@ placeholders only.
 | `test_run_normalize.py` | Stored `raw_responses` normalize into curated Parquet tables (including `similarity_scores` copied from `run.json` `page_similarity`, `page_content_fields`, `backlinks` from paired `backlinks/summary/live` responses, and `textrazor_page_metrics_curated` from TextRazor page-metrics responses) via lazy scan + batch UDFs; TextRazor entailment scores above 1.0 validate; dataset-name validation errors; refresh the run catalog |
 | `test_data_scans_validate.py` | Raw-response scans use `pl.scan_parquet()`, lazy curated frames are built, schema-only validation rejects missing columns, and materialized row-rule checks stay off the lazy edge |
 | `test_data_marts.py` | Analysis mart lazy join lives in `seo_rank.data.marts` and preserves the feature-mart contract |
-| `test_feature_marts.py` | Feature marts materialize lazy joins (including `backlinks_analysis` from curated `backlinks`), validate before sink, sink feature marts lazily with Parquet statistics, audit the written parquet row rules, allow unbounded TextRazor entailment scores, surface dataset names on validation failure, and refresh the run catalog |
+| `test_feature_marts.py` | Feature marts materialize lazy joins (including `backlinks_analysis` from curated `backlinks`), validate before sink, sink feature marts lazily with Parquet statistics, rebuild stale TextRazor metrics before analysis, audit the written parquet row rules, allow unbounded TextRazor entailment scores, surface dataset names on validation failure, and refresh the run catalog |
 | `test_analysis_mart.py` | Feature marts materialize the lazy analysis mart from the common scored URL panel, validate before sink, audit the written parquet row rules, and refresh the run catalog |
 | `test_stats_panel.py` | Guardrail evaluation (SERP-rank variance hard-fail, similarity-variance warn), panel grain filtering, full vs minimal stats artifact writing on pass/fail |
 | `test_stats_spearman.py` | Benjamini-Hochberg adjustment, backend Spearman summaries, and Spearman artifact emission on passing panels |
 | `test_stats_diagnostics.py` | Pooled OLS diagnostics, multivariate VIF sensitivity with spec drop order, influence refit (`influence_sensitivity`), small-sample Shapiro handling, diagnostic artifact emission on passing panels, and skipped-backend diagnostics behavior |
 | `test_stats_regression.py` | Pooled baseline and per-backend feature regressions with keyword-clustered SEs, effect-size translation, two-way-cluster sensitivity, error-state preservation when required controls are incomplete, and regression artifact emission on passing panels |
 | `test_stats_plackett_luce.py` | Page-level Plackett-Luce rank-ordered logit summaries, partial-ranking handling, optimizer / leave-one-out IIA diagnostics, actual score-column formula recording, and PL artifact emission on passing panels |
-| `test_stats_families.py` | Declarative signal-family registry loading, ordered enumeration, panel-grain preservation, and malformed-entry rejection |
+| `test_stats_families.py` | Declarative signal-family registry loading, including Phase 5.7 salience, entity-coverage, linkage, and syntactic families, ordered enumeration, panel-grain preservation, and malformed-entry rejection |
 | `test_stats_family_dispatch.py` | Family-aware Spearman summaries with BH scoped per signal family (similarity vs TextRazor source marts) |
-| `test_stats_family_artifacts.py` | Combined `stats_*` artifact tree for all signal families (similarity, TextRazor, `backlinks_counts`), hard-fail family skip path, and underpowered `inference_mode` labeling |
+| `test_stats_family_artifacts.py` | Combined `stats_*` artifact tree for all signal families (similarity, TextRazor including Phase 5.7 additions, `backlinks_counts`), hard-fail family skip path, and underpowered `inference_mode` labeling |
 | `test_stats_rank_depth.py` | Rank-depth confirmatory slices: spec accessors, panel filtering, per-depth Spearman/OLS/PL, monotonic row counts, `rank_depths` JSON + report sections |
 | `test_stats_scale.py` | Within-keyword and global z-score helpers (`stats.scale`) for OLS/PL effect-size contract |
 | `test_textrazor_ingest.py` | TextRazor endpoint registry, page entity fetch, and dedupe helpers with injected transport |
@@ -490,18 +490,43 @@ Contract: `PAGE_TEXT_RETRIEVAL_PLAN.md` (slices 1–4 shipped).
 - **Raw partition CLI** — Phase 5.91 tests in `test_cli_run.py` (see § DataForSEO
   backlinks above).
 
-## Shipped tests — Phase 6.1 partial (within-keyword ranks)
+## Shipped tests — Phase 6.1 (within-keyword ranks)
 
-- **Within-keyword rank transform (Phase 6.1 Slice 3 partial)** —
+- **Within-keyword rank transform + mart columns (Phase 6.1 Slices 3–4 shipped)** —
   `tests/unit/test_within_keyword_ranks.py` covers Polars-lazy
   `add_within_keyword_similarity_ranks()` in `src/seo_rank/data/ranks.py`: ties,
-  `n = 1`, null backend scores, zero variance, and full top-20 panels. Mart
-  wiring and `analysis_mart.v2` remain open (Phase 6.1 Slice 4).
+  `n = 1`, null backend scores, zero variance, and full top-20 panels.
+  `test_data_marts.py` / `test_analysis_mart.py` cover production
+  `{backend}_{rank,pct,z}` columns on `analysis_mart.v8`. Relative-similarity
+  stats sensitivity (Phase 6.1 Slice 5) remains open.
+
+## Shipped tests — Phase 5.6 signal factor dossier (Slice 34)
+
+- `tests/unit/test_textrazor_normalization.py` — entity dedupe key, mention/unique
+  counts, word-normalized densities, null-when-section-absent (not silent zero).
+- `tests/unit/test_feature_marts.py` — density columns on `textrazor_page_metrics`
+  schema / validation bounds.
+- `tests/unit/test_signal_dossier.py` — dossier panel load + char-density derivation,
+  `signal_factor_report.json` envelope, NDCG@k, incremental OLS ladder, partial
+  correlation, subset re-tests, LOKO, negative controls, keyword holdout, time-split
+  skip-without-overlap.
+
+**CLI (standalone, not `seo-rank analyze`):**
+
+```bash
+python analysis/signal_factor_report.py --run runs/RUN_ID --depth top_20
+python analysis/signal_factor_report.py --run runs/RUN_ID --holdout --seed 0
+python analysis/signal_factor_report.py --run runs/RUN_A --compare-run runs/RUN_B
+```
+
+Writes `runs/{run_id}/stats/signal_factor_report.json`. Stored runs need
+`seo-rank normalize` (no TextRazor re-fetch) to materialize new entity density
+columns on `textrazor_page_metrics`.
 
 ## Planned tests (not yet in suite) — Phase 5 active scope
 
-See `GOALS.md` and `ROADMAP.md` § Phase 5 slice 31; standardization and
-relative ranks are Phase 6.1.
+See `GOALS.md` and `ROADMAP.md` § Phase 5 slice 31; remaining standardization
+work is Phase 6.1 (scaling polish, relative-similarity sensitivity, PL thresholds).
 
 - Feature marts and `analysis_mart` join keys (`run_id`, `target_keyword_id`,
   `canonical_url_hash`, `response_id`, `passage_id`)
@@ -521,15 +546,12 @@ See `ROADMAP.md` § Phase 6.1.
 
 - **Scaling contract** — `test_stats_scaling_contract.py`: OLS and PL report the
   same `similarity_within_keyword_sd` on an identical panel; `stats.scale` export.
-- **Analysis mart v2** — `test_analysis_mart_ranks.py`: rank/pct/z columns,
-  bounded validation, rank invariants.
 - **Relative similarity sensitivity** — `test_stats_relative_similarity.py`:
-  Spearman on rank, OLS on z/pct, skip on `analysis_mart.v1`, excluded from
-  actionable flag.
+  Spearman on rank, OLS on z/pct, excluded from actionable flag.
 - **Plackett-Luce spec runtime** — spec threshold edits change convergence and
   IIA enablement (`test_stats_plackett_luce.py`, `test_stats_spec.py`).
-- **CLI relative ranks** — keyword report shows rank/pct; sort by primary backend
-  similarity rank.
+- **CLI relative ranks** — covered for mart column exposure; remaining polish
+  tracked under Phase 6.1 Slice 7 docs closure.
 
 ## Planned tests (not yet in suite) — Phase 6 workflow integrity
 
