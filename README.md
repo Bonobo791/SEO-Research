@@ -408,7 +408,7 @@ Verification: `python -m pytest` (live integration opt-in — see `TESTING.md`).
 
 ## License
 
-SEO-Research is dual-licensed:
+SEO Research is dual-licensed:
 
 - **Open source:** [GNU AGPLv3](LICENSE) — free to use, modify, and
   self-host, including commercially, as long as you comply with AGPLv3
@@ -416,5 +416,5 @@ SEO-Research is dual-licensed:
   offer as a network service).
 - **Commercial license:** if you want to use SEO-Research in a proprietary
   product or offer it as a hosted service without AGPL obligations,
-  contact <your-email> for a commercial license.
+  contact contact@marketingprowess.simplelogin.com for a commercial license.
 
